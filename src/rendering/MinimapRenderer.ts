@@ -34,6 +34,8 @@ export class MinimapRenderer {
   private clickPing: { x: number; y: number; age: number } | null = null;
   // Rally point for player 0
   private rallyPoint: { x: number; z: number } | null = null;
+  // Attack flash pings
+  private attackPings: { x: number; z: number; color: string; age: number }[] = [];
 
   constructor(terrain: TerrainRenderer, sceneManager: SceneManager) {
     this.canvas = document.getElementById('minimap-canvas') as HTMLCanvasElement;
@@ -61,6 +63,12 @@ export class MinimapRenderer {
 
   setRallyPoint(x: number, z: number): void {
     this.rallyPoint = { x, z };
+  }
+
+  /** Flash a colored ping on the minimap at a world position */
+  flashPing(worldX: number, worldZ: number, color: string): void {
+    const TILE_SIZE = 2;
+    this.attackPings.push({ x: worldX / TILE_SIZE, z: worldZ / TILE_SIZE, color, age: 0 });
   }
 
   private renderTerrain(): void {
@@ -177,6 +185,31 @@ export class MinimapRenderer {
         this.ctx.lineWidth = 2 * (1 - t);
         this.ctx.beginPath();
         this.ctx.arc(this.clickPing.x, this.clickPing.y, radius, 0, Math.PI * 2);
+        this.ctx.stroke();
+      }
+    }
+
+    // Draw attack pings (expanding red rings)
+    for (let i = this.attackPings.length - 1; i >= 0; i--) {
+      const ping = this.attackPings[i];
+      ping.age++;
+      const t = ping.age / 40; // 40 frames ~1.5s
+      if (t >= 1) {
+        this.attackPings.splice(i, 1);
+      } else {
+        const px = ping.x * scale;
+        const pz = ping.z * scale;
+        const radius = 2 + t * 12;
+        const alpha = (1 - t) * 0.8;
+        // Convert hex color to rgba
+        const hex = ping.color;
+        const r = parseInt(hex.slice(1, 3), 16);
+        const g = parseInt(hex.slice(3, 5), 16);
+        const b = parseInt(hex.slice(5, 7), 16);
+        this.ctx.strokeStyle = `rgba(${r},${g},${b},${alpha})`;
+        this.ctx.lineWidth = 2;
+        this.ctx.beginPath();
+        this.ctx.arc(px, pz, radius, 0, Math.PI * 2);
         this.ctx.stroke();
       }
     }

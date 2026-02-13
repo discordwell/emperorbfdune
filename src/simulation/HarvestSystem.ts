@@ -31,8 +31,28 @@ export class HarvestSystem implements GameSystem {
   // Harvesters being airlifted: eid -> ticks remaining
   private airlifting = new Map<number, number>();
 
+  // Tracked harvester entity IDs
+  private knownHarvesters = new Set<number>();
+  // Harvesters that recently took damage - flee to refinery
+  private fleeing = new Set<number>();
+
   constructor(terrain: TerrainRenderer) {
     this.terrain = terrain;
+
+    // Harvesters flee when damaged (unless already returning/unloading)
+    EventBus.on('unit:damaged', ({ entityId }) => {
+      if (!this.knownHarvesters.has(entityId)) return;
+      const state = Harvester.state[entityId];
+      if (state !== RETURNING && state !== UNLOADING) {
+        Harvester.state[entityId] = RETURNING;
+        this.returnToRefinery(entityId);
+        this.fleeing.add(entityId);
+        // Clear flee flag after 10 seconds so they can resume
+        setTimeout(() => {
+          if (this.knownHarvesters.has(entityId)) this.fleeing.delete(entityId);
+        }, 10000);
+      }
+    });
   }
 
   /** Mark a player as having carryall support (owns a Hanger) */
@@ -73,6 +93,10 @@ export class HarvestSystem implements GameSystem {
 
   update(world: World, _dt: number): void {
     const entities = harvestQuery(world);
+
+    // Track known harvesters for damage detection
+    this.knownHarvesters.clear();
+    for (const eid of entities) this.knownHarvesters.add(eid);
 
     for (const eid of entities) {
       const state = Harvester.state[eid];

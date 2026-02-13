@@ -132,7 +132,8 @@ export class Game {
       this.ticksThisSecond = 0;
       this.fpsTime = now;
       if (this.fpsElement) {
-        this.fpsElement.textContent = `${this.currentFps} FPS | ${this.currentTps} TPS`;
+        const speedStr = this.speedMultiplier !== 1.0 ? ` | ${this.speedMultiplier}x` : '';
+        this.fpsElement.textContent = `${this.currentFps} FPS | ${this.currentTps} TPS${speedStr}`;
       }
     }
   };

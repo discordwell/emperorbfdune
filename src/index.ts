@@ -203,6 +203,9 @@ async function main() {
     return 'vehicle';
   };
   audioManager.setUnitClassifier(classifyUnit);
+  audioManager.setBuildingChecker((eid: number) => {
+    try { return hasComponent(game.getWorld(), BuildingType, eid); } catch { return false; }
+  });
   commandManager.setUnitClassifier(classifyUnit);
 
   const pathfinder = new PathfindingSystem(terrain);
@@ -662,7 +665,9 @@ async function main() {
     }
     effectsManager.spawnExplosion(x, y, z, explosionSize);
     effectsManager.spawnWreckage(x, y, z, isBuilding);
-    audioManager.playSfx('explosion');
+    if (isBuilding) {
+      EventBus.emit('building:destroyed', { entityId });
+    }
 
     // Death animation: tilt the 3D model before removal
     const obj = unitRenderer.getEntityObject(entityId);
@@ -779,6 +784,7 @@ async function main() {
     lastAttackNotifyTime = now;
     if (isBuilding) {
       selectionPanel.addMessage('Base under attack!', '#ff2222');
+      minimapRenderer.flashPing(x, z, '#ff2222');
     } else {
       selectionPanel.addMessage('Units under attack!', '#ff6644');
     }

@@ -18,7 +18,7 @@ const MUSIC_TRACKS: TrackInfo[] = [
 ];
 
 // Synthesized SFX using Web Audio API (no external files needed)
-type SfxType = 'select' | 'move' | 'attack' | 'explosion' | 'build' | 'sell' | 'error' | 'victory' | 'defeat' | 'harvest' | 'shot' | 'powerlow' | 'place' | 'worm' | 'underattack';
+type SfxType = 'select' | 'move' | 'attack' | 'explosion' | 'build' | 'sell' | 'error' | 'victory' | 'defeat' | 'harvest' | 'shot' | 'powerlow' | 'place' | 'worm' | 'underattack' | 'deathInfantry' | 'deathVehicle' | 'deathBuilding';
 
 export type UnitCategory = 'infantry' | 'vehicle' | 'harvester';
 
@@ -34,6 +34,7 @@ export class AudioManager {
   private playerFaction = 'AT';
   private musicStarted = false;
   private unitClassifier: ((eid: number) => UnitCategory) | null = null;
+  private buildingChecker: ((eid: number) => boolean) | null = null;
   private crossfadeDuration = 2000; // ms
   private crossfadeTimer: ReturnType<typeof setInterval> | null = null;
   private combatIntensity = 0; // 0-1
@@ -59,6 +60,10 @@ export class AudioManager {
     this.unitClassifier = fn;
   }
 
+  setBuildingChecker(fn: (eid: number) => boolean): void {
+    this.buildingChecker = fn;
+  }
+
   private setupEventListeners(): void {
     // Unit selection uses classifier for category-specific response
     EventBus.on('unit:selected', (data) => {
@@ -70,9 +75,24 @@ export class AudioManager {
       }
     });
     // unit:move and unit:attack handled by CommandManager direct calls
-    EventBus.on('unit:died', () => { this.playSfx('explosion'); this.bumpCombatIntensity(0.15); });
+    EventBus.on('unit:died', ({ entityId }) => {
+      // Buildings are handled by building:destroyed
+      if (this.buildingChecker?.(entityId)) return;
+      if (this.unitClassifier) {
+        const cat = this.unitClassifier(entityId);
+        if (cat === 'infantry') this.playSfx('deathInfantry');
+        else this.playSfx('deathVehicle');
+      } else {
+        this.playSfx('explosion');
+      }
+      this.bumpCombatIntensity(0.15);
+    });
     EventBus.on('production:complete', () => this.playSfx('build'));
     EventBus.on('harvest:delivered', () => this.playSfx('harvest'));
+    EventBus.on('building:destroyed', () => {
+      this.playSfx('deathBuilding');
+      this.bumpCombatIntensity(0.25);
+    });
     EventBus.on('combat:fire', () => {
       const now = Date.now();
       if (now - this.lastShotTime > 100) { // Max 10 shot sounds/sec
@@ -217,6 +237,9 @@ export class AudioManager {
         case 'place': this.synthPlace(ctx); break;
         case 'worm': this.synthWorm(ctx); break;
         case 'underattack': this.synthUnderAttack(ctx); break;
+        case 'deathInfantry': this.synthDeathInfantry(ctx); break;
+        case 'deathVehicle': this.synthDeathVehicle(ctx); break;
+        case 'deathBuilding': this.synthDeathBuilding(ctx); break;
       }
     } catch {
       // Audio not available
@@ -633,6 +656,95 @@ export class AudioManager {
       osc.start(t + i * 0.12);
       osc.stop(t + i * 0.12 + 0.11);
     }
+  }
+
+  // Infantry death: sharp crack + quick fade (small arms)
+  private synthDeathInfantry(ctx: AudioContext): void {
+    const t = ctx.currentTime;
+    const p = this.randPitch();
+    // Short noise burst
+    const bufferSize = ctx.sampleRate * 0.1;
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.2));
+    }
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    const gain = this.makeGain(ctx, 0.15);
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'highpass';
+    filter.frequency.value = 500 * p;
+    source.connect(filter);
+    filter.connect(gain);
+    source.start(t);
+  }
+
+  // Vehicle death: heavy metallic boom with rumble
+  private synthDeathVehicle(ctx: AudioContext): void {
+    const t = ctx.currentTime;
+    const p = this.randPitch();
+    // Noise burst (explosion body)
+    const bufferSize = ctx.sampleRate * 0.4;
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.12));
+    }
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    const gain = this.makeGain(ctx, 0.3);
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(600 * p, t);
+    filter.frequency.exponentialRampToValueAtTime(80, t + 0.4);
+    source.connect(filter);
+    filter.connect(gain);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
+    source.start(t);
+    // Metallic ping
+    const osc = ctx.createOscillator();
+    const oscGain = this.makeGain(ctx, 0.08);
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(1200 * p, t);
+    osc.frequency.exponentialRampToValueAtTime(300, t + 0.15);
+    oscGain.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+    osc.connect(oscGain);
+    osc.start(t);
+    osc.stop(t + 0.2);
+  }
+
+  // Building death: massive rumbling explosion with debris
+  private synthDeathBuilding(ctx: AudioContext): void {
+    const t = ctx.currentTime;
+    // Long noise burst
+    const bufferSize = ctx.sampleRate * 0.8;
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.2));
+    }
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    const gain = this.makeGain(ctx, 0.35);
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(400, t);
+    filter.frequency.exponentialRampToValueAtTime(50, t + 0.8);
+    source.connect(filter);
+    filter.connect(gain);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.9);
+    source.start(t);
+    // Sub-bass thud
+    const osc = ctx.createOscillator();
+    const oscGain = this.makeGain(ctx, 0.2);
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(50, t);
+    osc.frequency.exponentialRampToValueAtTime(25, t + 0.5);
+    oscGain.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
+    osc.connect(oscGain);
+    osc.start(t);
+    osc.stop(t + 0.6);
   }
 
   // --- Combat intensity ---
