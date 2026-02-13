@@ -15,7 +15,7 @@ export class Sidebar {
   private artMap: Map<string, ArtEntry>;
   private onBuild: BuildCallback;
   private playerId = 0;
-  private currentTab: 'Buildings' | 'Units' | 'Infantry' = 'Buildings';
+  private currentTab: 'Buildings' | 'Units' | 'Infantry' | 'Starport' = 'Buildings';
   private progressBar: HTMLDivElement | null = null;
 
   private factionPrefix: string;
@@ -57,7 +57,12 @@ export class Sidebar {
     // Tabs
     const tabBar = document.createElement('div');
     tabBar.style.cssText = 'display:flex;border-bottom:1px solid #444;';
-    for (const tab of ['Buildings', 'Units', 'Infantry'] as const) {
+    const tabs = ['Buildings', 'Units', 'Infantry'] as ('Buildings' | 'Units' | 'Infantry' | 'Starport')[];
+    // Add Starport tab if player has offers
+    const starportOffers = this.production.getStarportOffers(this.factionPrefix);
+    if (starportOffers.length > 0) tabs.push('Starport');
+
+    for (const tab of tabs) {
       const btn = document.createElement('button');
       btn.textContent = tab;
       btn.style.cssText = `flex:1;padding:6px;background:${tab === this.currentTab ? '#2a2a4e' : '#111'};color:#ccc;border:none;cursor:pointer;font-size:11px;`;
@@ -95,6 +100,8 @@ export class Sidebar {
     this.hotkeyMap.clear();
     if (this.currentTab === 'Buildings') {
       this.renderBuildingItems(grid);
+    } else if (this.currentTab === 'Starport') {
+      this.renderStarportItems(grid);
     } else {
       this.renderUnitItems(grid, this.currentTab === 'Infantry');
     }
@@ -173,6 +180,39 @@ export class Sidebar {
         this.hotkeyMap.set(hotkey, { name, isBuilding: false });
       }
       hotkeyIdx++;
+    }
+  }
+
+  private renderStarportItems(grid: HTMLElement): void {
+    const offers = this.production.getStarportOffers(this.factionPrefix);
+    for (const { name, price } of offers) {
+      const def = this.rules.units.get(name);
+      if (!def) continue;
+      const canAfford = this.production.canBuild(this.playerId, name, false);
+      const displayName = name.replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, '');
+      const baseCost = def.cost;
+      const priceDelta = price - baseCost;
+      const priceColor = priceDelta <= 0 ? '#4f4' : priceDelta > baseCost * 0.3 ? '#f44' : '#ff8';
+
+      const item = document.createElement('button');
+      item.style.cssText = `
+        padding:4px;background:${canAfford ? '#1a1a3e' : '#0a0a15'};
+        border:1px solid ${canAfford ? '#444' : '#222'};color:${canAfford ? '#ddd' : '#555'};
+        cursor:${canAfford ? 'pointer' : 'default'};font-size:10px;text-align:center;
+      `;
+      item.innerHTML = `<div style="font-size:11px;font-weight:bold">${displayName}</div><div style="color:${priceColor};font-size:10px">$${price}</div>`;
+
+      if (canAfford) {
+        item.onclick = () => {
+          if (this.production.buyFromStarport(this.playerId, name)) {
+            this.render();
+          }
+        };
+        item.onmouseenter = () => { item.style.borderColor = '#0f0'; };
+        item.onmouseleave = () => { item.style.borderColor = '#444'; };
+      }
+
+      grid.appendChild(item);
     }
   }
 

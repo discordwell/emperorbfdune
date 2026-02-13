@@ -45,6 +45,23 @@ export class AIPlayer implements GameSystem {
   private attackCooldown = 500; // 20 seconds between major attacks
   private difficulty = 1.0; // Scales with game time
 
+  setDifficulty(level: 'easy' | 'normal' | 'hard'): void {
+    if (level === 'easy') {
+      this.waveInterval = 1200;
+      this.waveSize = 2;
+      this.buildCooldown = 350;
+      this.attackGroupSize = 3;
+      this.attackCooldown = 800;
+    } else if (level === 'hard') {
+      this.waveInterval = 500;
+      this.waveSize = 5;
+      this.buildCooldown = 120;
+      this.attackGroupSize = 6;
+      this.attackCooldown = 300;
+    }
+    // 'normal' uses defaults
+  }
+
   constructor(rules: GameRules, combatSystem: CombatSystem, playerId: number, baseX: number, baseZ: number, targetX: number, targetZ: number) {
     this.rules = rules;
     this.combatSystem = combatSystem;

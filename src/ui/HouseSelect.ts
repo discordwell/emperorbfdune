@@ -8,6 +8,8 @@ export interface SubhouseChoice {
   description: string;
 }
 
+export type Difficulty = 'easy' | 'normal' | 'hard';
+
 export interface HouseChoice {
   id: string;
   name: string;
@@ -17,6 +19,7 @@ export interface HouseChoice {
   enemyPrefix: string;
   enemyName: string;
   subhouse?: SubhouseChoice;
+  difficulty: Difficulty;
 }
 
 const SUBHOUSES: SubhouseChoice[] = [
@@ -145,6 +148,59 @@ export class HouseSelect {
     document.body.appendChild(this.overlay);
   }
 
+  private showDifficultySelect(house: HouseChoice, resolve: (house: HouseChoice) => void): void {
+    this.overlay = document.createElement('div');
+    this.overlay.style.cssText = `
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: radial-gradient(ellipse at center, #1a0f00 0%, #000 80%);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      z-index: 2000;
+      font-family: 'Segoe UI', Tahoma, sans-serif;
+    `;
+
+    const headerText = document.createElement('div');
+    headerText.style.cssText = `color:${house.color}; font-size:24px; font-weight:bold; margin-bottom:8px;`;
+    headerText.textContent = house.name;
+    this.overlay.appendChild(headerText);
+
+    const sub = house.subhouse;
+    if (sub) {
+      const subText = document.createElement('div');
+      subText.style.cssText = `color:${sub.color}; font-size:14px; margin-bottom:16px;`;
+      subText.textContent = `Allied with ${sub.name}`;
+      this.overlay.appendChild(subText);
+    }
+
+    const chooseText = document.createElement('div');
+    chooseText.style.cssText = 'color:#aaa; font-size:16px; margin-bottom:24px;';
+    chooseText.textContent = 'Select Difficulty';
+    this.overlay.appendChild(chooseText);
+
+    const difficulties: { id: Difficulty; label: string; desc: string; color: string }[] = [
+      { id: 'easy', label: 'Easy', desc: 'AI builds slowly and attacks less often.', color: '#44cc44' },
+      { id: 'normal', label: 'Normal', desc: 'Balanced AI opponent.', color: '#cccc44' },
+      { id: 'hard', label: 'Hard', desc: 'AI gets resource bonus and attacks aggressively.', color: '#cc4444' },
+    ];
+
+    const grid = document.createElement('div');
+    grid.style.cssText = 'display:flex; gap:16px;';
+
+    for (const diff of difficulties) {
+      const card = this.createCard(diff.label, '', diff.desc, diff.color, 180);
+      card.onclick = () => {
+        this.audioManager.playSfx('select');
+        house.difficulty = diff.id;
+        this.overlay.remove();
+        resolve(house);
+      };
+      grid.appendChild(card);
+    }
+
+    this.overlay.appendChild(grid);
+    document.body.appendChild(this.overlay);
+  }
+
   private showSubhouseSelect(house: HouseChoice, resolve: (house: HouseChoice) => void): void {
     this.overlay = document.createElement('div');
     this.overlay.style.cssText = `
@@ -175,7 +231,7 @@ export class HouseSelect {
         this.audioManager.playSfx('select');
         house.subhouse = sub;
         this.overlay.remove();
-        resolve(house);
+        this.showDifficultySelect(house, resolve);
       };
       grid.appendChild(card);
     }
@@ -189,7 +245,7 @@ export class HouseSelect {
     skipBtn.onclick = () => {
       this.audioManager.playSfx('select');
       this.overlay.remove();
-      resolve(house);
+      this.showDifficultySelect(house, resolve);
     };
     this.overlay.appendChild(skipBtn);
 

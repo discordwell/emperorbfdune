@@ -249,6 +249,55 @@ export class ProductionSystem {
     return { typeName: item.typeName, progress: item.elapsed / item.totalTime };
   }
 
+  // --- Starport Trading ---
+  private starportPrices = new Map<string, number>(); // unit name -> current price
+  private starportTick = 0;
+
+  /** Update starport prices (call periodically) */
+  updateStarportPrices(): void {
+    this.starportTick++;
+    if (this.starportTick % 250 !== 0 && this.starportPrices.size > 0) return; // Update every ~10 seconds
+
+    for (const [name, def] of this.rules.units) {
+      if (!def.starportable) continue;
+      // Price fluctuates between 50% and 150% of base cost
+      const variance = 0.5 + Math.random();
+      this.starportPrices.set(name, Math.floor(def.cost * variance));
+    }
+  }
+
+  /** Get available starport units with current prices */
+  getStarportOffers(factionPrefix: string): { name: string; price: number }[] {
+    const offers: { name: string; price: number }[] = [];
+    for (const [name, price] of this.starportPrices) {
+      if (!name.startsWith(factionPrefix)) continue;
+      offers.push({ name, price });
+    }
+    return offers;
+  }
+
+  /** Purchase a unit from the starport (arrives after delay via normal production:complete) */
+  buyFromStarport(playerId: number, unitName: string): boolean {
+    const price = this.starportPrices.get(unitName);
+    if (price === undefined) return false;
+    if (!this.harvestSystem.spendSolaris(playerId, price)) return false;
+
+    // Queue as a unit with reduced build time (arrives by air)
+    const def = this.rules.units.get(unitName);
+    if (!def) return false;
+
+    const queue = this.unitQueues.get(playerId) ?? [];
+    queue.push({
+      typeName: unitName,
+      isBuilding: false,
+      totalTime: Math.floor(def.buildTime * 0.3), // Starport units arrive faster
+      elapsed: 0,
+      cost: price,
+    });
+    this.unitQueues.set(playerId, queue);
+    return true;
+  }
+
   /** Get full queue contents for UI display */
   getQueue(playerId: number, isBuilding: boolean): { typeName: string; progress: number }[] {
     const queue = isBuilding

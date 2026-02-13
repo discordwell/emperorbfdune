@@ -22,7 +22,7 @@ import { AudioManager } from './audio/AudioManager';
 import { FogOfWar } from './rendering/FogOfWar';
 import { BuildingPlacement } from './input/BuildingPlacement';
 import { VictorySystem, GameStats } from './ui/VictoryScreen';
-import { HouseSelect, type HouseChoice, type SubhouseChoice } from './ui/HouseSelect';
+import { HouseSelect, type HouseChoice, type SubhouseChoice, type Difficulty } from './ui/HouseSelect';
 import { SelectionPanel } from './ui/SelectionPanel';
 import { EffectsManager } from './rendering/EffectsManager';
 import { SandwormSystem } from './simulation/SandwormSystem';
@@ -136,6 +136,7 @@ async function main() {
       description: '',
       enemyPrefix: savedGame.enemyPrefix,
       enemyName: savedGame.enemyName,
+      difficulty: 'normal' as Difficulty,
     };
     // Hide loading screen elements from house select
     const loadScreen = document.getElementById('loading-screen');
@@ -210,6 +211,11 @@ async function main() {
   const aiPlayer = new AIPlayer(gameRules, combatSystem, 1, 200, 200, 60, 60);
   // Override AI unit pool for the enemy faction
   aiPlayer.setUnitPool(house.enemyPrefix);
+  aiPlayer.setDifficulty(house.difficulty ?? 'normal');
+  // Hard difficulty: AI gets resource bonus
+  if (house.difficulty === 'hard') {
+    harvestSystem.addSolaris(1, 3000);
+  }
   // Connect AI to production/economy systems
   aiPlayer.setProductionSystem(productionSystem, harvestSystem);
 
@@ -693,6 +699,7 @@ async function main() {
     const world = game.getWorld();
 
     productionSystem.update();
+    productionSystem.updateStarportPrices();
     unitRenderer.update(world);
     unitRenderer.tickConstruction();
     unitRenderer.tickDeconstruction();
@@ -1138,6 +1145,16 @@ async function main() {
       } else {
         selectionPanel.addMessage('No saved game found', '#f44');
       }
+    } else if (e.key === 'Escape' && !helpOverlay?.style.display?.includes('block')) {
+      e.preventDefault();
+      if (pauseMenu && pauseMenu.parentNode) {
+        pauseMenu.remove();
+        pauseMenu = null;
+        if (game.isPaused()) game.pause(); // Unpause
+      } else {
+        if (!game.isPaused()) game.pause();
+        showPauseMenu();
+      }
     } else if (e.key === 'F9') {
       e.preventDefault();
       game.pause();
@@ -1212,6 +1229,51 @@ async function main() {
 
     localStorage.setItem('ebfd_save', JSON.stringify(save));
     selectionPanel.addMessage('Game saved! (F8 to load)', '#44ff44');
+  }
+
+  let pauseMenu: HTMLDivElement | null = null;
+
+  function showPauseMenu(): void {
+    pauseMenu = document.createElement('div');
+    pauseMenu.style.cssText = `
+      position:fixed;top:0;left:0;right:0;bottom:0;
+      background:rgba(0,0,0,0.8);display:flex;flex-direction:column;
+      align-items:center;justify-content:center;z-index:900;
+      font-family:'Segoe UI',Tahoma,sans-serif;
+    `;
+
+    const elapsed = Math.floor(game.getTickCount() / 25);
+    const mins = Math.floor(elapsed / 60);
+    const secs = elapsed % 60;
+
+    pauseMenu.innerHTML = `
+      <div style="color:#d4a840;font-size:36px;font-weight:bold;margin-bottom:8px;">PAUSED</div>
+      <div style="color:#888;font-size:14px;margin-bottom:32px;">Game Time: ${mins}:${secs.toString().padStart(2, '0')}</div>
+    `;
+
+    const buttons = [
+      { label: 'Resume', action: () => { pauseMenu?.remove(); pauseMenu = null; game.pause(); } },
+      { label: 'Save Game (F5)', action: () => { saveGame(); } },
+      { label: 'Load Game (F8)', action: () => {
+        if (localStorage.getItem('ebfd_save')) {
+          localStorage.setItem('ebfd_load', '1');
+          window.location.reload();
+        }
+      }},
+      { label: 'Restart', action: () => { window.location.reload(); } },
+    ];
+
+    for (const { label, action } of buttons) {
+      const btn = document.createElement('button');
+      btn.textContent = label;
+      btn.style.cssText = 'display:block;width:200px;padding:10px;margin:4px;background:#1a1a3e;border:1px solid #444;color:#ccc;cursor:pointer;font-size:14px;';
+      btn.onmouseenter = () => { btn.style.borderColor = '#88f'; btn.style.color = '#fff'; };
+      btn.onmouseleave = () => { btn.style.borderColor = '#444'; btn.style.color = '#ccc'; };
+      btn.onclick = action;
+      pauseMenu.appendChild(btn);
+    }
+
+    document.body.appendChild(pauseMenu);
   }
 
   // --- SPAWN INITIAL ENTITIES ---
