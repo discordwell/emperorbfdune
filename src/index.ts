@@ -910,6 +910,29 @@ async function main() {
           }
         }
       }
+
+      // Contaminator replication: Contaminator kills infantry and spawns a new Contaminator
+      const atName2 = unitTypeNames[UnitType.id[attackerEntity]];
+      if (atName2?.includes('Contaminator')) {
+        const tgtTypeId = UnitType.id[targetEntity];
+        const tgtName = unitTypeNames[tgtTypeId];
+        const tgtDef = tgtName ? gameRules.units.get(tgtName) : null;
+        if (tgtDef?.infantry && Health.current[targetEntity] > 0) {
+          const attackerOwner = Owner.playerId[attackerEntity];
+          const tgtOwner = Owner.playerId[targetEntity];
+          if (tgtOwner !== attackerOwner) {
+            // Kill the target
+            Health.current[targetEntity] = 0;
+            EventBus.emit('unit:died', { entityId: targetEntity, killerEntity: attackerEntity });
+            // Spawn a new Contaminator at the target's position
+            const cx = Position.x[targetEntity];
+            const cz = Position.z[targetEntity];
+            spawnUnit(game.getWorld(), atName2, attackerOwner, cx, cz);
+            if (attackerOwner === 0) selectionPanel.addMessage('Infantry contaminated!', '#88ff44');
+            else if (tgtOwner === 0) selectionPanel.addMessage('Unit contaminated by enemy!', '#ff4444');
+          }
+        }
+      }
     }
   });
 

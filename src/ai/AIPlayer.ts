@@ -189,6 +189,49 @@ export class AIPlayer implements GameSystem {
     if (this.tickCounter % 750 === 0 && this.difficulty > 1.5) {
       this.huntHarvesters(world);
     }
+
+    // Update target to player's most valuable cluster (every ~20 seconds)
+    if (this.tickCounter % 500 === 250) {
+      this.updateAttackTarget(world);
+    }
+  }
+
+  /** Dynamically retarget to the player's most valuable building cluster */
+  private updateAttackTarget(world: World): void {
+    const buildings = buildingQuery(world);
+    let bestX = this.targetX;
+    let bestZ = this.targetZ;
+    let bestScore = 0;
+
+    for (const eid of buildings) {
+      if (Owner.playerId[eid] === this.playerId || Health.current[eid] <= 0) continue;
+      const typeId = BuildingType.id[eid];
+      const bName = this.buildingTypeNames[typeId] ?? '';
+      // Score by building value
+      let score = 1;
+      if (bName.includes('ConYard')) score = 10;
+      else if (bName.includes('Refinery')) score = 8;
+      else if (bName.includes('Factory')) score = 6;
+      else if (bName.includes('Windtrap')) score = 3;
+      else if (bName.includes('Starport')) score = 5;
+
+      // Bonus for clusters: check nearby buildings
+      for (const other of buildings) {
+        if (other === eid || Owner.playerId[other] === this.playerId || Health.current[other] <= 0) continue;
+        const dx = Position.x[other] - Position.x[eid];
+        const dz = Position.z[other] - Position.z[eid];
+        if (dx * dx + dz * dz < 400) score += 1; // Within 20 units
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestX = Position.x[eid];
+        bestZ = Position.z[eid];
+      }
+    }
+
+    this.targetX = bestX;
+    this.targetZ = bestZ;
   }
 
   private makeBuildDecision(world: World): void {
@@ -301,9 +344,9 @@ export class AIPlayer implements GameSystem {
         }
       }
 
-      // Priority 6: Advanced structures (starport, hangar)
+      // Priority 6: Advanced structures (starport, hangar, palace)
       if (totalBuildings < 20 && solaris > 2000) {
-        const advBuildings = [`${px}Starport`, `${px}Hanger`];
+        const advBuildings = [`${px}Starport`, `${px}Hanger`, `${px}Palace`];
         for (const name of advBuildings) {
           if (this.production.canBuild(this.playerId, name, true)) {
             this.production.startProduction(this.playerId, name, true);
