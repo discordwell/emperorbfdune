@@ -35,10 +35,12 @@ export class Game {
   private ticksThisSecond = 0;
 
   private fpsElement: HTMLElement | null = null;
+  private timerElement: HTMLElement | null = null;
 
   init(): void {
     this.world = createGameWorld();
     this.fpsElement = document.getElementById('fps-counter');
+    this.timerElement = document.getElementById('game-timer');
 
     // Initialize all systems
     for (const sys of this.systems) {
@@ -134,6 +136,12 @@ export class Game {
       if (this.fpsElement) {
         const speedStr = this.speedMultiplier !== 1.0 ? ` | ${this.speedMultiplier}x` : '';
         this.fpsElement.textContent = `${this.currentFps} FPS | ${this.currentTps} TPS${speedStr}`;
+      }
+      if (this.timerElement) {
+        const totalSeconds = Math.floor(this.tickCount / 25);
+        const m = Math.floor(totalSeconds / 60);
+        const s = totalSeconds % 60;
+        this.timerElement.textContent = `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
       }
     }
   };

@@ -49,6 +49,8 @@ export class UnitRenderer {
   private constructing = new Map<number, { progress: number; duration: number }>();
   // Deconstruction (sell) animation: eid -> { progress 0..1, duration ticks, callback }
   private deconstructing = new Map<number, { progress: number; duration: number; onComplete: () => void }>();
+  // Death animation: objects fading out
+  private dying = new Map<THREE.Group, { opacity: number; sinkRate: number }>();
   // Idle animation timer
   private animTime = 0;
   // Unit category classifier (returns 'infantry'|'vehicle'|'aircraft')
@@ -430,18 +432,22 @@ export class UnitRenderer {
   private removeVisual(eid: number): void {
     const obj = this.entityObjects.get(eid);
     if (obj) {
-      // Dispose all Three.js resources
+      // Remove selection circle and health bar immediately
+      const circle = this.selectionCircles.get(eid);
+      if (circle) { obj.remove(circle); circle.geometry.dispose(); (circle.material as THREE.Material).dispose(); }
+      const bar = this.healthBars.get(eid);
+      if (bar) { obj.remove(bar); (bar.material as THREE.Material).dispose(); }
+      const rank = this.rankSprites.get(eid);
+      if (rank) { obj.remove(rank); (rank.material as THREE.Material).dispose(); }
+
+      // Start death fade animation instead of instant removal
       obj.traverse(child => {
-        if (child instanceof THREE.Mesh) {
-          child.geometry?.dispose();
-          if (child.material) {
-            (child.material as THREE.Material).dispose();
-          }
-        } else if (child instanceof THREE.Sprite) {
-          (child.material as THREE.Material).dispose();
+        if (child instanceof THREE.Mesh && child.material) {
+          const mat = child.material as THREE.Material;
+          mat.transparent = true;
         }
       });
-      this.sceneManager.scene.remove(obj);
+      this.dying.set(obj, { opacity: 1.0, sinkRate: 0.02 });
       this.entityObjects.delete(eid);
     }
     this.selectionCircles.delete(eid);
@@ -449,6 +455,29 @@ export class UnitRenderer {
     this.rankSprites.delete(eid);
     this.pendingModels.delete(eid);
     this.deconstructing.delete(eid);
+  }
+
+  /** Animate dying entities (call each frame) */
+  tickDeathAnimations(): void {
+    for (const [obj, state] of this.dying) {
+      state.opacity -= 0.04; // ~25 frames to fade out
+      obj.position.y -= state.sinkRate; // Sink into ground
+      obj.traverse(child => {
+        if (child instanceof THREE.Mesh && child.material) {
+          (child.material as THREE.Material).opacity = Math.max(0, state.opacity);
+        }
+      });
+      if (state.opacity <= 0) {
+        obj.traverse(child => {
+          if (child instanceof THREE.Mesh) {
+            child.geometry?.dispose();
+            if (child.material) (child.material as THREE.Material).dispose();
+          }
+        });
+        this.sceneManager.scene.remove(obj);
+        this.dying.delete(obj);
+      }
+    }
   }
 
   getEntityAtScreen(screenX: number, screenY: number): number | null {

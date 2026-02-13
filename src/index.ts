@@ -1602,6 +1602,7 @@ async function main() {
     unitRenderer.update(world);
     unitRenderer.tickConstruction();
     unitRenderer.tickDeconstruction();
+    unitRenderer.tickDeathAnimations();
     minimapRenderer.update(world);
     effectsManager.update(40); // ~40ms per tick at 25 TPS
     effectsManager.updateWormVisuals(sandwormSystem.getWorms(), 40);
