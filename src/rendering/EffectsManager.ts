@@ -15,13 +15,22 @@ interface Explosion {
   flashLife: number;
 }
 
+type WeaponStyle = 'bullet' | 'rocket' | 'laser' | 'flame' | 'mortar';
+
 interface Projectile {
-  mesh: THREE.Mesh;
+  mesh: THREE.Mesh | THREE.Line;
   start: THREE.Vector3;
   end: THREE.Vector3;
   progress: number; // 0-1
   speed: number; // units per second
   onHit: (() => void) | null;
+  style: WeaponStyle;
+  trail?: THREE.Mesh; // Trail mesh for rockets
+}
+
+interface Beam {
+  line: THREE.Line;
+  life: number;
 }
 
 interface WormVisual {
@@ -43,6 +52,7 @@ export class EffectsManager {
   private sceneManager: SceneManager;
   private explosions: Explosion[] = [];
   private projectiles: Projectile[] = [];
+  private beams: Beam[] = [];
   private wreckages: THREE.Mesh[] = [];
   private wormVisuals = new Map<number, WormVisual>();
   // Rally point markers per player
@@ -60,6 +70,9 @@ export class EffectsManager {
   // Shared geometry for particles
   private particleGeo: THREE.SphereGeometry;
   private projectileGeo: THREE.SphereGeometry;
+  private rocketGeo: THREE.CylinderGeometry;
+  private flameGeo: THREE.SphereGeometry;
+  private trailGeo: THREE.SphereGeometry;
   private wormRingGeo: THREE.RingGeometry;
   private wormDustGeo: THREE.SphereGeometry;
   private wormTrailGeo: THREE.SphereGeometry;
@@ -70,6 +83,10 @@ export class EffectsManager {
     this.crateGeo = new THREE.BoxGeometry(1.0, 1.0, 1.0);
     this.particleGeo = new THREE.SphereGeometry(0.15, 4, 4);
     this.projectileGeo = new THREE.SphereGeometry(0.1, 4, 4);
+    this.rocketGeo = new THREE.CylinderGeometry(0.05, 0.12, 0.6, 4);
+    this.rocketGeo.rotateX(Math.PI / 2);
+    this.flameGeo = new THREE.SphereGeometry(0.25, 5, 5);
+    this.trailGeo = new THREE.SphereGeometry(0.2, 4, 4);
     this.wormRingGeo = new THREE.RingGeometry(1.5, 3.0, 16);
     this.wormDustGeo = new THREE.SphereGeometry(0.3, 4, 4);
     this.wormTrailGeo = new THREE.SphereGeometry(0.2, 3, 3);
@@ -153,20 +170,73 @@ export class EffectsManager {
     color: number = 0xffaa00,
     speed: number = 40,
     onHit?: () => void,
+    style: WeaponStyle = 'bullet',
   ): void {
-    const mat = new THREE.MeshBasicMaterial({ color });
-    const mesh = new THREE.Mesh(this.projectileGeo, mat);
-    mesh.position.set(fromX, fromY + 1, fromZ);
+    const startPos = new THREE.Vector3(fromX, fromY + 1, fromZ);
+    const endPos = new THREE.Vector3(toX, toY + 1, toZ);
+
+    // Laser: instant beam, no traveling projectile
+    if (style === 'laser') {
+      this.spawnBeam(startPos, endPos, color);
+      this.spawnExplosion(toX, toY, toZ, 'small');
+      return;
+    }
+
+    // Create projectile mesh based on style
+    let mesh: THREE.Mesh;
+    let trail: THREE.Mesh | undefined;
+
+    if (style === 'rocket') {
+      const mat = new THREE.MeshBasicMaterial({ color });
+      mesh = new THREE.Mesh(this.rocketGeo, mat);
+      // Trail glow
+      const trailMat = new THREE.MeshBasicMaterial({ color: 0xff8800, transparent: true, opacity: 0.5 });
+      trail = new THREE.Mesh(this.trailGeo, trailMat);
+      trail.position.copy(startPos);
+      this.sceneManager.scene.add(trail);
+    } else if (style === 'flame') {
+      const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8 });
+      mesh = new THREE.Mesh(this.flameGeo, mat);
+    } else {
+      // Default bullet: small fast sphere
+      const mat = new THREE.MeshBasicMaterial({ color });
+      mesh = new THREE.Mesh(this.projectileGeo, mat);
+    }
+
+    mesh.position.copy(startPos);
+    // Orient rocket toward target
+    if (style === 'rocket') {
+      mesh.lookAt(endPos);
+    }
     this.sceneManager.scene.add(mesh);
+
+    // Muzzle flash for bullets/cannons
+    if (style === 'bullet') {
+      const flash = new THREE.PointLight(color, 2, 5);
+      flash.position.copy(startPos);
+      this.sceneManager.scene.add(flash);
+      setTimeout(() => { this.sceneManager.scene.remove(flash); flash.dispose(); }, 50);
+    }
 
     this.projectiles.push({
       mesh,
-      start: new THREE.Vector3(fromX, fromY + 1, fromZ),
-      end: new THREE.Vector3(toX, toY + 1, toZ),
+      start: startPos,
+      end: endPos,
       progress: 0,
       speed,
       onHit: onHit ?? null,
+      style,
+      trail,
     });
+  }
+
+  private spawnBeam(start: THREE.Vector3, end: THREE.Vector3, color: number): void {
+    const points = [start, end];
+    const geo = new THREE.BufferGeometry().setFromPoints(points);
+    const mat = new THREE.LineBasicMaterial({ color, linewidth: 2, transparent: true, opacity: 0.9 });
+    const line = new THREE.Line(geo, mat);
+    this.sceneManager.scene.add(line);
+    this.beams.push({ line, life: 0.15 }); // Beam visible for 150ms
   }
 
   updateWormVisuals(worms: ReadonlyArray<{ x: number; z: number; state: string }>, dt: number): void {
@@ -319,16 +389,56 @@ export class EffectsManager {
         // Hit
         this.sceneManager.scene.remove(proj.mesh);
         (proj.mesh.material as THREE.Material).dispose();
+        if (proj.trail) {
+          this.sceneManager.scene.remove(proj.trail);
+          (proj.trail.material as THREE.Material).dispose();
+        }
         if (proj.onHit) proj.onHit();
-        // Small impact flash
-        this.spawnExplosion(proj.end.x, proj.end.y - 1, proj.end.z, 'small');
+        // Impact size based on weapon type
+        const impactSize = proj.style === 'rocket' || proj.style === 'mortar' ? 'medium' : 'small';
+        this.spawnExplosion(proj.end.x, proj.end.y - 1, proj.end.z, impactSize);
         this.projectiles.splice(i, 1);
       } else {
-        // Interpolate position with arc
+        // Interpolate position
         proj.mesh.position.lerpVectors(proj.start, proj.end, proj.progress);
-        // Add parabolic arc
-        const arc = Math.sin(proj.progress * Math.PI) * dist * 0.1;
+
+        // Style-specific arc and effects
+        const arcHeight = proj.style === 'mortar' ? 0.3 : proj.style === 'rocket' ? 0.15 : 0.1;
+        const arc = Math.sin(proj.progress * Math.PI) * dist * arcHeight;
         proj.mesh.position.y += arc;
+
+        // Rocket trail follows behind
+        if (proj.trail) {
+          proj.trail.position.lerpVectors(proj.start, proj.end, Math.max(0, proj.progress - 0.1));
+          proj.trail.position.y += Math.sin(Math.max(0, proj.progress - 0.1) * Math.PI) * dist * 0.15;
+          // Fade trail
+          const trailMat = proj.trail.material as THREE.MeshBasicMaterial;
+          trailMat.opacity = 0.5 * (1 - proj.progress);
+        }
+
+        // Flame grows then shrinks
+        if (proj.style === 'flame') {
+          const scale = 1 + Math.sin(proj.progress * Math.PI) * 1.5;
+          proj.mesh.scale.setScalar(scale);
+          const flameMat = proj.mesh.material as THREE.MeshBasicMaterial;
+          flameMat.opacity = 0.8 * (1 - proj.progress * 0.5);
+        }
+      }
+    }
+
+    // Update beams
+    for (let i = this.beams.length - 1; i >= 0; i--) {
+      const beam = this.beams[i];
+      beam.life -= dtSec;
+      if (beam.life <= 0) {
+        this.sceneManager.scene.remove(beam.line);
+        beam.line.geometry.dispose();
+        (beam.line.material as THREE.Material).dispose();
+        this.beams.splice(i, 1);
+      } else {
+        // Fade beam out
+        const mat = beam.line.material as THREE.LineBasicMaterial;
+        mat.opacity = beam.life / 0.15;
       }
     }
 

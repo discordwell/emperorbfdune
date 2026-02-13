@@ -199,9 +199,12 @@
           <span class="resource-label">Solaris:</span>
           <span class="resource-value" id="solaris-count">5000</span>
         </div>
-        <div class="resource-item">
+        <div class="resource-item" style="position:relative;">
           <span class="resource-label">Power:</span>
           <span class="resource-value" id="power-status">0/0</span>
+          <div id="power-bar" style="position:absolute;bottom:-2px;left:0;right:0;height:3px;background:#222;border-radius:1px;overflow:hidden;">
+            <div id="power-bar-fill" style="height:100%;width:100%;background:#4f4;transition:width 0.3s,background 0.3s;"></div>
+          </div>
         </div>
         <div class="resource-item">
           <span class="resource-label">Units:</span>

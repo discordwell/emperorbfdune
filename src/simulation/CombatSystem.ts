@@ -1,11 +1,11 @@
 import type { GameSystem } from '../core/Game';
 import type { World } from '../core/ECS';
 import {
-  Position, Health, Combat, Owner, AttackTarget, MoveTarget,
+  Position, Health, Combat, Owner, AttackTarget, MoveTarget, Rotation, Speed,
   Armour, BuildingType, Veterancy, combatQuery, hasComponent,
 } from '../core/ECS';
 import type { GameRules } from '../config/RulesParser';
-import { distance2D, worldToTile } from '../utils/MathUtils';
+import { distance2D, worldToTile, angleBetween, lerpAngle } from '../utils/MathUtils';
 import { EventBus } from '../core/EventBus';
 import type { FogOfWar } from '../rendering/FogOfWar';
 
@@ -226,6 +226,21 @@ export class CombatSystem implements GameSystem {
       // In range — stop to fire if attack-moving
       if (this.attackMoveEntities.has(eid) && hasComponent(world, MoveTarget, eid)) {
         MoveTarget.active[eid] = 0;
+      }
+
+      // Rotate unit to face target (buildings don't rotate)
+      if (!hasComponent(world, BuildingType, eid) && hasComponent(world, Rotation, eid)) {
+        const desiredAngle = angleBetween(
+          Position.x[eid], Position.z[eid],
+          Position.x[targetEid], Position.z[targetEid]
+        );
+        const turnRate = hasComponent(world, Speed, eid) ? Speed.turnRate[eid] : 0.15;
+        Rotation.y[eid] = lerpAngle(Rotation.y[eid], desiredAngle, Math.min(1, turnRate * 3));
+        // Don't fire until roughly facing target (within ~20 degrees)
+        let angleDiff = desiredAngle - Rotation.y[eid];
+        if (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+        if (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+        if (Math.abs(angleDiff) > 0.35) continue;
       }
 
       // Only fire when cooldown is done

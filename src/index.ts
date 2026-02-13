@@ -812,19 +812,20 @@ async function main() {
   EventBus.on('combat:fire', ({ attackerX, attackerZ, targetX, targetZ, weaponType, attackerEntity, targetEntity }) => {
     let color = 0xffaa00; // Default orange
     let speed = 40;
+    let style: 'bullet' | 'rocket' | 'laser' | 'flame' | 'mortar' = 'bullet';
     const wt = (weaponType ?? '').toLowerCase();
     if (wt.includes('rocket') || wt.includes('missile')) {
-      color = 0xff4400; speed = 25; // Red, slower
+      color = 0xff4400; speed = 25; style = 'rocket';
     } else if (wt.includes('laser') || wt.includes('sonic')) {
-      color = 0x00ffff; speed = 80; // Cyan, fast
+      color = 0x00ffff; speed = 80; style = 'laser';
     } else if (wt.includes('flame')) {
-      color = 0xff6600; speed = 20; // Deep orange, slow
+      color = 0xff6600; speed = 20; style = 'flame';
     } else if (wt.includes('gun') || wt.includes('cannon') || wt.includes('machinegun')) {
-      color = 0xffff44; speed = 60; // Yellow, fast
+      color = 0xffff44; speed = 60; style = 'bullet';
     } else if (wt.includes('mortar') || wt.includes('inkvine')) {
-      color = 0x88ff44; speed = 15; // Green, arcing
+      color = 0x88ff44; speed = 15; style = 'mortar';
     }
-    effectsManager.spawnProjectile(attackerX, 0, attackerZ, targetX, 0, targetZ, color, speed);
+    effectsManager.spawnProjectile(attackerX, 0, attackerZ, targetX, 0, targetZ, color, speed, undefined, style);
 
     // Deviator conversion: if attacker is a deviator, convert target temporarily
     if (attackerEntity !== undefined && targetEntity !== undefined) {
@@ -966,6 +967,7 @@ async function main() {
 
   // UI elements for resource bar
   const powerEl = document.getElementById('power-status');
+  const powerBarFill = document.getElementById('power-bar-fill');
   const unitCountEl = document.getElementById('unit-count');
   const commandModeEl = document.getElementById('command-mode');
   const lowPowerEl = document.getElementById('low-power-warning');
@@ -1096,7 +1098,13 @@ async function main() {
 
       if (powerEl) {
         powerEl.textContent = `${powerGen}/${powerUsed}`;
-        powerEl.style.color = powerGen >= powerUsed ? '#4f4' : '#f44';
+        const sufficient = powerGen >= powerUsed;
+        powerEl.style.color = sufficient ? '#4f4' : '#f44';
+        if (powerBarFill) {
+          const ratio = powerUsed > 0 ? Math.min(1, powerGen / powerUsed) : 1;
+          powerBarFill.style.width = `${ratio * 100}%`;
+          powerBarFill.style.background = sufficient ? '#4f4' : ratio > 0.5 ? '#ff8800' : '#f44';
+        }
       }
       if (unitCountEl) unitCountEl.textContent = `${unitCount}`;
 
