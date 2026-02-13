@@ -22,7 +22,7 @@ interface EventMap {
   'game:started': {};
   'game:paused': {};
   'placement:cancelled': { typeName: string };
-  'combat:fire': { attackerX: number; attackerZ: number; targetX: number; targetZ: number };
+  'combat:fire': { attackerX: number; attackerZ: number; targetX: number; targetZ: number; weaponType?: string };
   'worm:emerge': { x: number; z: number };
   'worm:submerge': { x: number; z: number };
   'rally:set': { playerId: number; x: number; z: number };

@@ -84,7 +84,7 @@ export class AIPlayer implements GameSystem {
         this.unitPool.push(name);
         if (def.infantry) {
           this.infantryPool.push(name);
-        } else if (def.cost <= 1500) {
+        } else {
           this.vehiclePool.push(name);
         }
       }
@@ -181,9 +181,23 @@ export class AIPlayer implements GameSystem {
         }
       }
     } else {
-      // Late game: expand economy and military
-      if (solaris > 2000 && totalBuildings < 12) {
-        const lateBuildings = [`${px}SmWindtrap`, `${px}Factory`, `${px}Barracks`, `${px}Refinery`];
+      // Try upgrading buildings for higher tech levels
+      if (solaris > 1500) {
+        const upgradePriority = [`${px}Factory`, `${px}Barracks`, `${px}ConYard`];
+        for (const bType of upgradePriority) {
+          if (this.production.canUpgrade(this.playerId, bType)) {
+            this.production.startUpgrade(this.playerId, bType);
+            break;
+          }
+        }
+      }
+
+      // Late game: expand economy, military, and advanced buildings
+      if (solaris > 2000 && totalBuildings < 15) {
+        const lateBuildings = [
+          `${px}SmWindtrap`, `${px}Factory`, `${px}Barracks`, `${px}Refinery`,
+          `${px}Hanger`, `${px}Starport`, `${px}SmWindtrap`,
+        ];
         const pick = lateBuildings[Math.floor(Math.random() * lateBuildings.length)];
         if (this.production.canBuild(this.playerId, pick, true)) {
           this.production.startProduction(this.playerId, pick, true);
@@ -208,7 +222,18 @@ export class AIPlayer implements GameSystem {
     if (pool.length === 0) pool = this.unitPool;
     if (pool.length === 0) return;
 
-    const typeName = pool[Math.floor(Math.random() * pool.length)];
+    // Filter to units we can actually build (tech level + prerequisites)
+    const buildable = pool.filter(name => this.production!.canBuild(this.playerId, name, false));
+    if (buildable.length === 0) {
+      // Fall back to any buildable unit
+      const anyBuildable = this.unitPool.filter(name => this.production!.canBuild(this.playerId, name, false));
+      if (anyBuildable.length === 0) return;
+      const typeName = anyBuildable[Math.floor(Math.random() * anyBuildable.length)];
+      this.production.startProduction(this.playerId, typeName, false);
+      return;
+    }
+
+    const typeName = buildable[Math.floor(Math.random() * buildable.length)];
     this.production.startProduction(this.playerId, typeName, false);
   }
 

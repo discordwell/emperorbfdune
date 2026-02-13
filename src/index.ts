@@ -351,16 +351,21 @@ async function main() {
     harvestSystem.addSolaris(0, refund);
     selectionPanel.addMessage(`Sold for ${refund} Solaris`, '#f0c040');
 
-    // Sell visual effect
-    effectsManager.spawnExplosion(Position.x[eid], Position.y[eid], Position.z[eid], 'small');
+    effectsManager.clearBuildingDamage(eid);
 
-    // Clean up from production prerequisites and combat
+    // Clean up from production prerequisites and combat immediately
     if (typeName) {
       productionSystem.removePlayerBuilding(0, typeName);
     }
     combatSystem.unregisterUnit(eid);
+    // Prevent combat targeting this building
+    Health.current[eid] = 0;
 
-    try { removeEntity(world, eid); } catch {}
+    // Animate deconstruction over ~2 seconds (50 ticks), then remove
+    unitRenderer.startDeconstruction(eid, 50, () => {
+      effectsManager.spawnExplosion(Position.x[eid], Position.y[eid], Position.z[eid], 'small');
+      try { removeEntity(world, eid); } catch {}
+    });
   }
 
   function repairBuilding(eid: number): void {
@@ -443,6 +448,7 @@ async function main() {
     const z = Position.z[entityId];
 
     combatSystem.unregisterUnit(entityId);
+    effectsManager.clearBuildingDamage(entityId);
 
     // Visual effects — infantry get small, vehicles medium, buildings large
     const isUnit = hasComponent(world, UnitType, entityId);
@@ -539,9 +545,23 @@ async function main() {
     selectionPanel.addMessage('Rally point set', '#44ff44');
   });
 
-  // Projectile visuals
-  EventBus.on('combat:fire', ({ attackerX, attackerZ, targetX, targetZ }) => {
-    effectsManager.spawnProjectile(attackerX, 0, attackerZ, targetX, 0, targetZ);
+  // Projectile visuals — color and speed vary by weapon type
+  EventBus.on('combat:fire', ({ attackerX, attackerZ, targetX, targetZ, weaponType }) => {
+    let color = 0xffaa00; // Default orange
+    let speed = 40;
+    const wt = (weaponType ?? '').toLowerCase();
+    if (wt.includes('rocket') || wt.includes('missile')) {
+      color = 0xff4400; speed = 25; // Red, slower
+    } else if (wt.includes('laser') || wt.includes('sonic')) {
+      color = 0x00ffff; speed = 80; // Cyan, fast
+    } else if (wt.includes('flame')) {
+      color = 0xff6600; speed = 20; // Deep orange, slow
+    } else if (wt.includes('gun') || wt.includes('cannon') || wt.includes('machinegun')) {
+      color = 0xffff44; speed = 60; // Yellow, fast
+    } else if (wt.includes('mortar') || wt.includes('inkvine')) {
+      color = 0x88ff44; speed = 15; // Green, arcing
+    }
+    effectsManager.spawnProjectile(attackerX, 0, attackerZ, targetX, 0, targetZ, color, speed);
   });
 
   EventBus.on('unit:move', ({ entityIds }) => {
@@ -599,6 +619,7 @@ async function main() {
     productionSystem.update();
     unitRenderer.update(world);
     unitRenderer.tickConstruction();
+    unitRenderer.tickDeconstruction();
     minimapRenderer.update(world);
     effectsManager.update(40); // ~40ms per tick at 25 TPS
     effectsManager.updateWormVisuals(sandwormSystem.getWorms(), 40);
@@ -700,6 +721,46 @@ async function main() {
       // AI always gets full power (simplification - AI builds enough windtraps)
       productionSystem.setPowerMultiplier(1, 1.0);
       combatSystem.setPowerMultiplier(1, 1.0);
+
+      // Building damage visual states: smoke and fire based on HP
+      for (const eid of buildings) {
+        if (Health.current[eid] <= 0) continue;
+        const ratio = Health.current[eid] / Health.max[eid];
+        effectsManager.updateBuildingDamage(
+          eid, Position.x[eid], Position.y[eid], Position.z[eid], ratio
+        );
+      }
+    }
+
+    // Infantry crushing: vehicles crush infantry they overlap (every 10 ticks)
+    if (game.getTickCount() % 10 === 0) {
+      const allUnits = unitQuery(world);
+      for (const eid of allUnits) {
+        if (Health.current[eid] <= 0) continue;
+        const typeId = UnitType.id[eid];
+        const typeName = unitTypeNames[typeId];
+        const def = typeName ? gameRules.units.get(typeName) : null;
+        if (!def || !def.crushes) continue;
+        if (MoveTarget.active[eid] !== 1) continue; // Only crush while moving
+
+        // Check for nearby crushable infantry
+        for (const other of allUnits) {
+          if (other === eid) continue;
+          if (Health.current[other] <= 0) continue;
+          if (Owner.playerId[other] === Owner.playerId[eid]) continue; // Don't crush friendlies
+          const oTypeId = UnitType.id[other];
+          const oName = unitTypeNames[oTypeId];
+          const oDef = oName ? gameRules.units.get(oName) : null;
+          if (!oDef || !oDef.crushable) continue;
+
+          const dx = Position.x[eid] - Position.x[other];
+          const dz = Position.z[eid] - Position.z[other];
+          if (dx * dx + dz * dz < 2.0) { // Within 1.4 units
+            Health.current[other] = 0;
+            EventBus.emit('unit:died', { entityId: other, killerEntity: eid });
+          }
+        }
+      }
     }
 
     // Passive repair: idle units near friendly buildings heal slowly every 2 seconds
@@ -761,6 +822,45 @@ async function main() {
         effectsManager.spawnExplosion(worldX, 0.5, worldZ, 'medium');
         selectionPanel.addMessage('Spice bloom detected!', '#ff8800');
       }
+    }
+
+    // Sandstorm events: ~1% chance every 20 seconds, lasts 8 seconds
+    if (game.getTickCount() % 500 === 0 && !effectsManager.isSandstormActive() && Math.random() < 0.01 * (game.getTickCount() / 2500 + 0.5)) {
+      effectsManager.startSandstorm();
+      selectionPanel.addMessage('Sandstorm approaching!', '#ff8844');
+      // End storm after 200 ticks (8 seconds)
+      const stormEnd = game.getTickCount() + 200;
+      const stormDamage = () => {
+        if (game.getTickCount() >= stormEnd) {
+          effectsManager.stopSandstorm();
+          selectionPanel.addMessage('Sandstorm subsided', '#aaa');
+          EventBus.off('game:tick', stormDamage);
+          return;
+        }
+        // Damage units on sand every 25 ticks during storm
+        if (game.getTickCount() % 25 === 0) {
+          const stormUnits = unitQuery(world);
+          for (const eid of stormUnits) {
+            if (Health.current[eid] <= 0) continue;
+            const typeId = UnitType.id[eid];
+            const tName = unitTypeNames[typeId];
+            const uDef = tName ? gameRules.units.get(tName) : null;
+            const dmg = uDef?.stormDamage ?? 5;
+            if (dmg <= 0) continue;
+            // Only damage units on sand terrain
+            const tileX = Math.floor(Position.x[eid] / 2);
+            const tileZ = Math.floor(Position.z[eid] / 2);
+            const terrType = terrain.getTerrainType(tileX, tileZ);
+            if (terrType === 0 || terrType === 4) { // Sand or Dunes
+              Health.current[eid] = Math.max(0, Health.current[eid] - dmg);
+              if (Health.current[eid] <= 0) {
+                EventBus.emit('unit:died', { entityId: eid, killerEntity: -1 });
+              }
+            }
+          }
+        }
+      };
+      EventBus.on('game:tick', stormDamage);
     }
 
     // Pause game on victory/defeat

@@ -47,6 +47,8 @@ export class UnitRenderer {
   private localPlayerId = 0;
   // Construction animation: eid -> { progress 0..1, duration ticks }
   private constructing = new Map<number, { progress: number; duration: number }>();
+  // Deconstruction (sell) animation: eid -> { progress 0..1, duration ticks, callback }
+  private deconstructing = new Map<number, { progress: number; duration: number; onComplete: () => void }>();
 
   constructor(sceneManager: SceneManager, modelManager: ModelManager, artMap: Map<string, ArtEntry>) {
     this.sceneManager = sceneManager;
@@ -76,6 +78,11 @@ export class UnitRenderer {
     }
   }
 
+  /** Start deconstruction (sell) animation — reverse of construction */
+  startDeconstruction(eid: number, durationTicks: number, onComplete: () => void): void {
+    this.deconstructing.set(eid, { progress: 0, duration: Math.max(1, durationTicks), onComplete });
+  }
+
   /** Advance construction animation by one tick */
   tickConstruction(): void {
     for (const [eid, state] of this.constructing) {
@@ -103,6 +110,34 @@ export class UnitRenderer {
             mat.transparent = true;
             mat.opacity = opacity;
           }
+        }
+      });
+    }
+  }
+
+  /** Advance deconstruction (sell) animation by one tick */
+  tickDeconstruction(): void {
+    for (const [eid, state] of this.deconstructing) {
+      state.progress += 1 / state.duration;
+      if (state.progress >= 1) {
+        this.deconstructing.delete(eid);
+        state.onComplete();
+        continue;
+      }
+      const obj = this.entityObjects.get(eid);
+      if (!obj) continue;
+
+      const t = state.progress;
+      // Scale from 1.0 -> 0.3
+      const s = 1.0 - t * 0.7;
+      obj.scale.setScalar(s);
+      // Opacity from 1.0 -> 0.0
+      const opacity = 1.0 - t;
+      obj.traverse(child => {
+        if (child instanceof THREE.Mesh && child.material) {
+          const mat = child.material as THREE.Material;
+          mat.transparent = true;
+          mat.opacity = opacity;
         }
       });
     }
@@ -367,6 +402,17 @@ export class UnitRenderer {
   private removeVisual(eid: number): void {
     const obj = this.entityObjects.get(eid);
     if (obj) {
+      // Dispose all Three.js resources
+      obj.traverse(child => {
+        if (child instanceof THREE.Mesh) {
+          child.geometry?.dispose();
+          if (child.material) {
+            (child.material as THREE.Material).dispose();
+          }
+        } else if (child instanceof THREE.Sprite) {
+          (child.material as THREE.Material).dispose();
+        }
+      });
       this.sceneManager.scene.remove(obj);
       this.entityObjects.delete(eid);
     }
@@ -374,6 +420,7 @@ export class UnitRenderer {
     this.healthBars.delete(eid);
     this.rankSprites.delete(eid);
     this.pendingModels.delete(eid);
+    this.deconstructing.delete(eid);
   }
 
   getEntityAtScreen(screenX: number, screenY: number): number | null {

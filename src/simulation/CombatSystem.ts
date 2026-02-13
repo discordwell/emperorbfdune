@@ -212,6 +212,7 @@ export class CombatSystem implements GameSystem {
     // In a full impl, look up turret -> bullet -> warhead chain
 
     let baseDamage = 100; // Default
+    let bulletName = '';
     const typeName = this.unitTypeMap.get(attackerEid);
     if (typeName) {
       // Look up turret from either unit or building definition
@@ -221,6 +222,7 @@ export class CombatSystem implements GameSystem {
       if (turretName) {
         const turret = this.rules.turrets.get(turretName);
         if (turret?.bullet) {
+          bulletName = turret.bullet;
           const bullet = this.rules.bullets.get(turret.bullet);
           if (bullet) {
             baseDamage = bullet.damage;
@@ -259,6 +261,7 @@ export class CombatSystem implements GameSystem {
       attackerZ: Position.z[attackerEid],
       targetX: Position.x[targetEid],
       targetZ: Position.z[targetEid],
+      weaponType: bulletName,
     });
 
     // Apply damage

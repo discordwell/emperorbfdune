@@ -33,6 +33,12 @@ interface WormVisual {
   prevZ: number;
 }
 
+interface DamageSmoke {
+  mesh: THREE.Mesh;
+  baseY: number;
+  phase: number; // Random offset for animation variety
+}
+
 export class EffectsManager {
   private sceneManager: SceneManager;
   private explosions: Explosion[] = [];
@@ -41,6 +47,11 @@ export class EffectsManager {
   private wormVisuals = new Map<number, WormVisual>();
   // Rally point markers per player
   private rallyMarkers = new Map<number, THREE.Group>();
+  // Building damage smoke/fire effects: eid -> array of smoke meshes
+  private buildingDamageEffects = new Map<number, DamageSmoke[]>();
+  // Sandstorm overlay
+  private sandstormParticles: THREE.Mesh[] = [];
+  private sandstormActive = false;
 
   // Shared geometry for particles
   private particleGeo: THREE.SphereGeometry;
@@ -48,6 +59,7 @@ export class EffectsManager {
   private wormRingGeo: THREE.RingGeometry;
   private wormDustGeo: THREE.SphereGeometry;
   private wormTrailGeo: THREE.SphereGeometry;
+  private smokeGeo: THREE.SphereGeometry;
 
   constructor(sceneManager: SceneManager) {
     this.sceneManager = sceneManager;
@@ -56,6 +68,7 @@ export class EffectsManager {
     this.wormRingGeo = new THREE.RingGeometry(1.5, 3.0, 16);
     this.wormDustGeo = new THREE.SphereGeometry(0.3, 4, 4);
     this.wormTrailGeo = new THREE.SphereGeometry(0.2, 3, 3);
+    this.smokeGeo = new THREE.SphereGeometry(0.4, 5, 5);
   }
 
   spawnExplosion(x: number, y: number, z: number, size: 'small' | 'medium' | 'large' = 'medium'): void {
@@ -228,6 +241,7 @@ export class EffectsManager {
         mat.opacity -= dt * 0.0003;
         if (mat.opacity <= 0) {
           this.sceneManager.scene.remove(trail);
+          trail.geometry.dispose();
           mat.dispose();
           vis.trailMeshes.splice(j, 1);
         }
@@ -370,6 +384,9 @@ export class EffectsManager {
     for (const [, marker] of this.rallyMarkers) {
       marker.children[0].position.y = 1.5 + Math.sin(Date.now() * 0.003) * 0.15;
     }
+
+    // Sandstorm particles
+    this.updateSandstormParticles(dt);
   }
 
   setRallyPoint(playerId: number, x: number, z: number): void {
@@ -413,6 +430,152 @@ export class EffectsManager {
       });
       this.sceneManager.scene.remove(existing);
       this.rallyMarkers.delete(playerId);
+    }
+  }
+
+  /** Update building damage smoke/fire based on health ratio */
+  updateBuildingDamage(eid: number, x: number, y: number, z: number, healthRatio: number): void {
+    const existing = this.buildingDamageEffects.get(eid);
+
+    // Full health or dead: remove effects
+    if (healthRatio >= 0.75 || healthRatio <= 0) {
+      if (existing) {
+        for (const smoke of existing) {
+          this.sceneManager.scene.remove(smoke.mesh);
+          (smoke.mesh.material as THREE.Material).dispose();
+        }
+        this.buildingDamageEffects.delete(eid);
+      }
+      return;
+    }
+
+    // Determine how many smoke columns based on damage
+    let targetCount = 0;
+    let isOnFire = false;
+    if (healthRatio < 0.25) {
+      targetCount = 3;
+      isOnFire = true;
+    } else if (healthRatio < 0.5) {
+      targetCount = 2;
+      isOnFire = true;
+    } else {
+      targetCount = 1;
+    }
+
+    // Create effects if needed
+    if (!existing || existing.length !== targetCount) {
+      // Remove old
+      if (existing) {
+        for (const smoke of existing) {
+          this.sceneManager.scene.remove(smoke.mesh);
+          (smoke.mesh.material as THREE.Material).dispose();
+        }
+      }
+
+      const smokes: DamageSmoke[] = [];
+      for (let i = 0; i < targetCount; i++) {
+        const color = isOnFire ? 0xff4400 : 0x444444;
+        const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.6 });
+        const mesh = new THREE.Mesh(this.smokeGeo, mat);
+        const offsetX = (Math.random() - 0.5) * 2;
+        const offsetZ = (Math.random() - 0.5) * 2;
+        mesh.position.set(x + offsetX, y + 2, z + offsetZ);
+        this.sceneManager.scene.add(mesh);
+        smokes.push({ mesh, baseY: y + 2, phase: Math.random() * Math.PI * 2 });
+      }
+      this.buildingDamageEffects.set(eid, smokes);
+    }
+
+    // Animate existing smoke
+    const effects = this.buildingDamageEffects.get(eid)!;
+    const t = Date.now() * 0.001;
+    for (const smoke of effects) {
+      // Bob up and down, pulse scale
+      smoke.mesh.position.y = smoke.baseY + Math.sin(t * 2 + smoke.phase) * 0.5 + 0.5;
+      const scale = 0.5 + Math.sin(t * 3 + smoke.phase) * 0.2;
+      smoke.mesh.scale.setScalar(scale);
+      const mat = smoke.mesh.material as THREE.MeshBasicMaterial;
+      mat.opacity = 0.4 + Math.sin(t * 4 + smoke.phase) * 0.2;
+      // Fire flickers between orange and red
+      if (isOnFire) {
+        const flicker = Math.sin(t * 8 + smoke.phase) * 0.5 + 0.5;
+        mat.color.setRGB(1.0, 0.2 + flicker * 0.3, flicker * 0.1);
+      }
+    }
+  }
+
+  /** Remove all damage effects for an entity (on death/sell) */
+  clearBuildingDamage(eid: number): void {
+    const existing = this.buildingDamageEffects.get(eid);
+    if (existing) {
+      for (const smoke of existing) {
+        this.sceneManager.scene.remove(smoke.mesh);
+        (smoke.mesh.material as THREE.Material).dispose();
+      }
+      this.buildingDamageEffects.delete(eid);
+    }
+  }
+
+  /** Start sandstorm visual effect */
+  startSandstorm(): void {
+    if (this.sandstormActive) return;
+    this.sandstormActive = true;
+
+    // Create swirling sand particles across the viewport
+    for (let i = 0; i < 60; i++) {
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0xd4a460,
+        transparent: true,
+        opacity: 0.3 + Math.random() * 0.3,
+      });
+      const mesh = new THREE.Mesh(this.smokeGeo, mat);
+      const scale = 0.5 + Math.random() * 1.5;
+      mesh.scale.setScalar(scale);
+      mesh.position.set(
+        (Math.random() - 0.5) * 200,
+        0.5 + Math.random() * 5,
+        (Math.random() - 0.5) * 200
+      );
+      mesh.userData.stormVelX = 3 + Math.random() * 4;
+      mesh.userData.stormVelZ = (Math.random() - 0.5) * 2;
+      mesh.userData.stormPhase = Math.random() * Math.PI * 2;
+      this.sceneManager.scene.add(mesh);
+      this.sandstormParticles.push(mesh);
+    }
+  }
+
+  /** Stop sandstorm visual effect */
+  stopSandstorm(): void {
+    if (!this.sandstormActive) return;
+    this.sandstormActive = false;
+    for (const mesh of this.sandstormParticles) {
+      this.sceneManager.scene.remove(mesh);
+      (mesh.material as THREE.Material).dispose();
+    }
+    this.sandstormParticles = [];
+  }
+
+  isSandstormActive(): boolean {
+    return this.sandstormActive;
+  }
+
+  /** Animate sandstorm particles (call in update) */
+  private updateSandstormParticles(dt: number): void {
+    if (!this.sandstormActive) return;
+    const dtSec = dt / 1000;
+    const camX = this.sceneManager.camera.position.x;
+    const camZ = this.sceneManager.camera.position.z;
+
+    for (const mesh of this.sandstormParticles) {
+      mesh.position.x += mesh.userData.stormVelX * dtSec * 8;
+      mesh.position.z += mesh.userData.stormVelZ * dtSec * 8;
+      mesh.position.y = 0.5 + Math.sin(Date.now() * 0.002 + mesh.userData.stormPhase) * 3;
+
+      // Wrap particles around camera
+      if (mesh.position.x > camX + 100) mesh.position.x = camX - 100;
+      if (mesh.position.x < camX - 100) mesh.position.x = camX + 100;
+      if (mesh.position.z > camZ + 100) mesh.position.z = camZ - 100;
+      if (mesh.position.z < camZ - 100) mesh.position.z = camZ + 100;
     }
   }
 }

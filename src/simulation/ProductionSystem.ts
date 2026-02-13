@@ -102,8 +102,19 @@ export class ProductionSystem {
   }
 
   getPlayerTechLevel(playerId: number): number {
-    // Tech level = max upgrade tech level of all upgraded buildings
-    let maxTech = 1;
+    // Tech level = max of: owned buildings' base tech levels + upgraded buildings' upgrade tech levels
+    let maxTech = 0;
+
+    // Base tech from owned buildings
+    const owned = this.playerBuildings.get(playerId);
+    if (owned) {
+      for (const bType of owned.keys()) {
+        const def = this.rules.buildings.get(bType);
+        if (def && def.techLevel > maxTech) maxTech = def.techLevel;
+      }
+    }
+
+    // Higher tech from upgrades
     const upgraded = this.upgradedBuildings.get(playerId);
     if (upgraded) {
       for (const bType of upgraded) {
@@ -111,6 +122,10 @@ export class ProductionSystem {
         if (def && def.upgradeTechLevel > maxTech) maxTech = def.upgradeTechLevel;
       }
     }
+
+    // Owning any building gives at least tech 1
+    if (owned && owned.size > 0 && maxTech < 1) maxTech = 1;
+
     return maxTech;
   }
 
@@ -134,6 +149,12 @@ export class ProductionSystem {
       for (const req of def.secondaryBuildings) {
         if (!owned || !owned.has(req) || (owned.get(req) ?? 0) <= 0) return false;
       }
+    }
+
+    // Tech level requirement
+    if (def.techLevel > 0) {
+      const playerTech = this.getPlayerTechLevel(playerId);
+      if (def.techLevel > playerTech) return false;
     }
 
     // Unit population cap (only for units, not buildings)

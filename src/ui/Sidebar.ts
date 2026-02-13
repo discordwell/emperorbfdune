@@ -206,11 +206,15 @@ export class Sidebar {
       html += `<div style="color:${reqColor};margin-top:4px;font-size:10px;">Requires: ${reqName}${canBuild ? ' \u2713' : ' (not built)'}</div>`;
     }
 
-    // Show if unaffordable
+    // Show tech level requirement
+    if (def.techLevel > 0) {
+      const playerTech = this.production.getPlayerTechLevel(this.playerId);
+      const techMet = def.techLevel <= playerTech;
+      html += `<div style="color:${techMet ? '#4f4' : '#f66'};font-size:10px;">Tech Level: ${def.techLevel}${techMet ? ' \u2713' : ` (need ${def.techLevel}, have ${playerTech})`}</div>`;
+    }
+
+    // Show if unaffordable or otherwise unavailable
     if (!this.production.canBuild(this.playerId, name, isBuilding)) {
-      if (!def.primaryBuilding || this.production.canBuild(this.playerId, name, isBuilding)) {
-        // Must be a cost issue
-      }
       html += `<div style="color:#f44;font-size:10px;margin-top:2px;">Cannot build</div>`;
     }
 
