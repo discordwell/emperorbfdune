@@ -45,14 +45,21 @@ export class Sidebar {
     }
     this.container.appendChild(tabBar);
 
-    // Progress bar
+    // Progress bar with label
+    const progressWrap = document.createElement('div');
+    progressWrap.style.cssText = 'margin:2px 4px;';
+    const progressLabel = document.createElement('div');
+    progressLabel.id = 'production-label';
+    progressLabel.style.cssText = 'font-size:10px;color:#aaa;text-align:center;height:14px;line-height:14px;';
+    progressWrap.appendChild(progressLabel);
     this.progressBar = document.createElement('div');
-    this.progressBar.style.cssText = 'height:4px;background:#222;margin:2px 4px;';
+    this.progressBar.style.cssText = 'height:4px;background:#222;';
     const progressFill = document.createElement('div');
     progressFill.id = 'production-progress';
     progressFill.style.cssText = 'height:100%;background:#0f0;width:0%;transition:width 0.1s;';
     this.progressBar.appendChild(progressFill);
-    this.container.appendChild(this.progressBar);
+    progressWrap.appendChild(this.progressBar);
+    this.container.appendChild(progressWrap);
 
     // Items grid
     const grid = document.createElement('div');
@@ -176,11 +183,22 @@ export class Sidebar {
   updateProgress(): void {
     const buildingProg = this.production.getQueueProgress(this.playerId, true);
     const unitProg = this.production.getQueueProgress(this.playerId, false);
-    const prog = buildingProg ?? unitProg;
 
     const fill = document.getElementById('production-progress');
+    const label = document.getElementById('production-label');
+
+    // Show the active production item
+    const prog = buildingProg ?? unitProg;
     if (fill) {
       fill.style.width = prog ? `${prog.progress * 100}%` : '0%';
+    }
+    if (label) {
+      if (prog) {
+        const displayName = prog.typeName.replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, '');
+        label.textContent = `${displayName} ${Math.floor(prog.progress * 100)}%`;
+      } else {
+        label.textContent = '';
+      }
     }
   }
 

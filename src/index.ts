@@ -554,6 +554,15 @@ async function main() {
 
   // Help overlay toggle
   const helpOverlay = document.getElementById('help-overlay');
+
+  // Track last combat event position for Space key
+  let lastEventX = 55, lastEventZ = 55;
+  EventBus.on('unit:died', ({ entityId }) => {
+    lastEventX = Position.x[entityId];
+    lastEventZ = Position.z[entityId];
+  });
+  EventBus.on('worm:emerge', ({ x, z }) => { lastEventX = x; lastEventZ = z; });
+
   window.addEventListener('keydown', (e) => {
     if (e.key === '?' || (e.key === '/' && e.shiftKey)) {
       if (helpOverlay) {
@@ -561,6 +570,15 @@ async function main() {
       }
     } else if (e.key === 'Escape' && helpOverlay?.style.display === 'block') {
       helpOverlay.style.display = 'none';
+    } else if (e.key === 'h' && !e.ctrlKey && !e.altKey) {
+      // Snap to base (construction yard)
+      scene.cameraTarget.set(50, 0, 50);
+      scene.updateCameraPosition();
+    } else if (e.key === ' ' && !e.ctrlKey) {
+      // Snap to last event
+      e.preventDefault();
+      scene.cameraTarget.set(lastEventX, 0, lastEventZ);
+      scene.updateCameraPosition();
     }
   });
 
