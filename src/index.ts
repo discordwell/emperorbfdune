@@ -105,11 +105,13 @@ async function main() {
 
   // Initialize
   game.init();
-  terrain.generate();
+  await terrain.generate();
 
-  // Preload models
-  const modelNames = [...gameRules.units.keys()].filter(n => n.startsWith('AT') || n.startsWith('HK'));
-  await unitRenderer.preloadModels(modelNames);
+  // Preload all unit and building models (no faction filter)
+  const unitModelNames = [...gameRules.units.keys()];
+  await unitRenderer.preloadModels(unitModelNames);
+  const buildingModelNames = [...gameRules.buildings.keys()];
+  await unitRenderer.preloadBuildingModels(buildingModelNames);
 
   // Helper: spawn a unit entity
   function spawnUnit(world: World, typeName: string, owner: number, x: number, z: number): number {
@@ -225,6 +227,12 @@ async function main() {
     Armour.type[eid] = armourIdMap.get(def.armour) ?? armourIdMap.get('Building') ?? 0;
 
     productionSystem.addPlayerBuilding(owner, typeName);
+
+    // Set 3D model for building
+    const art = artMap.get(typeName);
+    if (art?.xaf) {
+      unitRenderer.setEntityModel(eid, art.xaf, 0.025);
+    }
 
     return eid;
   }

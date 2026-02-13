@@ -4,6 +4,7 @@ import type { ModelManager, LoadedModel } from './ModelManager';
 import type { ArtEntry } from '../config/ArtIniParser';
 import {
   Position, Rotation, Renderable, Health, Selectable, Owner,
+  BuildingType, hasComponent,
   renderQuery, renderEnter, renderExit,
   type World,
 } from '../core/ECS';
@@ -34,6 +35,10 @@ export class UnitRenderer {
 
   // Preloaded model templates keyed by xaf name
   private modelTemplates = new Map<string, LoadedModel>();
+  // Pending model assignments for entities not yet visualized
+  private pendingModels = new Map<number, { xafName: string; scale: number }>();
+  // Current ECS world reference (set during update)
+  private currentWorld: World | null = null;
 
   constructor(sceneManager: SceneManager, modelManager: ModelManager, artMap: Map<string, ArtEntry>) {
     this.sceneManager = sceneManager;
@@ -61,7 +66,28 @@ export class UnitRenderer {
     console.log(`Preloaded ${this.modelTemplates.size} unit model templates`);
   }
 
+  async preloadBuildingModels(buildingTypeNames: string[]): Promise<void> {
+    const promises: Promise<void>[] = [];
+    const loaded = new Set<string>();
+
+    for (const typeName of buildingTypeNames) {
+      const art = this.artMap.get(typeName);
+      if (!art?.xaf || loaded.has(art.xaf)) continue;
+      loaded.add(art.xaf);
+
+      promises.push(
+        this.modelManager.loadModel(art.xaf, 'H0').then(model => {
+          if (model) this.modelTemplates.set(art.xaf, model);
+        })
+      );
+    }
+
+    await Promise.allSettled(promises);
+    console.log(`Preloaded ${this.modelTemplates.size} total model templates (units + buildings)`);
+  }
+
   update(world: World): void {
+    this.currentWorld = world;
     // Handle new renderable entities
     const entered = renderEnter(world);
     for (const eid of entered) {
@@ -99,18 +125,18 @@ export class UnitRenderer {
   }
 
   private createVisual(eid: number): void {
-    const modelId = Renderable.modelId[eid];
-    // modelId is an index; we'll use a lookup from a name registry
-    // For now, create a placeholder if no model loaded
-    const group = this.createPlaceholder(eid);
+    const isBuilding = this.currentWorld != null && hasComponent(this.currentWorld, BuildingType, eid);
+    const group = this.createPlaceholder(eid, isBuilding);
     group.position.set(Position.x[eid], Position.y[eid], Position.z[eid]);
     group.rotation.y = Rotation.y[eid];
 
     this.entityObjects.set(eid, group);
     this.sceneManager.scene.add(group);
 
-    // Selection circle (green ring, hidden by default)
-    const circleGeo = new THREE.RingGeometry(0.8, 1.0, 24);
+    // Selection circle (green ring, hidden by default) — larger for buildings
+    const innerR = isBuilding ? 2.0 : 0.8;
+    const outerR = isBuilding ? 2.4 : 1.0;
+    const circleGeo = new THREE.RingGeometry(innerR, outerR, 24);
     circleGeo.rotateX(-Math.PI / 2);
     const circleMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, side: THREE.DoubleSide });
     const circle = new THREE.Mesh(circleGeo, circleMat);
@@ -118,30 +144,55 @@ export class UnitRenderer {
     circle.visible = false;
     group.add(circle);
     this.selectionCircles.set(eid, circle);
+
+    // Apply pending model if setEntityModel was called before visual existed
+    const pending = this.pendingModels.get(eid);
+    if (pending) {
+      this.pendingModels.delete(eid);
+      this.setEntityModel(eid, pending.xafName, pending.scale);
+    }
   }
 
-  private createPlaceholder(eid: number): THREE.Group {
+  private createPlaceholder(eid: number, isBuilding: boolean = false): THREE.Group {
     const group = new THREE.Group();
     const ownerId = Owner.playerId[eid];
     const color = HOUSE_COLORS[ownerId] ?? HOUSE_COLORS[0];
 
-    // Simple box placeholder
-    const geo = new THREE.BoxGeometry(1.2, 1.0, 1.2);
-    const mat = new THREE.MeshLambertMaterial({ color });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.y = 0.5;
-    mesh.castShadow = true;
-    group.add(mesh);
+    if (isBuilding) {
+      // Larger box placeholder for buildings
+      const geo = new THREE.BoxGeometry(3, 2, 3);
+      const mat = new THREE.MeshLambertMaterial({ color });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.y = 1.0;
+      mesh.castShadow = true;
+      group.add(mesh);
+    } else {
+      // Small box placeholder for units
+      const geo = new THREE.BoxGeometry(1.2, 1.0, 1.2);
+      const mat = new THREE.MeshLambertMaterial({ color });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.y = 0.5;
+      mesh.castShadow = true;
+      group.add(mesh);
+    }
 
     return group;
   }
 
-  setEntityModel(eid: number, xafName: string): void {
+  setEntityModel(eid: number, xafName: string, scale: number = 0.02): void {
     const template = this.modelTemplates.get(xafName);
-    if (!template) return;
+    if (!template) {
+      // No template loaded — store pending in case model loads later
+      this.pendingModels.set(eid, { xafName, scale });
+      return;
+    }
 
     const existing = this.entityObjects.get(eid);
-    if (!existing) return;
+    if (!existing) {
+      // Visual not yet created — defer until createVisual runs
+      this.pendingModels.set(eid, { xafName, scale });
+      return;
+    }
 
     // Remove placeholder children (keep selection circle)
     const circle = this.selectionCircles.get(eid);
@@ -152,8 +203,7 @@ export class UnitRenderer {
 
     // Add cloned model
     const clone = this.modelManager.cloneModel(template);
-    // Scale models down - game models are large
-    clone.scale.setScalar(0.02);
+    clone.scale.setScalar(scale);
     existing.add(clone);
 
     // Re-add selection circle
@@ -217,6 +267,7 @@ export class UnitRenderer {
     }
     this.selectionCircles.delete(eid);
     this.healthBars.delete(eid);
+    this.pendingModels.delete(eid);
   }
 
   getEntityAtScreen(screenX: number, screenY: number): number | null {
