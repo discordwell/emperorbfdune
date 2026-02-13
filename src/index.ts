@@ -1,6 +1,6 @@
 import { Game } from './core/Game';
 import { SceneManager } from './rendering/SceneManager';
-import { TerrainRenderer } from './rendering/TerrainRenderer';
+import { TerrainRenderer, MAP_SIZE } from './rendering/TerrainRenderer';
 import { InputManager } from './input/InputManager';
 import { parseRules, type GameRules } from './config/RulesParser';
 import { parseArtIni, type ArtEntry } from './config/ArtIniParser';
@@ -321,6 +321,8 @@ async function main() {
       const bullet = turret ? gameRules.bullets.get(turret.bullet) : null;
       Combat.attackRange[eid] = bullet ? bullet.maxRange * 2 : 12;
       Combat.rof[eid] = turret?.reloadCount ?? 45;
+      // Register in combat system so damage lookups work
+      combatSystem.registerUnit(eid, typeName);
     }
 
     addComponent(world, Armour, eid);
@@ -727,6 +729,37 @@ async function main() {
         if (nearBase) {
           Health.current[eid] = Math.min(Health.max[eid], Health.current[eid] + Health.max[eid] * 0.02);
         }
+      }
+    }
+
+    // Spice bloom: randomly spawn new spice fields every ~60 seconds
+    if (game.getTickCount() % 1500 === 0 && Math.random() < 0.5) {
+      // Find a random sand tile to bloom
+      const bx = 10 + Math.floor(Math.random() * (MAP_SIZE - 20));
+      const bz = 10 + Math.floor(Math.random() * (MAP_SIZE - 20));
+      const tType = terrain.getTerrainType(bx, bz);
+      // Only bloom on sand or dunes
+      if (tType === 0 || tType === 4) { // Sand=0, Dunes=4
+        // Create a 3-5 tile radius spice field
+        const radius = 3 + Math.floor(Math.random() * 3);
+        for (let dz = -radius; dz <= radius; dz++) {
+          for (let dx = -radius; dx <= radius; dx++) {
+            if (dx * dx + dz * dz > radius * radius) continue;
+            const tx = bx + dx;
+            const tz = bz + dz;
+            if (tx < 0 || tx >= MAP_SIZE || tz < 0 || tz >= MAP_SIZE) continue;
+            const existing = terrain.getSpice(tx, tz);
+            const dist = Math.sqrt(dx * dx + dz * dz);
+            const amount = Math.min(1.0, existing + (1.0 - dist / radius) * 0.8);
+            terrain.setSpice(tx, tz, amount);
+          }
+        }
+        terrain.updateSpiceVisuals();
+        // Visual explosion at bloom site
+        const worldX = bx * 2; // Approximate tile->world
+        const worldZ = bz * 2;
+        effectsManager.spawnExplosion(worldX, 0.5, worldZ, 'medium');
+        selectionPanel.addMessage('Spice bloom detected!', '#ff8800');
       }
     }
 

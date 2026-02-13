@@ -24,6 +24,8 @@ export class CombatSystem implements GameSystem {
   private attackMoveDestinations = new Map<number, { x: number; z: number }>();
   // Buildings disabled due to low power
   private disabledBuildings = new Set<number>();
+  // Unit stances: 0=aggressive (chase), 1=defensive (fight in range, don't chase), 2=hold (fire only)
+  private stances = new Map<number, number>();
 
   constructor(rules: GameRules) {
     this.rules = rules;
@@ -43,6 +45,14 @@ export class CombatSystem implements GameSystem {
     else this.disabledBuildings.delete(eid);
   }
 
+  setStance(eid: number, stance: number): void {
+    this.stances.set(eid, stance);
+  }
+
+  getStance(eid: number): number {
+    return this.stances.get(eid) ?? 1; // Default: defensive
+  }
+
   init(_world: World): void {
     this.armourTypes = this.rules.armourTypes;
   }
@@ -55,6 +65,7 @@ export class CombatSystem implements GameSystem {
     this.unitTypeMap.delete(eid);
     this.attackMoveEntities.delete(eid);
     this.attackMoveDestinations.delete(eid);
+    this.stances.delete(eid);
   }
 
   setAttackMove(eids: number[]): void {
@@ -147,6 +158,9 @@ export class CombatSystem implements GameSystem {
       const range = Combat.attackRange[eid];
 
       if (dist > range) {
+        const stance = this.stances.get(eid) ?? 1;
+        // Hold position (stance=2): never move to chase
+        if (stance === 2) continue;
         // Move toward target if we have an explicit attack target
         if (hasComponent(world, AttackTarget, eid) && AttackTarget.active[eid] === 1) {
           if (hasComponent(world, MoveTarget, eid)) {
@@ -159,7 +173,15 @@ export class CombatSystem implements GameSystem {
           MoveTarget.x[eid] = Position.x[targetEid];
           MoveTarget.z[eid] = Position.z[targetEid];
           MoveTarget.active[eid] = 1;
+        } else if (stance === 0) {
+          // Aggressive: chase auto-acquired targets
+          if (hasComponent(world, MoveTarget, eid)) {
+            MoveTarget.x[eid] = Position.x[targetEid];
+            MoveTarget.z[eid] = Position.z[targetEid];
+            MoveTarget.active[eid] = 1;
+          }
         }
+        // Defensive (stance=1): don't chase auto-acquired targets that are out of range
         continue;
       }
 
@@ -192,9 +214,12 @@ export class CombatSystem implements GameSystem {
     let baseDamage = 100; // Default
     const typeName = this.unitTypeMap.get(attackerEid);
     if (typeName) {
+      // Look up turret from either unit or building definition
       const unitDef = this.rules.units.get(typeName);
-      if (unitDef?.turretAttach) {
-        const turret = this.rules.turrets.get(unitDef.turretAttach);
+      const bldgDef = this.rules.buildings.get(typeName);
+      const turretName = unitDef?.turretAttach ?? bldgDef?.turretAttach;
+      if (turretName) {
+        const turret = this.rules.turrets.get(turretName);
         if (turret?.bullet) {
           const bullet = this.rules.bullets.get(turret.bullet);
           if (bullet) {

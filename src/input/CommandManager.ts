@@ -172,6 +172,26 @@ export class CommandManager {
         }
         break;
 
+      case 'v':
+        // Cycle stance: aggressive(0) -> defensive(1) -> hold(2) -> aggressive
+        if (selected.length > 0 && this.combatSystem) {
+          const current = this.combatSystem.getStance(selected[0]);
+          const next = (current + 1) % 3;
+          for (const eid of selected) {
+            this.combatSystem.setStance(eid, next);
+          }
+          const names = ['Aggressive', 'Defensive', 'Hold Position'];
+          this.audioManager?.playSfx('select');
+          // Use a custom DOM element for stance message
+          const modeEl = document.getElementById('command-mode');
+          if (modeEl) {
+            modeEl.style.display = 'block';
+            modeEl.textContent = `Stance: ${names[next]}`;
+            setTimeout(() => { if (modeEl.textContent?.startsWith('Stance:')) modeEl.style.display = 'none'; }, 1500);
+          }
+        }
+        break;
+
       case 'escape':
         if (this.commandMode !== 'normal') {
           this.commandMode = 'normal';
