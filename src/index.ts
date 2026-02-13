@@ -109,6 +109,7 @@ async function main() {
   const productionSystem = new ProductionSystem(gameRules, harvestSystem);
   const minimapRenderer = new MinimapRenderer(terrain, scene);
   const fogOfWar = new FogOfWar(scene, 0);
+  minimapRenderer.setFogOfWar(fogOfWar);
   const effectsManager = new EffectsManager(scene);
   const victorySystem = new VictorySystem(audioManager, 0);
 
@@ -509,6 +510,14 @@ async function main() {
       const powerMult = powerGen >= powerUsed ? 1.0 : 0.5;
       productionSystem.setPowerMultiplier(0, powerMult);
       combatSystem.setPowerMultiplier(0, powerMult);
+      if (powerMult < 1.0 && powerUsed > 0 && game.getTickCount() % 250 === 0) {
+        audioManager.playSfx('powerlow');
+        selectionPanel.addMessage('Low power! Build more Windtraps', '#ff4444');
+      }
+
+      // AI always gets full power (simplification - AI builds enough windtraps)
+      productionSystem.setPowerMultiplier(1, 1.0);
+      combatSystem.setPowerMultiplier(1, 1.0);
     }
 
     // Pause game on victory/defeat
@@ -603,6 +612,8 @@ async function main() {
   spawnBuilding(world, `${ex}SmWindtrap`, 1, 206, 200);
   spawnBuilding(world, `${ex}Barracks`, 1, 194, 200);
   spawnBuilding(world, `${ex}Factory`, 1, 200, 206);
+  spawnBuilding(world, `${ex}SmWindtrap`, 1, 206, 206);
+  spawnBuilding(world, `${ex}Refinery`, 1, 194, 206);
 
   // Enemy starting units
   const enemyInfantry = [...gameRules.units.keys()].filter(n => n.startsWith(ex) && gameRules.units.get(n)?.infantry);
@@ -613,6 +624,12 @@ async function main() {
   }
   for (let i = 0; i < 3 && i < enemyVehicles.length; i++) {
     spawnUnit(world, enemyVehicles[i], 1, 201 + i * 2, 212);
+  }
+
+  // Enemy harvester
+  const enemyHarvTypes = [...gameRules.units.keys()].filter(n => n.startsWith(ex) && (n.includes('Harv') || n.includes('harvester')));
+  if (enemyHarvTypes.length > 0) {
+    spawnUnit(world, enemyHarvTypes[0], 1, 195, 212);
   }
 
   // Start!

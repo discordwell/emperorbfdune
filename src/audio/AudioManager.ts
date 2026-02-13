@@ -18,7 +18,7 @@ const MUSIC_TRACKS: TrackInfo[] = [
 ];
 
 // Synthesized SFX using Web Audio API (no external files needed)
-type SfxType = 'select' | 'move' | 'attack' | 'explosion' | 'build' | 'sell' | 'error' | 'victory' | 'defeat';
+type SfxType = 'select' | 'move' | 'attack' | 'explosion' | 'build' | 'sell' | 'error' | 'victory' | 'defeat' | 'harvest' | 'shot' | 'powerlow';
 
 export class AudioManager {
   private audioContext: AudioContext | null = null;
@@ -27,6 +27,7 @@ export class AudioManager {
   private musicVolume = 0.3;
   private sfxVolume = 0.5;
   private muted = false;
+  private lastShotTime = 0;
   private playerFaction = 'AT';
   private musicStarted = false;
 
@@ -52,6 +53,14 @@ export class AudioManager {
     EventBus.on('unit:attack', () => this.playSfx('attack'));
     EventBus.on('unit:died', () => this.playSfx('explosion'));
     EventBus.on('production:complete', () => this.playSfx('build'));
+    EventBus.on('harvest:delivered', () => this.playSfx('harvest'));
+    EventBus.on('combat:fire', () => {
+      const now = Date.now();
+      if (now - this.lastShotTime > 100) { // Max 10 shot sounds/sec
+        this.lastShotTime = now;
+        this.playSfx('shot');
+      }
+    });
 
     // Start music on first user interaction
     const startMusic = () => {
@@ -164,6 +173,9 @@ export class AudioManager {
         case 'error': this.synthError(ctx); break;
         case 'victory': this.synthVictory(ctx); break;
         case 'defeat': this.synthDefeat(ctx); break;
+        case 'harvest': this.synthHarvest(ctx); break;
+        case 'shot': this.synthShot(ctx); break;
+        case 'powerlow': this.synthPowerLow(ctx); break;
       }
     } catch {
       // Audio not available
@@ -180,9 +192,10 @@ export class AudioManager {
   private synthSelect(ctx: AudioContext): void {
     const osc = ctx.createOscillator();
     const gain = this.makeGain(ctx, 0.15);
+    const p = this.randPitch();
     osc.type = 'sine';
-    osc.frequency.setValueAtTime(800, ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(1200, ctx.currentTime + 0.08);
+    osc.frequency.setValueAtTime(800 * p, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(1200 * p, ctx.currentTime + 0.08);
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
     osc.connect(gain);
     osc.start(ctx.currentTime);
@@ -303,6 +316,63 @@ export class AudioManager {
       osc.start(t + i * 0.2);
       osc.stop(t + i * 0.2 + 0.5);
     });
+  }
+
+  // Pitch randomization factor (0.9 - 1.1)
+  private randPitch(): number {
+    return 0.9 + Math.random() * 0.2;
+  }
+
+  private synthHarvest(ctx: AudioContext): void {
+    // Cash register sound - ascending ding
+    const t = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = this.makeGain(ctx, 0.12);
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(500 * this.randPitch(), t);
+    osc.frequency.exponentialRampToValueAtTime(1500, t + 0.1);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+    osc.connect(gain);
+    osc.start(t);
+    osc.stop(t + 0.2);
+  }
+
+  private synthShot(ctx: AudioContext): void {
+    // Quick pop — randomized pitch for variety
+    const t = ctx.currentTime;
+    const baseFreq = 300 * this.randPitch();
+    const bufferSize = ctx.sampleRate * 0.05;
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.3));
+    }
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    const gain = this.makeGain(ctx, 0.06);
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.value = baseFreq;
+    filter.Q.value = 2;
+    source.connect(filter);
+    filter.connect(gain);
+    source.start(t);
+  }
+
+  private synthPowerLow(ctx: AudioContext): void {
+    // Warning beep — two descending tones
+    const t = ctx.currentTime;
+    for (let i = 0; i < 2; i++) {
+      const osc = ctx.createOscillator();
+      const gain = this.makeGain(ctx, 0.15);
+      osc.type = 'square';
+      osc.frequency.value = 500 - i * 100;
+      gain.gain.setValueAtTime(0.15 * this.sfxVolume, t + i * 0.15);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + i * 0.15 + 0.1);
+      osc.connect(gain);
+      osc.start(t + i * 0.15);
+      osc.stop(t + i * 0.15 + 0.12);
+    }
   }
 
   // --- Controls ---

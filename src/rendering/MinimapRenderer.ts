@@ -1,7 +1,10 @@
 import type { TerrainRenderer } from './TerrainRenderer';
 import { TerrainType, MAP_SIZE } from './TerrainRenderer';
 import type { SceneManager } from './SceneManager';
-import { Position, Owner, unitQuery, buildingQuery, type World } from '../core/ECS';
+import type { FogOfWar } from './FogOfWar';
+import { FOG_VISIBLE, FOG_EXPLORED } from './FogOfWar';
+import { Position, Owner, Health, unitQuery, buildingQuery, type World } from '../core/ECS';
+import { worldToTile } from '../utils/MathUtils';
 
 const MINIMAP_COLORS: Record<TerrainType, string> = {
   [TerrainType.Sand]: '#C2A54F',
@@ -24,6 +27,7 @@ export class MinimapRenderer {
   private ctx: CanvasRenderingContext2D;
   private terrain: TerrainRenderer;
   private sceneManager: SceneManager;
+  private fogOfWar: FogOfWar | null = null;
   private terrainImageData: ImageData | null = null;
 
   constructor(terrain: TerrainRenderer, sceneManager: SceneManager) {
@@ -39,6 +43,10 @@ export class MinimapRenderer {
     this.canvas.addEventListener('mousemove', this.onDrag);
 
     this.renderTerrain();
+  }
+
+  setFogOfWar(fog: FogOfWar): void {
+    this.fogOfWar = fog;
   }
 
   private renderTerrain(): void {
@@ -62,26 +70,57 @@ export class MinimapRenderer {
       this.ctx.putImageData(this.terrainImageData, 0, 0);
     }
 
+    // Apply fog of war overlay
+    if (this.fogOfWar && this.fogOfWar.isEnabled()) {
+      const vis = this.fogOfWar.getVisibility();
+      const tileScale = 200 / MAP_SIZE;
+      this.ctx.fillStyle = 'rgba(0,0,0,0.7)';
+      for (let tz = 0; tz < MAP_SIZE; tz++) {
+        for (let tx = 0; tx < MAP_SIZE; tx++) {
+          const v = vis[tz * MAP_SIZE + tx];
+          if (v === FOG_VISIBLE) continue; // Fully visible
+          if (v === FOG_EXPLORED) {
+            this.ctx.globalAlpha = 0.4;
+          } else {
+            this.ctx.globalAlpha = 0.85;
+          }
+          this.ctx.fillRect(tx * tileScale, tz * tileScale, Math.ceil(tileScale), Math.ceil(tileScale));
+        }
+      }
+      this.ctx.globalAlpha = 1.0;
+    }
+
     const scale = 200 / (MAP_SIZE * 2); // World units to minimap pixels
 
     // Draw units
     const units = unitQuery(world);
     for (const eid of units) {
+      if (Health.current[eid] <= 0) continue;
+      const owner = Owner.playerId[eid];
+      // Only show enemy units if visible through fog
+      if (owner !== 0 && this.fogOfWar && this.fogOfWar.isEnabled()) {
+        const tile = worldToTile(Position.x[eid], Position.z[eid]);
+        if (!this.fogOfWar.isTileVisible(tile.tx, tile.tz)) continue;
+      }
       const px = Position.x[eid] * scale;
       const pz = Position.z[eid] * scale;
-      const owner = Owner.playerId[eid];
       this.ctx.fillStyle = PLAYER_COLORS[owner] ?? '#fff';
-      this.ctx.fillRect(px - 1, pz - 1, 2, 2);
+      this.ctx.fillRect(px - 1, pz - 1, 3, 3);
     }
 
     // Draw buildings
     const buildings = buildingQuery(world);
     for (const eid of buildings) {
+      if (Health.current[eid] <= 0) continue;
+      const owner = Owner.playerId[eid];
+      if (owner !== 0 && this.fogOfWar && this.fogOfWar.isEnabled()) {
+        const tile = worldToTile(Position.x[eid], Position.z[eid]);
+        if (!this.fogOfWar.isTileVisible(tile.tx, tile.tz)) continue;
+      }
       const px = Position.x[eid] * scale;
       const pz = Position.z[eid] * scale;
-      const owner = Owner.playerId[eid];
       this.ctx.fillStyle = PLAYER_COLORS[owner] ?? '#fff';
-      this.ctx.fillRect(px - 2, pz - 2, 4, 4);
+      this.ctx.fillRect(px - 2, pz - 2, 5, 5);
     }
 
     // Draw camera viewport

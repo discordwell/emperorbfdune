@@ -225,8 +225,9 @@ export class UnitRenderer {
   private updateHealthBar(eid: number): void {
     if (Health.max[eid] <= 0) return;
     const ratio = Health.current[eid] / Health.max[eid];
-    if (ratio >= 1) {
-      // Full health, hide bar
+    const isSelected = Selectable.selected[eid] === 1;
+    if (ratio >= 1 && !isSelected) {
+      // Full health and not selected, hide bar
       const bar = this.healthBars.get(eid);
       if (bar) bar.visible = false;
       return;
