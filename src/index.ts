@@ -22,7 +22,7 @@ import { AudioManager } from './audio/AudioManager';
 import { FogOfWar } from './rendering/FogOfWar';
 import { BuildingPlacement } from './input/BuildingPlacement';
 import { VictorySystem, GameStats } from './ui/VictoryScreen';
-import { HouseSelect, type HouseChoice, type SubhouseChoice, type Difficulty, type MapChoice, type GameMode } from './ui/HouseSelect';
+import { HouseSelect, type HouseChoice, type SubhouseChoice, type Difficulty, type MapChoice, type GameMode, type SkirmishOptions } from './ui/HouseSelect';
 import { CampaignMap } from './ui/CampaignMap';
 import { SelectionPanel } from './ui/SelectionPanel';
 import { EffectsManager } from './rendering/EffectsManager';
@@ -119,12 +119,13 @@ async function main() {
 
   // Check for saved game to load
   const shouldLoad = localStorage.getItem('ebfd_load') === '1';
-  const savedJson = shouldLoad ? localStorage.getItem('ebfd_save') : null;
+  const savedJson = shouldLoad ? (localStorage.getItem('ebfd_load_data') ?? localStorage.getItem('ebfd_save')) : null;
   let savedGame: SaveData | null = null;
   if (savedJson) {
     try { savedGame = JSON.parse(savedJson); } catch { /* corrupted save */ }
   }
-  localStorage.removeItem('ebfd_load'); // Clear the load flag
+  localStorage.removeItem('ebfd_load');
+  localStorage.removeItem('ebfd_load_data');
 
   // House selection screen (skip if loading)
   let house: HouseChoice;
@@ -219,6 +220,10 @@ async function main() {
   const gameStats = new GameStats();
   const victorySystem = new VictorySystem(audioManager, 0);
   victorySystem.setStats(gameStats);
+  victorySystem.setBuildingTypeNames(buildingTypeNames);
+  if (house.skirmishOptions?.victoryCondition) {
+    victorySystem.setVictoryCondition(house.skirmishOptions.victoryCondition);
+  }
 
   // Campaign progress tracking
   if (house.gameMode === 'campaign' && house.campaignTerritoryId !== undefined) {
@@ -235,6 +240,19 @@ async function main() {
   // Override AI unit pool for the enemy faction
   aiPlayer.setUnitPool(house.enemyPrefix);
   aiPlayer.setDifficulty(house.difficulty ?? 'normal');
+  // Apply skirmish options
+  if (house.skirmishOptions) {
+    const opts = house.skirmishOptions;
+    // Override starting credits (default is 5000 set in HarvestSystem.init)
+    const extraCredits = opts.startingCredits - 5000;
+    if (extraCredits !== 0) {
+      harvestSystem.addSolaris(0, extraCredits);
+      harvestSystem.addSolaris(1, extraCredits);
+    }
+    // Apply unit cap
+    productionSystem.setMaxUnits(opts.unitCap);
+  }
+
   // Hard difficulty: AI gets resource bonus
   if (house.difficulty === 'hard') {
     harvestSystem.addSolaris(1, 3000);
@@ -489,6 +507,7 @@ async function main() {
     const eid = spawnBuilding(world, typeName, 0, x, z);
     // Animate construction over ~3 seconds (75 ticks at 25 TPS)
     if (eid >= 0) {
+      audioManager.playSfx('place');
       const def = gameRules.buildings.get(typeName);
       const duration = def ? Math.max(25, Math.floor(def.buildTime * 0.5)) : 75;
       unitRenderer.startConstruction(eid, duration);
@@ -611,12 +630,16 @@ async function main() {
     if (Owner.playerId[entityId] === 0) {
       const rankNames = ['', 'Veteran', 'Elite', 'Heroic'];
       selectionPanel.addMessage(`Unit promoted to ${rankNames[rank]}!`, '#ffd700');
+      audioManager.playSfx('select');
     }
+    // Visual effect at unit position
+    effectsManager.spawnExplosion(Position.x[entityId], 0.5, Position.z[entityId], 'small');
   });
 
   // Sandworm events
   EventBus.on('worm:emerge', () => {
     selectionPanel.addMessage('Worm sign detected!', '#ff8800');
+    audioManager.playSfx('worm');
   });
   EventBus.on('worm:eat', ({ ownerId }) => {
     if (ownerId === 0) {
@@ -636,7 +659,7 @@ async function main() {
     } else {
       selectionPanel.addMessage('Units under attack!', '#ff6644');
     }
-    audioManager.playSfx('error');
+    audioManager.playSfx('underattack');
     // Pulse minimap border
     const minimapEl = document.getElementById('minimap-container');
     if (minimapEl) {
@@ -703,6 +726,12 @@ async function main() {
     }
   });
 
+  // Track credits spent on production
+  EventBus.on('production:started', ({ unitType, owner }: { unitType: string; owner: number }) => {
+    const def = gameRules.units.get(unitType) ?? gameRules.buildings.get(unitType);
+    if (def) gameStats.recordCreditsSpent(owner, def.cost);
+  });
+
   // Auto-spawn produced units
   EventBus.on('production:complete', ({ unitType, owner }) => {
     const world = game.getWorld();
@@ -725,17 +754,46 @@ async function main() {
         buildingPlacement.startPlacement(unitType);
       } else {
         // AI auto-places buildings near base
-        const x = 200 + (Math.random() - 0.5) * 20;
-        const z = 200 + (Math.random() - 0.5) * 20;
+        const aiBase = aiPlayer.getBasePosition();
+        const x = aiBase.x + (Math.random() - 0.5) * 20;
+        const z = aiBase.z + (Math.random() - 0.5) * 20;
         spawnBuilding(world, unitType, owner, x, z);
       }
     } else {
-      // Spawn unit near appropriate building
-      const prefix = owner === 0 ? house.prefix : house.enemyPrefix;
-      const baseX = owner === 0 ? 55 : 200;
-      const baseZ = owner === 0 ? 55 : 200;
-      const x = baseX + (Math.random() - 0.5) * 10;
-      const z = baseZ + (Math.random() - 0.5) * 10;
+      // Spawn unit near appropriate building — find a barracks/factory owned by this player
+      let baseX: number, baseZ: number;
+      const spawnBuildings = buildingQuery(world);
+      let found = false;
+      for (const bid of spawnBuildings) {
+        if (Owner.playerId[bid] !== owner) continue;
+        if (Health.current[bid] <= 0) continue;
+        const bTypeId = BuildingType.id[bid];
+        const bName = buildingTypeNames[bTypeId] ?? '';
+        if (bName.includes('Barracks') || bName.includes('Factory')) {
+          baseX = Position.x[bid];
+          baseZ = Position.z[bid];
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        // Fallback: use ConYard or any building
+        for (const bid of spawnBuildings) {
+          if (Owner.playerId[bid] !== owner) continue;
+          if (Health.current[bid] <= 0) continue;
+          baseX = Position.x[bid];
+          baseZ = Position.z[bid];
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        const aiBase = aiPlayer.getBasePosition();
+        baseX = owner === 0 ? 55 : aiBase.x;
+        baseZ = owner === 0 ? 55 : aiBase.z;
+      }
+      const x = baseX! + (Math.random() - 0.5) * 10;
+      const z = baseZ! + (Math.random() - 0.5) * 10;
       const eid = spawnUnit(world, unitType, owner, x, z);
 
       // Send to rally point if player has one set
@@ -756,6 +814,7 @@ async function main() {
   const powerEl = document.getElementById('power-status');
   const unitCountEl = document.getElementById('unit-count');
   const commandModeEl = document.getElementById('command-mode');
+  const lowPowerEl = document.getElementById('low-power-warning');
 
   // Crate/power-up state
   let nextCrateId = 0;
@@ -808,6 +867,20 @@ async function main() {
       }
     }
 
+    // Update cursor based on context
+    const canvas = document.getElementById('game-canvas');
+    if (canvas) {
+      if (mode === 'attack-move') {
+        canvas.style.cursor = 'crosshair';
+      } else if (mode === 'patrol') {
+        canvas.style.cursor = 'crosshair';
+      } else if (selectionManager.getSelectedEntities().length > 0) {
+        canvas.style.cursor = 'default';
+      } else {
+        canvas.style.cursor = 'default';
+      }
+    }
+
     // Update power and unit count every 25 ticks (~1 second)
     if (game.getTickCount() % 25 === 0) {
       let powerGen = 0;
@@ -850,6 +923,7 @@ async function main() {
       // Power affects gameplay: slow production and turrets when in deficit
       const lowPower = powerGen < powerUsed;
       const powerMult = lowPower ? 0.5 : 1.0;
+      if (lowPowerEl) lowPowerEl.style.display = lowPower ? 'block' : 'none';
       productionSystem.setPowerMultiplier(0, powerMult);
       combatSystem.setPowerMultiplier(0, powerMult);
 
@@ -1037,6 +1111,48 @@ async function main() {
       }
     }
 
+    // Repair vehicles: units with canBeRepaired tag that have "Repair" in name heal nearby friendlies
+    if (game.getTickCount() % 25 === 0) {
+      const allUnits = unitQuery(world);
+      for (const eid of allUnits) {
+        if (Health.current[eid] <= 0) continue;
+        const typeId = UnitType.id[eid];
+        const typeName = unitTypeNames[typeId];
+        if (!typeName || !typeName.toLowerCase().includes('repair')) continue;
+
+        const owner = Owner.playerId[eid];
+        const rx = Position.x[eid];
+        const rz = Position.z[eid];
+
+        // Heal all friendly units within 8 units, 3% max HP per tick
+        for (const other of allUnits) {
+          if (other === eid) continue;
+          if (Owner.playerId[other] !== owner) continue;
+          if (Health.current[other] <= 0) continue;
+          if (Health.current[other] >= Health.max[other]) continue;
+          const dx = Position.x[other] - rx;
+          const dz = Position.z[other] - rz;
+          if (dx * dx + dz * dz < 64) { // 8 unit radius
+            Health.current[other] = Math.min(Health.max[other],
+              Health.current[other] + Health.max[other] * 0.03);
+          }
+        }
+
+        // Also heal nearby buildings
+        const nearBlds = buildingQuery(world);
+        for (const bid of nearBlds) {
+          if (Owner.playerId[bid] !== owner) continue;
+          if (Health.current[bid] <= 0 || Health.current[bid] >= Health.max[bid]) continue;
+          const dx = Position.x[bid] - rx;
+          const dz = Position.z[bid] - rz;
+          if (dx * dx + dz * dz < 64) {
+            Health.current[bid] = Math.min(Health.max[bid],
+              Health.current[bid] + Health.max[bid] * 0.02);
+          }
+        }
+      }
+    }
+
     // Spice bloom: randomly spawn new spice fields every ~60 seconds
     if (game.getTickCount() % 1500 === 0 && Math.random() < 0.5) {
       // Find a random sand tile to bloom
@@ -1158,6 +1274,30 @@ async function main() {
       EventBus.on('game:tick', stormDamage);
     }
 
+    // Sample stats for post-game graphs every 250 ticks (~10 seconds)
+    if (game.getTickCount() % 250 === 0) {
+      const allU = unitQuery(world);
+      let p0units = 0, p1units = 0;
+      for (const uid of allU) {
+        if (Health.current[uid] <= 0) continue;
+        if (Owner.playerId[uid] === 0) p0units++;
+        else if (Owner.playerId[uid] === 1) p1units++;
+      }
+      gameStats.sample(
+        game.getTickCount(),
+        [harvestSystem.getSolaris(0), harvestSystem.getSolaris(1)],
+        [p0units, p1units],
+      );
+    }
+
+    // Autosave every 2 minutes (3000 ticks at 25 TPS)
+    if (game.getTickCount() > 0 && game.getTickCount() % 3000 === 0 && victorySystem.getOutcome() === 'playing') {
+      const autoSaveData = buildSaveData();
+      localStorage.setItem('ebfd_autosave', JSON.stringify(autoSaveData));
+      localStorage.setItem('ebfd_autosave_time', new Date().toLocaleString());
+      selectionPanel.addMessage('Autosaved', '#888');
+    }
+
     // Pause game on victory/defeat
     if (victorySystem.getOutcome() !== 'playing') {
       game.pause();
@@ -1215,8 +1355,21 @@ async function main() {
     } else if (e.key === 'Escape' && helpOverlay?.style.display === 'block') {
       helpOverlay.style.display = 'none';
     } else if (e.key === 'h' && !e.ctrlKey && !e.altKey) {
-      // Snap to base (construction yard)
-      scene.cameraTarget.set(50, 0, 50);
+      // Snap to base (find player's ConYard)
+      const w = game.getWorld();
+      const blds = buildingQuery(w);
+      let baseX = 50, baseZ = 50;
+      for (const bid of blds) {
+        if (Owner.playerId[bid] !== 0 || Health.current[bid] <= 0) continue;
+        const bTypeId = BuildingType.id[bid];
+        const bName = buildingTypeNames[bTypeId] ?? '';
+        if (bName.includes('ConYard')) {
+          baseX = Position.x[bid];
+          baseZ = Position.z[bid];
+          break;
+        }
+      }
+      scene.cameraTarget.set(baseX, 0, baseZ);
       scene.updateCameraPosition();
     } else if (e.key === ' ' && !e.ctrlKey) {
       // Snap to last event
@@ -1304,7 +1457,7 @@ async function main() {
     }
   });
 
-  function saveGame(): void {
+  function buildSaveData(): SaveData {
     const w = game.getWorld();
     const entities: SavedEntity[] = [];
 
@@ -1357,7 +1510,7 @@ async function main() {
       spice.push(row);
     }
 
-    const save: SaveData = {
+    return {
       version: 1,
       tick: game.getTickCount(),
       housePrefix: house.prefix,
@@ -1368,12 +1521,25 @@ async function main() {
       entities,
       spice,
     };
+  }
 
+  function saveGame(): void {
+    const save = buildSaveData();
     localStorage.setItem('ebfd_save', JSON.stringify(save));
+    localStorage.setItem('ebfd_save_time', new Date().toLocaleString());
     selectionPanel.addMessage('Game saved! (F8 to load)', '#44ff44');
   }
 
   let pauseMenu: HTMLDivElement | null = null;
+
+  // Settings persistence
+  const savedSettings = JSON.parse(localStorage.getItem('ebfd_settings') ?? '{}');
+  if (savedSettings.musicVol !== undefined) audioManager.setMusicVolume(savedSettings.musicVol);
+  if (savedSettings.sfxVol !== undefined) audioManager.setSfxVolume(savedSettings.sfxVol);
+
+  function saveSettings(musicVol: number, sfxVol: number, scrollSpeed: number): void {
+    localStorage.setItem('ebfd_settings', JSON.stringify({ musicVol, sfxVol, scrollSpeed }));
+  }
 
   function showPauseMenu(): void {
     pauseMenu = document.createElement('div');
@@ -1395,13 +1561,8 @@ async function main() {
 
     const buttons = [
       { label: 'Resume', action: () => { pauseMenu?.remove(); pauseMenu = null; game.pause(); } },
-      { label: 'Save Game (F5)', action: () => { saveGame(); } },
-      { label: 'Load Game (F8)', action: () => {
-        if (localStorage.getItem('ebfd_save')) {
-          localStorage.setItem('ebfd_load', '1');
-          window.location.reload();
-        }
-      }},
+      { label: 'Settings', action: () => { showSettingsPanel(); } },
+      { label: 'Save / Load', action: () => { showSaveLoadPanel(); } },
       { label: 'Restart', action: () => { window.location.reload(); } },
     ];
 
@@ -1416,6 +1577,210 @@ async function main() {
     }
 
     document.body.appendChild(pauseMenu);
+  }
+
+  function showSaveLoadPanel(): void {
+    if (!pauseMenu) return;
+    pauseMenu.innerHTML = '';
+
+    const panel = document.createElement('div');
+    panel.style.cssText = 'background:#1a1a3e;border:1px solid #555;padding:24px 32px;border-radius:4px;min-width:360px;';
+
+    const title = document.createElement('div');
+    title.textContent = 'SAVE / LOAD';
+    title.style.cssText = 'color:#d4a840;font-size:24px;font-weight:bold;text-align:center;margin-bottom:20px;';
+    panel.appendChild(title);
+
+    const slotKeys = ['ebfd_save', 'ebfd_save_2', 'ebfd_save_3'];
+    const slotLabels = ['Slot 1 (F5)', 'Slot 2', 'Slot 3'];
+
+    for (let i = 0; i < slotKeys.length; i++) {
+      const key = slotKeys[i];
+      const raw = localStorage.getItem(key);
+      const timeKey = key + '_time';
+      const timeStr = localStorage.getItem(timeKey) ?? '';
+      const hasSave = !!raw;
+
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:8px;';
+
+      const label = document.createElement('div');
+      label.style.cssText = 'color:#ccc;font-size:13px;flex:1;';
+      label.textContent = hasSave ? `${slotLabels[i]} — ${timeStr}` : `${slotLabels[i]} — Empty`;
+      row.appendChild(label);
+
+      const saveBtn = document.createElement('button');
+      saveBtn.textContent = 'Save';
+      saveBtn.style.cssText = 'padding:4px 12px;background:#1a3e1a;border:1px solid #4a4;color:#ccc;cursor:pointer;font-size:12px;';
+      saveBtn.onmouseenter = () => { saveBtn.style.borderColor = '#8f8'; };
+      saveBtn.onmouseleave = () => { saveBtn.style.borderColor = '#4a4'; };
+      saveBtn.onclick = () => {
+        const data = buildSaveData();
+        localStorage.setItem(key, JSON.stringify(data));
+        localStorage.setItem(timeKey, new Date().toLocaleString());
+        selectionPanel.addMessage(`Saved to ${slotLabels[i]}`, '#44ff44');
+        showSaveLoadPanel(); // Refresh
+      };
+      row.appendChild(saveBtn);
+
+      const loadBtn = document.createElement('button');
+      loadBtn.textContent = 'Load';
+      loadBtn.style.cssText = `padding:4px 12px;background:#1a1a3e;border:1px solid ${hasSave ? '#44f' : '#333'};color:${hasSave ? '#ccc' : '#555'};cursor:${hasSave ? 'pointer' : 'default'};font-size:12px;`;
+      if (hasSave) {
+        loadBtn.onmouseenter = () => { loadBtn.style.borderColor = '#88f'; };
+        loadBtn.onmouseleave = () => { loadBtn.style.borderColor = '#44f'; };
+        loadBtn.onclick = () => {
+          localStorage.setItem('ebfd_load_data', raw!);
+          localStorage.setItem('ebfd_load', '1');
+          window.location.reload();
+        };
+      }
+      row.appendChild(loadBtn);
+
+      panel.appendChild(row);
+    }
+
+    // Autosave slot (read-only, load only)
+    const autoRaw = localStorage.getItem('ebfd_autosave');
+    const autoTime = localStorage.getItem('ebfd_autosave_time') ?? '';
+    const hasAuto = !!autoRaw;
+
+    const autoRow = document.createElement('div');
+    autoRow.style.cssText = 'display:flex;align-items:center;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid #333;';
+
+    const autoLabel = document.createElement('div');
+    autoLabel.style.cssText = 'color:#888;font-size:13px;flex:1;';
+    autoLabel.textContent = hasAuto ? `Autosave — ${autoTime}` : 'Autosave — None';
+    autoRow.appendChild(autoLabel);
+
+    const autoLoadBtn = document.createElement('button');
+    autoLoadBtn.textContent = 'Load';
+    autoLoadBtn.style.cssText = `padding:4px 12px;background:#1a1a3e;border:1px solid ${hasAuto ? '#44f' : '#333'};color:${hasAuto ? '#ccc' : '#555'};cursor:${hasAuto ? 'pointer' : 'default'};font-size:12px;`;
+    if (hasAuto) {
+      autoLoadBtn.onmouseenter = () => { autoLoadBtn.style.borderColor = '#88f'; };
+      autoLoadBtn.onmouseleave = () => { autoLoadBtn.style.borderColor = '#44f'; };
+      autoLoadBtn.onclick = () => {
+        localStorage.setItem('ebfd_load_data', autoRaw!);
+        localStorage.setItem('ebfd_load', '1');
+        window.location.reload();
+      };
+    }
+    autoRow.appendChild(autoLoadBtn);
+    panel.appendChild(autoRow);
+
+    // Back button
+    const backBtn = document.createElement('button');
+    backBtn.textContent = 'Back';
+    backBtn.style.cssText = 'display:block;width:100%;padding:10px;background:#2a2a4e;border:1px solid #555;color:#ccc;cursor:pointer;font-size:14px;margin-top:16px;';
+    backBtn.onmouseenter = () => { backBtn.style.borderColor = '#88f'; };
+    backBtn.onmouseleave = () => { backBtn.style.borderColor = '#555'; };
+    backBtn.onclick = () => {
+      pauseMenu?.remove();
+      pauseMenu = null;
+      showPauseMenu();
+    };
+    panel.appendChild(backBtn);
+
+    pauseMenu.appendChild(panel);
+  }
+
+  function showSettingsPanel(): void {
+    if (!pauseMenu) return;
+    // Clear pause menu content and show settings
+    pauseMenu.innerHTML = '';
+
+    const panel = document.createElement('div');
+    panel.style.cssText = 'background:#1a1a3e;border:1px solid #555;padding:24px 32px;border-radius:4px;min-width:300px;';
+
+    const title = document.createElement('div');
+    title.textContent = 'SETTINGS';
+    title.style.cssText = 'color:#d4a840;font-size:24px;font-weight:bold;text-align:center;margin-bottom:20px;';
+    panel.appendChild(title);
+
+    // Music volume slider
+    const currentSettings = JSON.parse(localStorage.getItem('ebfd_settings') ?? '{"musicVol":0.3,"sfxVol":0.5,"scrollSpeed":1}');
+    let musicVol = currentSettings.musicVol ?? 0.3;
+    let sfxVol = currentSettings.sfxVol ?? 0.5;
+    let scrollSpd = currentSettings.scrollSpeed ?? 1;
+
+    const createSlider = (label: string, value: number, onChange: (v: number) => void): HTMLElement => {
+      const row = document.createElement('div');
+      row.style.cssText = 'margin-bottom:16px;';
+      const lbl = document.createElement('div');
+      lbl.style.cssText = 'color:#ccc;font-size:13px;margin-bottom:4px;display:flex;justify-content:space-between;';
+      const valLabel = document.createElement('span');
+      valLabel.textContent = `${Math.round(value * 100)}%`;
+      valLabel.style.color = '#8cf';
+      lbl.innerHTML = `<span>${label}</span>`;
+      lbl.appendChild(valLabel);
+      row.appendChild(lbl);
+      const slider = document.createElement('input');
+      slider.type = 'range';
+      slider.min = '0';
+      slider.max = '100';
+      slider.value = String(Math.round(value * 100));
+      slider.style.cssText = 'width:100%;accent-color:#d4a840;';
+      slider.oninput = () => {
+        const v = parseInt(slider.value) / 100;
+        valLabel.textContent = `${slider.value}%`;
+        onChange(v);
+      };
+      row.appendChild(slider);
+      return row;
+    };
+
+    panel.appendChild(createSlider('Music Volume', musicVol, (v) => {
+      musicVol = v;
+      audioManager.setMusicVolume(v);
+    }));
+
+    panel.appendChild(createSlider('SFX Volume', sfxVol, (v) => {
+      sfxVol = v;
+      audioManager.setSfxVolume(v);
+    }));
+
+    panel.appendChild(createSlider('Scroll Speed', scrollSpd, (v) => {
+      scrollSpd = v;
+    }));
+
+    // Game speed selector
+    const speedRow = document.createElement('div');
+    speedRow.style.cssText = 'margin-bottom:20px;';
+    const speedLabel = document.createElement('div');
+    speedLabel.textContent = 'Game Speed';
+    speedLabel.style.cssText = 'color:#ccc;font-size:13px;margin-bottom:4px;';
+    speedRow.appendChild(speedLabel);
+    const speedBtns = document.createElement('div');
+    speedBtns.style.cssText = 'display:flex;gap:4px;';
+    for (const { label, speed } of [{ label: 'Slow', speed: 0.5 }, { label: 'Normal', speed: 1.0 }, { label: 'Fast', speed: 2.0 }]) {
+      const btn = document.createElement('button');
+      btn.textContent = label;
+      btn.style.cssText = 'flex:1;padding:6px;background:#111;border:1px solid #444;color:#ccc;cursor:pointer;font-size:12px;';
+      btn.onclick = () => {
+        game.setSpeed(speed);
+        speedBtns.querySelectorAll('button').forEach(b => (b as HTMLElement).style.borderColor = '#444');
+        btn.style.borderColor = '#d4a840';
+      };
+      speedBtns.appendChild(btn);
+    }
+    speedRow.appendChild(speedBtns);
+    panel.appendChild(speedRow);
+
+    // Back button
+    const backBtn = document.createElement('button');
+    backBtn.textContent = 'Back';
+    backBtn.style.cssText = 'display:block;width:100%;padding:10px;background:#2a2a4e;border:1px solid #555;color:#ccc;cursor:pointer;font-size:14px;margin-top:8px;';
+    backBtn.onmouseenter = () => { backBtn.style.borderColor = '#88f'; };
+    backBtn.onmouseleave = () => { backBtn.style.borderColor = '#555'; };
+    backBtn.onclick = () => {
+      saveSettings(musicVol, sfxVol, scrollSpd);
+      pauseMenu?.remove();
+      pauseMenu = null;
+      showPauseMenu();
+    };
+    panel.appendChild(backBtn);
+
+    pauseMenu.appendChild(panel);
   }
 
   // --- SPAWN INITIAL ENTITIES ---
@@ -1477,13 +1842,29 @@ async function main() {
     console.log(`Restored ${savedGame.entities.length} entities from save (tick ${savedGame.tick})`);
   } else {
     // --- FRESH GAME ---
+    // Randomize starting positions: pick 2 opposite corners
+    const corners = [
+      { x: 50, z: 50 },   // Top-left
+      { x: 200, z: 50 },  // Top-right
+      { x: 50, z: 200 },  // Bottom-left
+      { x: 200, z: 200 }, // Bottom-right
+    ];
+    const playerCornerIdx = Math.floor(Math.random() * 4);
+    const enemyCornerIdx = 3 - playerCornerIdx; // Opposite corner
+    const playerBase = corners[playerCornerIdx];
+    const enemyBase = corners[enemyCornerIdx];
+
+    // Update AI target/base to match randomized positions
+    aiPlayer.setBasePosition(enemyBase.x, enemyBase.z);
+    aiPlayer.setTargetPosition(playerBase.x, playerBase.z);
+
     // Player base
     const px = house.prefix;
-    spawnBuilding(world, `${px}ConYard`, 0, 50, 50);
-    spawnBuilding(world, `${px}SmWindtrap`, 0, 56, 50);
-    spawnBuilding(world, `${px}Barracks`, 0, 44, 50);
-    spawnBuilding(world, `${px}Factory`, 0, 50, 56);
-    spawnBuilding(world, `${px}Refinery`, 0, 56, 56);
+    spawnBuilding(world, `${px}ConYard`, 0, playerBase.x, playerBase.z);
+    spawnBuilding(world, `${px}SmWindtrap`, 0, playerBase.x + 6, playerBase.z);
+    spawnBuilding(world, `${px}Barracks`, 0, playerBase.x - 6, playerBase.z);
+    spawnBuilding(world, `${px}Factory`, 0, playerBase.x, playerBase.z + 6);
+    spawnBuilding(world, `${px}Refinery`, 0, playerBase.x + 6, playerBase.z + 6);
 
     // Starting player units - find available unit types for the house
     const playerInfantry = [...gameRules.units.keys()].filter(n => n.startsWith(px) && gameRules.units.get(n)?.infantry);
@@ -1491,22 +1872,22 @@ async function main() {
 
     // Spawn 3 infantry
     for (let i = 0; i < 3 && i < playerInfantry.length; i++) {
-      spawnUnit(world, playerInfantry[i], 0, 45 + i * 2, 60);
+      spawnUnit(world, playerInfantry[i], 0, playerBase.x - 5 + i * 2, playerBase.z + 10);
     }
     // Spawn 4 vehicles
     for (let i = 0; i < 4 && i < playerVehicles.length; i++) {
-      spawnUnit(world, playerVehicles[i], 0, 53 + i * 2, 62);
+      spawnUnit(world, playerVehicles[i], 0, playerBase.x + 3 + i * 2, playerBase.z + 12);
     }
 
     // Harvester
     const harvTypes = [...gameRules.units.keys()].filter(n => n.startsWith(px) && (n.includes('Harv') || n.includes('harvester')));
     if (harvTypes.length > 0) {
-      spawnUnit(world, harvTypes[0], 0, 60, 58);
+      spawnUnit(world, harvTypes[0], 0, playerBase.x + 10, playerBase.z + 8);
     } else {
       // Fallback: make a trike into a harvester
       const fallbackVehicle = playerVehicles[0];
       if (fallbackVehicle) {
-        const harvEid = spawnUnit(world, fallbackVehicle, 0, 60, 58);
+        const harvEid = spawnUnit(world, fallbackVehicle, 0, playerBase.x + 10, playerBase.z + 8);
         if (harvEid >= 0) {
           addComponent(world, Harvester, harvEid);
           Harvester.maxCapacity[harvEid] = 1.0;
@@ -1519,29 +1900,33 @@ async function main() {
 
     // Enemy base
     const ex = house.enemyPrefix;
-    spawnBuilding(world, `${ex}ConYard`, 1, 200, 200);
-    spawnBuilding(world, `${ex}SmWindtrap`, 1, 206, 200);
-    spawnBuilding(world, `${ex}Barracks`, 1, 194, 200);
-    spawnBuilding(world, `${ex}Factory`, 1, 200, 206);
-    spawnBuilding(world, `${ex}SmWindtrap`, 1, 206, 206);
-    spawnBuilding(world, `${ex}Refinery`, 1, 194, 206);
+    spawnBuilding(world, `${ex}ConYard`, 1, enemyBase.x, enemyBase.z);
+    spawnBuilding(world, `${ex}SmWindtrap`, 1, enemyBase.x + 6, enemyBase.z);
+    spawnBuilding(world, `${ex}Barracks`, 1, enemyBase.x - 6, enemyBase.z);
+    spawnBuilding(world, `${ex}Factory`, 1, enemyBase.x, enemyBase.z + 6);
+    spawnBuilding(world, `${ex}SmWindtrap`, 1, enemyBase.x + 6, enemyBase.z + 6);
+    spawnBuilding(world, `${ex}Refinery`, 1, enemyBase.x - 6, enemyBase.z + 6);
 
     // Enemy starting units
     const enemyInfantry = [...gameRules.units.keys()].filter(n => n.startsWith(ex) && gameRules.units.get(n)?.infantry);
     const enemyVehicles = [...gameRules.units.keys()].filter(n => n.startsWith(ex) && !gameRules.units.get(n)?.infantry && gameRules.units.get(n)!.cost > 0 && !gameRules.units.get(n)!.canFly);
 
     for (let i = 0; i < 3 && i < enemyInfantry.length; i++) {
-      spawnUnit(world, enemyInfantry[i], 1, 195 + i * 2, 210);
+      spawnUnit(world, enemyInfantry[i], 1, enemyBase.x - 5 + i * 2, enemyBase.z + 10);
     }
     for (let i = 0; i < 3 && i < enemyVehicles.length; i++) {
-      spawnUnit(world, enemyVehicles[i], 1, 201 + i * 2, 212);
+      spawnUnit(world, enemyVehicles[i], 1, enemyBase.x + 1 + i * 2, enemyBase.z + 12);
     }
 
     // Enemy harvester
     const enemyHarvTypes = [...gameRules.units.keys()].filter(n => n.startsWith(ex) && (n.includes('Harv') || n.includes('harvester')));
     if (enemyHarvTypes.length > 0) {
-      spawnUnit(world, enemyHarvTypes[0], 1, 195, 212);
+      spawnUnit(world, enemyHarvTypes[0], 1, enemyBase.x - 5, enemyBase.z + 12);
     }
+
+    // Camera starts at player base
+    scene.cameraTarget.set(playerBase.x, 0, playerBase.z);
+    scene.updateCameraPosition();
   }
 
   // Start!

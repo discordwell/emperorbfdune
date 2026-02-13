@@ -46,6 +46,10 @@ export class ProductionSystem {
     this.unitCountCallback = cb;
   }
 
+  setMaxUnits(max: number): void {
+    this.maxUnits = max;
+  }
+
   addPlayerBuilding(playerId: number, buildingType: string): void {
     if (!this.playerBuildings.has(playerId)) {
       this.playerBuildings.set(playerId, new Map());

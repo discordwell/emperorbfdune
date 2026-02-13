@@ -102,6 +102,15 @@ export class SceneManager implements RenderSystem {
     this.updateCameraPosition();
   }
 
+  rotateCamera(delta: number): void {
+    this.cameraRotation += delta;
+    this.updateCameraPosition();
+  }
+
+  getCameraRotation(): number {
+    return this.cameraRotation;
+  }
+
   getZoom(): number {
     return this.cameraDistance;
   }

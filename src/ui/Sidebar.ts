@@ -6,7 +6,7 @@ import type { BuildingDef } from '../config/BuildingDefs';
 
 type BuildCallback = (typeName: string, isBuilding: boolean) => void;
 
-const HOTKEYS = ['q', 'e', 'r', 'z', 'x', 'c'];
+const HOTKEYS = ['q', 'e', 'r', 'f', 't', 'y'];
 
 export class Sidebar {
   private container: HTMLElement;
@@ -38,7 +38,7 @@ export class Sidebar {
   }
 
   private onKeyDown = (e: KeyboardEvent): void => {
-    if (e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return;
+    if (e.ctrlKey || e.altKey || e.metaKey) return;
     // Don't fire in text inputs or when help overlay is shown
     const tag = (e.target as HTMLElement)?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA') return;
@@ -47,7 +47,11 @@ export class Sidebar {
 
     const entry = this.hotkeyMap.get(e.key.toLowerCase());
     if (entry) {
-      this.onBuild(entry.name, entry.isBuilding);
+      // Shift+hotkey: queue 5 at once
+      const count = e.shiftKey ? 5 : 1;
+      for (let i = 0; i < count; i++) {
+        this.onBuild(entry.name, entry.isBuilding);
+      }
     }
   };
 
@@ -246,7 +250,13 @@ export class Sidebar {
     };
 
     if (enabled) {
-      item.onclick = () => this.onBuild(name, isBuilding);
+      item.onclick = (e: MouseEvent) => {
+        // Shift-click: queue 5 at once
+        const count = e.shiftKey ? 5 : 1;
+        for (let i = 0; i < count; i++) {
+          this.onBuild(name, isBuilding);
+        }
+      };
     }
 
     return item;
@@ -263,40 +273,77 @@ export class Sidebar {
     const displayName = name.replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, '');
     const hotkeyHint = hotkey ? ` <span style="color:#8cf;font-size:10px;">[${hotkey.toUpperCase()}]</span>` : '';
     let html = `<div style="font-weight:bold;color:#fff;margin-bottom:4px;">${displayName}${hotkeyHint}</div>`;
+
+    // Role tags
+    const tags: string[] = [];
+    if (!isBuilding) {
+      const u = def as UnitDef;
+      if (u.infantry) tags.push('<span style="color:#8cf">Infantry</span>');
+      else if (u.canFly) tags.push('<span style="color:#aaf">Aircraft</span>');
+      else tags.push('<span style="color:#db8">Vehicle</span>');
+      if (u.turretAttach) tags.push('<span style="color:#f88">Combat</span>');
+      if (u.engineer) tags.push('<span style="color:#ff0">Engineer</span>');
+      if (u.stealth) tags.push('<span style="color:#8f8">Stealth</span>');
+      if (u.selfDestruct) tags.push('<span style="color:#f44">Self-Destruct</span>');
+      if (u.deviator) tags.push('<span style="color:#f8f">Deviator</span>');
+      if (u.crushes) tags.push('<span style="color:#fa8">Crushes Infantry</span>');
+      if (name.includes('Harv') || name.includes('harvester')) tags.push('<span style="color:#fd0">Harvester</span>');
+    } else {
+      const b = def as BuildingDef;
+      if (b.refinery) tags.push('<span style="color:#fd0">Refinery</span>');
+      if (b.aiDefence) tags.push('<span style="color:#f88">Defense</span>');
+      if (b.powerGenerated > 0) tags.push('<span style="color:#4f4">Power</span>');
+      if (b.upgradable) tags.push('<span style="color:#8cf">Upgradable</span>');
+    }
+    if (tags.length > 0) html += `<div style="font-size:10px;margin-bottom:3px;">${tags.join(' ')}</div>`;
+
     html += `<div style="color:#f0c040;">Cost: $${def.cost}</div>`;
-    html += `<div>HP: ${def.health}</div>`;
-    html += `<div>Build Time: ${def.buildTime} ticks</div>`;
+    html += `<div>HP: ${def.health} &middot; Armor: ${def.armour}</div>`;
+    const buildSecs = Math.round(def.buildTime / 25);
+    html += `<div>Build: ${buildSecs}s</div>`;
 
     if (!isBuilding) {
       const unitDef = def as UnitDef;
-      html += `<div>Speed: ${unitDef.speed.toFixed(1)}</div>`;
-      if (unitDef.turretAttach) html += `<div style="color:#f88;">Armed</div>`;
-      if (unitDef.infantry) html += `<div style="color:#8cf;">Infantry</div>`;
-      if (unitDef.canFly) html += `<div style="color:#aaf;">Aircraft</div>`;
+      html += `<div>Speed: ${unitDef.speed.toFixed(1)} &middot; Range: ${unitDef.viewRange}</div>`;
+      if (unitDef.starportable) html += `<div style="color:#aaa;font-size:10px;">Available at Starport</div>`;
     } else {
       const bDef = def as BuildingDef;
       if (bDef.powerGenerated > 0) html += `<div style="color:#4f4;">Power: +${bDef.powerGenerated}</div>`;
-      if (bDef.powerUsed > 0) html += `<div style="color:#f44;">Power: -${bDef.powerUsed}</div>`;
+      if (bDef.powerUsed > 0) html += `<div style="color:#f66;">Power: -${bDef.powerUsed}</div>`;
+      if (bDef.getUnitWhenBuilt) {
+        const unitName = bDef.getUnitWhenBuilt.replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, '');
+        html += `<div style="color:#8cf;font-size:10px;">Spawns: ${unitName}</div>`;
+      }
+      if (bDef.upgradable) {
+        const upgraded = this.production.isUpgraded(this.playerId, name);
+        html += `<div style="color:${upgraded ? '#4f4' : '#aaa'};font-size:10px;">Upgrade: $${bDef.upgradeCost}${upgraded ? ' (Done)' : ''}</div>`;
+      }
     }
 
+    // Requirements
+    const reqs: string[] = [];
     if (def.primaryBuilding) {
       const reqName = def.primaryBuilding.replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, '');
+      reqs.push(reqName);
+    }
+    if (def.secondaryBuildings) {
+      for (const sb of def.secondaryBuildings) {
+        reqs.push(sb.replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, ''));
+      }
+    }
+    if (reqs.length > 0) {
       const canBuild = this.production.canBuild(this.playerId, name, isBuilding);
       const reqColor = canBuild ? '#4f4' : '#f44';
-      html += `<div style="color:${reqColor};margin-top:4px;font-size:10px;">Requires: ${reqName}${canBuild ? ' \u2713' : ' (not built)'}</div>`;
+      html += `<div style="color:${reqColor};margin-top:3px;font-size:10px;">Requires: ${reqs.join(', ')}</div>`;
     }
 
-    // Show tech level requirement
     if (def.techLevel > 0) {
       const playerTech = this.production.getPlayerTechLevel(this.playerId);
       const techMet = def.techLevel <= playerTech;
-      html += `<div style="color:${techMet ? '#4f4' : '#f66'};font-size:10px;">Tech Level: ${def.techLevel}${techMet ? ' \u2713' : ` (need ${def.techLevel}, have ${playerTech})`}</div>`;
+      html += `<div style="color:${techMet ? '#4f4' : '#f66'};font-size:10px;">Tech Level: ${def.techLevel}${techMet ? '' : ` (have ${playerTech})`}</div>`;
     }
 
-    // Show if unaffordable or otherwise unavailable
-    if (!this.production.canBuild(this.playerId, name, isBuilding)) {
-      html += `<div style="color:#f44;font-size:10px;margin-top:2px;">Cannot build</div>`;
-    }
+    html += `<div style="color:#555;font-size:9px;margin-top:3px;">Shift+click: build 5</div>`;
 
     this.tooltip.innerHTML = html;
     this.tooltip.style.display = 'block';

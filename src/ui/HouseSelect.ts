@@ -20,6 +20,12 @@ export interface MapChoice {
 
 export type GameMode = 'skirmish' | 'campaign';
 
+export interface SkirmishOptions {
+  startingCredits: number;
+  unitCap: number;
+  victoryCondition: 'annihilate' | 'conyard';
+}
+
 export interface HouseChoice {
   id: string;
   name: string;
@@ -33,6 +39,7 @@ export interface HouseChoice {
   mapChoice?: MapChoice;
   gameMode: GameMode;
   campaignTerritoryId?: number;
+  skirmishOptions?: SkirmishOptions;
 }
 
 const SUBHOUSES: SubhouseChoice[] = [
@@ -254,7 +261,7 @@ export class HouseSelect {
         if (house.gameMode === 'campaign') {
           this.showCampaignMap(house, resolve);
         } else {
-          this.showMapSelect(house, resolve);
+          this.showSkirmishOptions(house, resolve);
         }
       };
       grid.appendChild(card);
@@ -332,6 +339,126 @@ export class HouseSelect {
       // User went back - show difficulty select again
       this.showDifficultySelect(house, resolve);
     }
+  }
+
+  private showSkirmishOptions(house: HouseChoice, resolve: (house: HouseChoice) => void): void {
+    this.overlay = document.createElement('div');
+    this.overlay.style.cssText = `
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: radial-gradient(ellipse at center, #1a0f00 0%, #000 80%);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      z-index: 2000;
+      font-family: 'Segoe UI', Tahoma, sans-serif;
+    `;
+
+    const headerText = document.createElement('div');
+    headerText.style.cssText = `color:${house.color}; font-size:24px; font-weight:bold; margin-bottom:16px;`;
+    headerText.textContent = 'Skirmish Options';
+    this.overlay.appendChild(headerText);
+
+    const panel = document.createElement('div');
+    panel.style.cssText = 'background:#11111188;border:1px solid #444;padding:24px 32px;border-radius:4px;min-width:320px;';
+
+    let credits = 5000;
+    let unitCap = 50;
+    let victory: 'annihilate' | 'conyard' = 'annihilate';
+
+    // Starting credits
+    const creditsRow = document.createElement('div');
+    creditsRow.style.cssText = 'margin-bottom:16px;';
+    const creditsLabel = document.createElement('div');
+    creditsLabel.style.cssText = 'color:#ccc;font-size:13px;margin-bottom:6px;';
+    creditsLabel.textContent = 'Starting Credits';
+    creditsRow.appendChild(creditsLabel);
+    const creditsBtns = document.createElement('div');
+    creditsBtns.style.cssText = 'display:flex;gap:4px;';
+    for (const { label, value } of [
+      { label: '3,000', value: 3000 }, { label: '5,000', value: 5000 },
+      { label: '10,000', value: 10000 }, { label: '20,000', value: 20000 },
+    ]) {
+      const btn = document.createElement('button');
+      btn.textContent = label;
+      btn.style.cssText = `flex:1;padding:6px;background:#111;border:1px solid ${value === credits ? '#d4a840' : '#444'};color:#ccc;cursor:pointer;font-size:12px;`;
+      btn.onclick = () => {
+        credits = value;
+        creditsBtns.querySelectorAll('button').forEach(b => (b as HTMLElement).style.borderColor = '#444');
+        btn.style.borderColor = '#d4a840';
+      };
+      creditsBtns.appendChild(btn);
+    }
+    creditsRow.appendChild(creditsBtns);
+    panel.appendChild(creditsRow);
+
+    // Unit cap
+    const capRow = document.createElement('div');
+    capRow.style.cssText = 'margin-bottom:16px;';
+    const capLabel = document.createElement('div');
+    capLabel.style.cssText = 'color:#ccc;font-size:13px;margin-bottom:6px;';
+    capLabel.textContent = 'Unit Cap';
+    capRow.appendChild(capLabel);
+    const capBtns = document.createElement('div');
+    capBtns.style.cssText = 'display:flex;gap:4px;';
+    for (const { label, value } of [
+      { label: '25', value: 25 }, { label: '50', value: 50 },
+      { label: '100', value: 100 }, { label: 'Unlimited', value: 999 },
+    ]) {
+      const btn = document.createElement('button');
+      btn.textContent = label;
+      btn.style.cssText = `flex:1;padding:6px;background:#111;border:1px solid ${value === unitCap ? '#d4a840' : '#444'};color:#ccc;cursor:pointer;font-size:12px;`;
+      btn.onclick = () => {
+        unitCap = value;
+        capBtns.querySelectorAll('button').forEach(b => (b as HTMLElement).style.borderColor = '#444');
+        btn.style.borderColor = '#d4a840';
+      };
+      capBtns.appendChild(btn);
+    }
+    capRow.appendChild(capBtns);
+    panel.appendChild(capRow);
+
+    // Victory condition
+    const vicRow = document.createElement('div');
+    vicRow.style.cssText = 'margin-bottom:20px;';
+    const vicLabel = document.createElement('div');
+    vicLabel.style.cssText = 'color:#ccc;font-size:13px;margin-bottom:6px;';
+    vicLabel.textContent = 'Victory Condition';
+    vicRow.appendChild(vicLabel);
+    const vicBtns = document.createElement('div');
+    vicBtns.style.cssText = 'display:flex;gap:4px;';
+    for (const { label, value, desc } of [
+      { label: 'Destroy All', value: 'annihilate' as const, desc: 'Destroy all enemy buildings' },
+      { label: 'Destroy ConYard', value: 'conyard' as const, desc: 'Destroy enemy Construction Yard' },
+    ]) {
+      const btn = document.createElement('button');
+      btn.textContent = label;
+      btn.title = desc;
+      btn.style.cssText = `flex:1;padding:6px;background:#111;border:1px solid ${value === victory ? '#d4a840' : '#444'};color:#ccc;cursor:pointer;font-size:12px;`;
+      btn.onclick = () => {
+        victory = value;
+        vicBtns.querySelectorAll('button').forEach(b => (b as HTMLElement).style.borderColor = '#444');
+        btn.style.borderColor = '#d4a840';
+      };
+      vicBtns.appendChild(btn);
+    }
+    vicRow.appendChild(vicBtns);
+    panel.appendChild(vicRow);
+
+    // Start button
+    const startBtn = document.createElement('button');
+    startBtn.textContent = 'Continue';
+    startBtn.style.cssText = `display:block;width:100%;padding:10px;background:${house.color}33;border:2px solid ${house.color};color:#fff;cursor:pointer;font-size:16px;font-weight:bold;`;
+    startBtn.onmouseenter = () => { startBtn.style.background = `${house.color}66`; };
+    startBtn.onmouseleave = () => { startBtn.style.background = `${house.color}33`; };
+    startBtn.onclick = () => {
+      this.audioManager.playSfx('select');
+      house.skirmishOptions = { startingCredits: credits, unitCap, victoryCondition: victory };
+      this.overlay.remove();
+      this.showMapSelect(house, resolve);
+    };
+    panel.appendChild(startBtn);
+
+    this.overlay.appendChild(panel);
+    document.body.appendChild(this.overlay);
   }
 
   private showMapSelect(house: HouseChoice, resolve: (house: HouseChoice) => void): void {

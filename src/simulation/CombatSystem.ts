@@ -28,6 +28,8 @@ export class CombatSystem implements GameSystem {
   private stances = new Map<number, number>();
   // Stealthed entities (idle stealth units, can't be auto-targeted)
   private stealthedEntities = new Set<number>();
+  // Guard positions: units return here after combat
+  private guardPositions = new Map<number, { x: number; z: number }>();
 
   constructor(rules: GameRules) {
     this.rules = rules;
@@ -60,6 +62,14 @@ export class CombatSystem implements GameSystem {
     return this.stances.get(eid) ?? 1; // Default: defensive
   }
 
+  setGuardPosition(eid: number, x: number, z: number): void {
+    this.guardPositions.set(eid, { x, z });
+  }
+
+  clearGuardPosition(eid: number): void {
+    this.guardPositions.delete(eid);
+  }
+
   init(_world: World): void {
     this.armourTypes = this.rules.armourTypes;
   }
@@ -73,6 +83,7 @@ export class CombatSystem implements GameSystem {
     this.attackMoveEntities.delete(eid);
     this.attackMoveDestinations.delete(eid);
     this.stances.delete(eid);
+    this.guardPositions.delete(eid);
   }
 
   setAttackMove(eids: number[]): void {
@@ -121,6 +132,14 @@ export class CombatSystem implements GameSystem {
               MoveTarget.z[eid] = dest.z;
               MoveTarget.active[eid] = 1;
             }
+          } else {
+            // Return to guard position if set
+            const guardPos = this.guardPositions.get(eid);
+            if (guardPos && hasComponent(world, MoveTarget, eid)) {
+              MoveTarget.x[eid] = guardPos.x;
+              MoveTarget.z[eid] = guardPos.z;
+              MoveTarget.active[eid] = 1;
+            }
           }
         }
       }
@@ -151,6 +170,18 @@ export class CombatSystem implements GameSystem {
               // Arrived at destination, clear attack-move
               this.attackMoveEntities.delete(eid);
               this.attackMoveDestinations.delete(eid);
+            }
+          }
+        }
+        // Return to guard position if idle and no targets
+        if (!this.attackMoveEntities.has(eid) && hasComponent(world, MoveTarget, eid) && MoveTarget.active[eid] === 0) {
+          const guardPos = this.guardPositions.get(eid);
+          if (guardPos) {
+            const distToGuard = distance2D(Position.x[eid], Position.z[eid], guardPos.x, guardPos.z);
+            if (distToGuard > 3.0) {
+              MoveTarget.x[eid] = guardPos.x;
+              MoveTarget.z[eid] = guardPos.z;
+              MoveTarget.active[eid] = 1;
             }
           }
         }

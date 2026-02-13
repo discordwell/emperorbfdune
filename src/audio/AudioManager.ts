@@ -18,7 +18,7 @@ const MUSIC_TRACKS: TrackInfo[] = [
 ];
 
 // Synthesized SFX using Web Audio API (no external files needed)
-type SfxType = 'select' | 'move' | 'attack' | 'explosion' | 'build' | 'sell' | 'error' | 'victory' | 'defeat' | 'harvest' | 'shot' | 'powerlow';
+type SfxType = 'select' | 'move' | 'attack' | 'explosion' | 'build' | 'sell' | 'error' | 'victory' | 'defeat' | 'harvest' | 'shot' | 'powerlow' | 'place' | 'worm' | 'underattack';
 
 export type UnitCategory = 'infantry' | 'vehicle' | 'harvester';
 
@@ -190,6 +190,9 @@ export class AudioManager {
         case 'harvest': this.synthHarvest(ctx); break;
         case 'shot': this.synthShot(ctx); break;
         case 'powerlow': this.synthPowerLow(ctx); break;
+        case 'place': this.synthPlace(ctx); break;
+        case 'worm': this.synthWorm(ctx); break;
+        case 'underattack': this.synthUnderAttack(ctx); break;
       }
     } catch {
       // Audio not available
@@ -553,6 +556,59 @@ export class AudioManager {
     osc2.start(t);
     osc.stop(t + 0.2);
     osc2.stop(t + 0.2);
+  }
+
+  // Building placement: solid thunk
+  private synthPlace(ctx: AudioContext): void {
+    const t = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = this.makeGain(ctx, 0.18);
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(300, t);
+    osc.frequency.exponentialRampToValueAtTime(100, t + 0.15);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+    osc.connect(gain);
+    osc.start(t);
+    osc.stop(t + 0.2);
+  }
+
+  // Worm warning: deep rumble with tremolo
+  private synthWorm(ctx: AudioContext): void {
+    const t = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const lfo = ctx.createOscillator();
+    const lfoGain = ctx.createGain();
+    const gain = this.makeGain(ctx, 0.2);
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(60, t);
+    osc.frequency.exponentialRampToValueAtTime(40, t + 0.6);
+    lfo.type = 'sine';
+    lfo.frequency.value = 8;
+    lfoGain.gain.value = 0.1 * this.sfxVolume;
+    lfo.connect(lfoGain);
+    lfoGain.connect(gain.gain);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.7);
+    osc.connect(gain);
+    osc.start(t);
+    lfo.start(t);
+    osc.stop(t + 0.7);
+    lfo.stop(t + 0.7);
+  }
+
+  // Under attack alert: urgent two-tone alarm
+  private synthUnderAttack(ctx: AudioContext): void {
+    const t = ctx.currentTime;
+    for (let i = 0; i < 3; i++) {
+      const osc = ctx.createOscillator();
+      const gain = this.makeGain(ctx, 0.12);
+      osc.type = 'square';
+      osc.frequency.value = i % 2 === 0 ? 800 : 600;
+      gain.gain.setValueAtTime(0.12 * this.sfxVolume, t + i * 0.12);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + i * 0.12 + 0.1);
+      osc.connect(gain);
+      osc.start(t + i * 0.12);
+      osc.stop(t + i * 0.12 + 0.11);
+    }
   }
 
   // --- Controls ---

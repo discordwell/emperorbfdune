@@ -1,6 +1,7 @@
-import { Owner, Health, buildingQuery, type World } from '../core/ECS';
+import { Owner, Health, BuildingType, buildingQuery, type World } from '../core/ECS';
 import type { AudioManager } from '../audio/AudioManager';
 
+export type VictoryCondition = 'annihilate' | 'conyard';
 export type GameOutcome = 'playing' | 'victory' | 'defeat';
 
 /** Tracks per-player game statistics */
@@ -14,6 +15,11 @@ export class GameStats {
   creditsSpent = [0, 0];
   damageDealt = [0, 0];
 
+  // Time-series data for graphs (sampled every ~10 seconds / 250 ticks)
+  creditHistory: [number[], number[]] = [[], []]; // per-player credit balance over time
+  unitCountHistory: [number[], number[]] = [[], []]; // per-player unit count over time
+  timestamps: number[] = []; // tick values for x-axis
+
   recordUnitBuilt(owner: number): void { if (owner < 2) this.unitsBuilt[owner]++; }
   recordUnitLost(owner: number): void { if (owner < 2) this.unitsLost[owner]++; }
   recordBuildingBuilt(owner: number): void { if (owner < 2) this.buildingsBuilt[owner]++; }
@@ -21,6 +27,15 @@ export class GameStats {
   recordCreditsEarned(owner: number, amount: number): void { if (owner < 2) this.creditsEarned[owner] += amount; }
   recordCreditsSpent(owner: number, amount: number): void { if (owner < 2) this.creditsSpent[owner] += amount; }
   recordDamage(owner: number, amount: number): void { if (owner < 2) this.damageDealt[owner] += amount; }
+
+  /** Call every 250 ticks to sample time-series data */
+  sample(tick: number, credits: [number, number], unitCounts: [number, number]): void {
+    this.timestamps.push(tick);
+    this.creditHistory[0].push(credits[0]);
+    this.creditHistory[1].push(credits[1]);
+    this.unitCountHistory[0].push(unitCounts[0]);
+    this.unitCountHistory[1].push(unitCounts[1]);
+  }
 }
 
 export class VictorySystem {
@@ -35,6 +50,9 @@ export class VictorySystem {
   private stats: GameStats | null = null;
   private startTime = Date.now();
   private onVictoryCallback: (() => void) | null = null;
+  private victoryCondition: VictoryCondition = 'annihilate';
+  // Building type names for ConYard check (set externally)
+  private buildingTypeNames: string[] = [];
 
   constructor(audioManager: AudioManager, localPlayerId: number, onRestart?: () => void) {
     this.audioManager = audioManager;
@@ -44,6 +62,8 @@ export class VictorySystem {
 
   setStats(stats: GameStats): void { this.stats = stats; }
   setVictoryCallback(cb: () => void): void { this.onVictoryCallback = cb; }
+  setVictoryCondition(cond: VictoryCondition): void { this.victoryCondition = cond; }
+  setBuildingTypeNames(names: string[]): void { this.buildingTypeNames = names; }
 
   getOutcome(): GameOutcome {
     return this.outcome;
@@ -57,22 +77,33 @@ export class VictorySystem {
     if (this.tickCounter % this.checkInterval !== 0) return;
 
     const buildings = buildingQuery(world);
-    let playerHasBuildings = false;
-    let enemyHasBuildings = false;
+    let playerAlive = false;
+    let enemyAlive = false;
 
-    for (const eid of buildings) {
-      if (Health.current[eid] <= 0) continue;
-      if (Owner.playerId[eid] === this.localPlayerId) {
-        playerHasBuildings = true;
-      } else {
-        enemyHasBuildings = true;
+    if (this.victoryCondition === 'conyard') {
+      // Only check ConYard buildings
+      for (const eid of buildings) {
+        if (Health.current[eid] <= 0) continue;
+        const typeId = BuildingType.id[eid];
+        const typeName = this.buildingTypeNames[typeId] ?? '';
+        if (!typeName.includes('ConYard')) continue;
+        if (Owner.playerId[eid] === this.localPlayerId) playerAlive = true;
+        else enemyAlive = true;
+        if (playerAlive && enemyAlive) return;
       }
-      if (playerHasBuildings && enemyHasBuildings) return; // Both alive, keep playing
+    } else {
+      // Check all buildings
+      for (const eid of buildings) {
+        if (Health.current[eid] <= 0) continue;
+        if (Owner.playerId[eid] === this.localPlayerId) playerAlive = true;
+        else enemyAlive = true;
+        if (playerAlive && enemyAlive) return;
+      }
     }
 
-    if (!playerHasBuildings && this.tickCounter > this.graceperiodTicks) {
+    if (!playerAlive && this.tickCounter > this.graceperiodTicks) {
       this.triggerDefeat();
-    } else if (!enemyHasBuildings && this.tickCounter > this.graceperiodTicks) {
+    } else if (!enemyAlive && this.tickCounter > this.graceperiodTicks) {
       this.triggerVictory();
     }
   }
@@ -95,12 +126,13 @@ export class VictorySystem {
     this.overlay = document.createElement('div');
     this.overlay.style.cssText = `
       position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(0,0,0,0.85);
+      background: rgba(0,0,0,0.9);
       display: flex; flex-direction: column;
-      align-items: center; justify-content: center;
+      align-items: center; justify-content: flex-start;
+      overflow-y: auto;
       z-index: 1000;
       font-family: 'Segoe UI', Tahoma, sans-serif;
-      animation: fadeIn 1s ease;
+      padding: 40px 20px;
     `;
 
     const elapsed = Math.floor((Date.now() - this.startTime) / 1000);
@@ -108,54 +140,241 @@ export class VictorySystem {
     const secs = elapsed % 60;
     const timeStr = `${mins}:${secs.toString().padStart(2, '0')}`;
 
-    let statsHtml = '';
+    const container = document.createElement('div');
+    container.style.cssText = 'display:flex;flex-direction:column;align-items:center;max-width:600px;width:100%;';
+
+    // Title
+    const titleEl = document.createElement('div');
+    titleEl.style.cssText = `color:${color};font-size:56px;font-weight:bold;text-shadow:0 0 30px ${color}40;margin-bottom:8px;`;
+    titleEl.textContent = title;
+    container.appendChild(titleEl);
+
+    // Message
+    const msgEl = document.createElement('div');
+    msgEl.style.cssText = 'color:#ccc;font-size:18px;margin-bottom:4px;';
+    msgEl.textContent = message;
+    container.appendChild(msgEl);
+
+    // Time
+    const timeEl = document.createElement('div');
+    timeEl.style.cssText = 'color:#888;font-size:14px;margin-bottom:24px;';
+    timeEl.textContent = `Game Time: ${timeStr}`;
+    container.appendChild(timeEl);
+
     if (this.stats) {
       const s = this.stats;
       const p = this.localPlayerId;
       const e = 1 - p;
-      statsHtml = `
-        <div style="display:grid;grid-template-columns:1fr auto auto;gap:4px 16px;font-size:14px;color:#ccc;margin-bottom:30px;text-align:right;max-width:400px;">
-          <div style="text-align:left;color:#888;"></div><div style="color:#4cf;">You</div><div style="color:#f88;">Enemy</div>
-          <div style="text-align:left;">Units Built</div><div>${s.unitsBuilt[p]}</div><div>${s.unitsBuilt[e]}</div>
-          <div style="text-align:left;">Units Lost</div><div>${s.unitsLost[p]}</div><div>${s.unitsLost[e]}</div>
-          <div style="text-align:left;">Buildings Built</div><div>${s.buildingsBuilt[p]}</div><div>${s.buildingsBuilt[e]}</div>
-          <div style="text-align:left;">Buildings Lost</div><div>${s.buildingsLost[p]}</div><div>${s.buildingsLost[e]}</div>
-          <div style="text-align:left;">Credits Earned</div><div>${s.creditsEarned[p].toLocaleString()}</div><div>${s.creditsEarned[e].toLocaleString()}</div>
-          <div style="text-align:left;">Damage Dealt</div><div>${s.damageDealt[p].toLocaleString()}</div><div>${s.damageDealt[e].toLocaleString()}</div>
-        </div>`;
+
+      // Stats table with bar visualization
+      container.appendChild(this.createStatsSection(s, p, e));
+
+      // Graphs
+      if (s.timestamps.length > 2) {
+        container.appendChild(this.createGraphSection(s, p, e));
+      }
     }
 
-    this.overlay.innerHTML = `
-      <div style="color:${color}; font-size:64px; font-weight:bold; text-shadow: 0 0 30px ${color}40; margin-bottom:16px;">
-        ${title}
-      </div>
-      <div style="color:#ccc; font-size:20px; margin-bottom:8px;">
-        ${message}
-      </div>
-      <div style="color:#888; font-size:14px; margin-bottom:24px;">Game Time: ${timeStr}</div>
-      ${statsHtml}
-      <button id="restart-btn" style="
-        padding: 12px 40px; font-size: 18px;
-        background: ${color}33; border: 2px solid ${color};
-        color: #fff; cursor: pointer;
-        font-family: inherit;
-        transition: background 0.2s;
-      ">Play Again</button>
+    // Play Again button
+    const btn = document.createElement('button');
+    btn.style.cssText = `
+      padding:14px 48px;font-size:18px;
+      background:${color}22;border:2px solid ${color};
+      color:#fff;cursor:pointer;font-family:inherit;
+      transition:background 0.2s;margin-top:24px;
     `;
+    btn.textContent = 'Play Again';
+    btn.onmouseenter = () => btn.style.background = `${color}55`;
+    btn.onmouseleave = () => btn.style.background = `${color}22`;
+    btn.onclick = () => {
+      if (this.onRestart) {
+        this.onRestart();
+      } else {
+        window.location.reload();
+      }
+    };
+    container.appendChild(btn);
 
+    this.overlay.appendChild(container);
     document.body.appendChild(this.overlay);
+  }
 
-    const btn = document.getElementById('restart-btn');
-    if (btn) {
-      btn.onmouseenter = () => btn.style.background = `${color}66`;
-      btn.onmouseleave = () => btn.style.background = `${color}33`;
-      btn.onclick = () => {
-        if (this.onRestart) {
-          this.onRestart();
-        } else {
-          window.location.reload();
-        }
-      };
+  private createStatsSection(s: GameStats, p: number, e: number): HTMLElement {
+    const section = document.createElement('div');
+    section.style.cssText = 'width:100%;margin-bottom:20px;';
+
+    const rows = [
+      { label: 'Units Built', pVal: s.unitsBuilt[p], eVal: s.unitsBuilt[e] },
+      { label: 'Units Lost', pVal: s.unitsLost[p], eVal: s.unitsLost[e] },
+      { label: 'Buildings Built', pVal: s.buildingsBuilt[p], eVal: s.buildingsBuilt[e] },
+      { label: 'Buildings Lost', pVal: s.buildingsLost[p], eVal: s.buildingsLost[e] },
+      { label: 'Credits Earned', pVal: s.creditsEarned[p], eVal: s.creditsEarned[e] },
+      { label: 'Credits Spent', pVal: s.creditsSpent[p], eVal: s.creditsSpent[e] },
+      { label: 'Damage Dealt', pVal: s.damageDealt[p], eVal: s.damageDealt[e] },
+    ];
+
+    // Header
+    const header = document.createElement('div');
+    header.style.cssText = 'display:grid;grid-template-columns:1fr 60px 1fr 60px;gap:4px;font-size:12px;color:#666;margin-bottom:6px;padding:0 4px;';
+    header.innerHTML = '<div style="text-align:right;color:#4cf;">You</div><div></div><div></div><div style="color:#f88;">Enemy</div>';
+    section.appendChild(header);
+
+    for (const row of rows) {
+      const maxVal = Math.max(row.pVal, row.eVal, 1);
+      const pPct = (row.pVal / maxVal) * 100;
+      const ePct = (row.eVal / maxVal) * 100;
+
+      const rowEl = document.createElement('div');
+      rowEl.style.cssText = 'display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center;margin-bottom:3px;';
+
+      // Player bar (right-aligned, grows left)
+      const pBar = document.createElement('div');
+      pBar.style.cssText = 'height:16px;display:flex;align-items:center;justify-content:flex-end;';
+      pBar.innerHTML = `
+        <span style="color:#aaa;font-size:11px;margin-right:4px;">${row.pVal.toLocaleString()}</span>
+        <div style="width:${pPct}%;min-width:2px;height:100%;background:linear-gradient(to right,transparent,#44ccff);border-radius:2px;"></div>
+      `;
+      rowEl.appendChild(pBar);
+
+      // Label
+      const labelEl = document.createElement('div');
+      labelEl.style.cssText = 'color:#999;font-size:11px;text-align:center;white-space:nowrap;min-width:90px;';
+      labelEl.textContent = row.label;
+      rowEl.appendChild(labelEl);
+
+      // Enemy bar (left-aligned, grows right)
+      const eBar = document.createElement('div');
+      eBar.style.cssText = 'height:16px;display:flex;align-items:center;';
+      eBar.innerHTML = `
+        <div style="width:${ePct}%;min-width:2px;height:100%;background:linear-gradient(to left,transparent,#ff8888);border-radius:2px;"></div>
+        <span style="color:#aaa;font-size:11px;margin-left:4px;">${row.eVal.toLocaleString()}</span>
+      `;
+      rowEl.appendChild(eBar);
+
+      section.appendChild(rowEl);
     }
+
+    return section;
+  }
+
+  private createGraphSection(s: GameStats, p: number, e: number): HTMLElement {
+    const section = document.createElement('div');
+    section.style.cssText = 'width:100%;';
+
+    // Credits over time graph
+    section.appendChild(this.createGraph(
+      'Credits Over Time',
+      s.timestamps,
+      s.creditHistory[p],
+      s.creditHistory[e],
+      260, 120
+    ));
+
+    // Unit count over time graph
+    section.appendChild(this.createGraph(
+      'Army Size Over Time',
+      s.timestamps,
+      s.unitCountHistory[p],
+      s.unitCountHistory[e],
+      260, 120
+    ));
+
+    return section;
+  }
+
+  private createGraph(
+    title: string,
+    xValues: number[],
+    pValues: number[],
+    eValues: number[],
+    width: number,
+    height: number,
+  ): HTMLElement {
+    const wrapper = document.createElement('div');
+    wrapper.style.cssText = 'margin-bottom:16px;';
+
+    const label = document.createElement('div');
+    label.style.cssText = 'color:#888;font-size:12px;margin-bottom:4px;text-align:center;';
+    label.textContent = title;
+    wrapper.appendChild(label);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width * 2; // Retina
+    canvas.height = height * 2;
+    canvas.style.cssText = `width:${width}px;height:${height}px;display:block;margin:0 auto;background:#111;border:1px solid #333;border-radius:3px;`;
+    wrapper.appendChild(canvas);
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return wrapper;
+
+    ctx.scale(2, 2);
+
+    const pad = { top: 8, right: 8, bottom: 18, left: 40 };
+    const gw = width - pad.left - pad.right;
+    const gh = height - pad.top - pad.bottom;
+
+    const allVals = [...pValues, ...eValues];
+    const maxVal = Math.max(...allVals, 1);
+    const minVal = 0;
+
+    const n = xValues.length;
+    if (n < 2) return wrapper;
+
+    // Grid lines
+    ctx.strokeStyle = '#222';
+    ctx.lineWidth = 0.5;
+    for (let i = 0; i <= 4; i++) {
+      const y = pad.top + (gh * i) / 4;
+      ctx.beginPath();
+      ctx.moveTo(pad.left, y);
+      ctx.lineTo(pad.left + gw, y);
+      ctx.stroke();
+
+      // Y-axis labels
+      const val = maxVal - (maxVal * i) / 4;
+      ctx.fillStyle = '#555';
+      ctx.font = '9px sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(val >= 1000 ? `${(val / 1000).toFixed(1)}k` : String(Math.round(val)), pad.left - 4, y + 3);
+    }
+
+    // X-axis labels (time in minutes)
+    ctx.fillStyle = '#555';
+    ctx.font = '9px sans-serif';
+    ctx.textAlign = 'center';
+    const totalTicks = xValues[n - 1] - xValues[0];
+    for (let i = 0; i <= 3; i++) {
+      const tickVal = xValues[0] + (totalTicks * i) / 3;
+      const x = pad.left + (gw * i) / 3;
+      const mins = Math.floor(tickVal / (25 * 60));
+      ctx.fillText(`${mins}m`, x, height - 4);
+    }
+
+    // Draw lines
+    const drawLine = (values: number[], color: string) => {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      for (let i = 0; i < n; i++) {
+        const x = pad.left + (gw * i) / (n - 1);
+        const y = pad.top + gh - (gh * (values[i] - minVal)) / (maxVal - minVal);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    };
+
+    drawLine(pValues, '#44ccff');
+    drawLine(eValues, '#ff8888');
+
+    // Legend
+    ctx.font = '9px sans-serif';
+    ctx.fillStyle = '#44ccff';
+    ctx.textAlign = 'left';
+    ctx.fillText('You', pad.left + 4, pad.top + 10);
+    ctx.fillStyle = '#ff8888';
+    ctx.fillText('Enemy', pad.left + 30, pad.top + 10);
+
+    return wrapper;
   }
 }

@@ -19,6 +19,7 @@ export class MovementSystem implements GameSystem {
   private pathIndex = new Map<number, number>();
   // Flying entities skip pathfinding
   private flyingEntities = new Set<number>();
+  private tickCount = 0;
 
   constructor(pathfinder: PathfindingSystem) {
     this.pathfinder = pathfinder;
@@ -36,9 +37,29 @@ export class MovementSystem implements GameSystem {
 
   update(world: World, _dt: number): void {
     const entities = movableQuery(world);
+    this.tickCount++;
+    const doIdleSep = this.tickCount % 5 === 0; // Idle separation every 5 ticks
 
     for (const eid of entities) {
       if (MoveTarget.active[eid] !== 1) {
+        // Apply idle separation to prevent stacking (throttled)
+        if (doIdleSep && !this.flyingEntities.has(eid)) {
+          const px = Position.x[eid];
+          const pz = Position.z[eid];
+          let sepX = 0, sepZ = 0;
+          for (const other of entities) {
+            if (other === eid || this.flyingEntities.has(other)) continue;
+            const d = distance2D(px, pz, Position.x[other], Position.z[other]);
+            if (d < 1.2 && d > 0.01) {
+              sepX += (px - Position.x[other]) / d;
+              sepZ += (pz - Position.z[other]) / d;
+            }
+          }
+          if (Math.abs(sepX) > 0.01 || Math.abs(sepZ) > 0.01) {
+            Position.x[eid] = Math.max(0, Math.min(256, px + sepX * 0.03));
+            Position.z[eid] = Math.max(0, Math.min(256, pz + sepZ * 0.03));
+          }
+        }
         Velocity.x[eid] = 0;
         Velocity.z[eid] = 0;
         continue;

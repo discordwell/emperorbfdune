@@ -7,6 +7,7 @@ const EDGE_SCROLL_MARGIN = 10; // Pixels from edge
 const EDGE_SCROLL_SPEED = 1.5;
 const WASD_SCROLL_SPEED = 2.0;
 const ZOOM_SPEED = 5;
+const ROTATE_SPEED = 0.04;
 
 export class InputManager implements GameSystem {
   private sceneManager: SceneManager;
@@ -48,6 +49,10 @@ export class InputManager implements GameSystem {
     if (this.mouseX >= window.innerWidth - EDGE_SCROLL_MARGIN) dx += EDGE_SCROLL_SPEED;
     if (this.mouseY <= EDGE_SCROLL_MARGIN) dz -= EDGE_SCROLL_SPEED;
     if (this.mouseY >= window.innerHeight - EDGE_SCROLL_MARGIN) dz += EDGE_SCROLL_SPEED;
+
+    // Camera rotation ([ and ] keys, or Ctrl+Q/E)
+    if (this.keys.has('[')) this.sceneManager.rotateCamera(-ROTATE_SPEED);
+    if (this.keys.has(']')) this.sceneManager.rotateCamera(ROTATE_SPEED);
 
     // Scale by zoom level
     const zoomFactor = this.sceneManager.getZoom() / 80;
@@ -99,12 +104,18 @@ export class InputManager implements GameSystem {
     this.mouseX = e.clientX;
     this.mouseY = e.clientY;
 
-    // Middle-click pan
+    // Middle-click: pan normally, rotate if Shift held
     if (this.middleMouseDown && this.middleDragPrev) {
-      const dx = (e.clientX - this.middleDragPrev.x) * -0.5;
-      const dz = (e.clientY - this.middleDragPrev.y) * -0.5;
-      const zoomFactor = this.sceneManager.getZoom() / 80;
-      this.sceneManager.panCamera(dx * zoomFactor, dz * zoomFactor);
+      if (e.shiftKey) {
+        // Shift+middle-drag: rotate camera
+        const rotDelta = (e.clientX - this.middleDragPrev.x) * 0.005;
+        this.sceneManager.rotateCamera(rotDelta);
+      } else {
+        const dx = (e.clientX - this.middleDragPrev.x) * -0.5;
+        const dz = (e.clientY - this.middleDragPrev.y) * -0.5;
+        const zoomFactor = this.sceneManager.getZoom() / 80;
+        this.sceneManager.panCamera(dx * zoomFactor, dz * zoomFactor);
+      }
       this.middleDragPrev = { x: e.clientX, y: e.clientY };
     }
   };

@@ -80,6 +80,10 @@
       0%, 100% { border-color: #333; }
       50% { border-color: #ff4444; }
     }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
 
     #minimap-container.under-attack {
       animation: minimap-pulse 0.8s ease-in-out 3;
@@ -167,6 +171,25 @@
       <div id="loading-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#f0c040,#ff6600);transition:width 0.3s;"></div>
     </div>
     <div id="loading-text" style="font-size:12px;color:#888;">Initializing...</div>
+    <div id="loading-tip" style="font-size:11px;color:#666;margin-top:24px;max-width:300px;text-align:center;font-style:italic;"></div>
+    <script>
+      const tips = [
+        'Shift+click to queue 5 units at once',
+        'Double-click a unit to select all of that type',
+        'Press H to snap camera to your base',
+        'Use [ and ] to rotate the camera',
+        'Right-click a building to set a rally point',
+        'Press G to make units guard their position',
+        'Build Windtraps to keep your power supply up',
+        'Ctrl+1-9 to create control groups',
+        'Harvesters auto-return when full — build more!',
+        'Press ? during gameplay for all keyboard shortcuts',
+        'Use attack-move (A) to engage enemies along a path',
+        'Spice is your lifeline — control the fields!',
+      ];
+      const tipEl = document.getElementById('loading-tip');
+      if (tipEl) tipEl.textContent = tips[Math.floor(Math.random() * tips.length)];
+    </script>
   </div>
   <div id="game-container">
     <canvas id="game-canvas"></canvas>
@@ -199,39 +222,60 @@
         font-family:'Segoe UI',Tahoma,sans-serif;font-size:13px;font-weight:bold;
         color:#fff;pointer-events:none;z-index:15;
       "></div>
+      <div id="low-power-warning" style="
+        display:none;position:absolute;top:28px;right:220px;
+        background:rgba(200,0,0,0.8);padding:3px 12px;border-radius:3px;
+        font-family:'Segoe UI',Tahoma,sans-serif;font-size:11px;font-weight:bold;
+        color:#ff8;pointer-events:none;z-index:15;
+        animation:pulse 1.5s infinite;
+      ">LOW POWER</div>
       <div id="help-overlay" style="
         display:none;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
         background:rgba(10,10,30,0.95);border:1px solid #555;padding:24px 32px;
         font-family:'Segoe UI',Tahoma,sans-serif;color:#ddd;z-index:200;
         pointer-events:auto;min-width:340px;border-radius:4px;
       ">
-        <h2 style="color:#f0c040;margin-bottom:12px;font-size:16px;">Keyboard Controls</h2>
-        <table style="width:100%;border-collapse:collapse;font-size:13px;">
-          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">WASD / Arrows</td><td>Scroll camera</td></tr>
-          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">Left Click</td><td>Select unit/building</td></tr>
-          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">Drag Select</td><td>Box select units</td></tr>
-          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">Double Click</td><td>Select all same type</td></tr>
-          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">Right Click</td><td>Move / Attack target</td></tr>
-          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">Shift + RClick</td><td>Add waypoint</td></tr>
-          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">A</td><td>Attack-move</td></tr>
-          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">S</td><td>Stop</td></tr>
-          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">G</td><td>Guard position</td></tr>
-          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">P</td><td>Patrol</td></tr>
-          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">V</td><td>Cycle stance (Agg/Def/Hold)</td></tr>
-          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">Ctrl + 1-9</td><td>Assign control group</td></tr>
-          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">1-9</td><td>Recall control group</td></tr>
-          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">H</td><td>Snap to base</td></tr>
-          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">Space</td><td>Snap to last event</td></tr>
-          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">M</td><td>Toggle music</td></tr>
-          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">F1/F2/F3</td><td>Speed: Slow/Normal/Fast</td></tr>
-          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">F9</td><td>Pause/Resume</td></tr>
-          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">X</td><td>Self-destruct (Devastator)</td></tr>
-          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">F5</td><td>Quick Save</td></tr>
-          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">F8</td><td>Quick Load</td></tr>
-          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">Escape</td><td>Pause / Cancel placement</td></tr>
-          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">?</td><td>Toggle this help</td></tr>
+        <h2 style="color:#f0c040;margin-bottom:12px;font-size:16px;">Controls</h2>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 24px;">
+        <table style="border-collapse:collapse;font-size:12px;">
+          <tr><td colspan="2" style="color:#f0c040;font-weight:bold;padding:4px 0 2px;">Camera</td></tr>
+          <tr><td style="padding:2px 8px 2px 0;color:#8cf;font-weight:bold;">WASD / Arrows</td><td>Scroll</td></tr>
+          <tr><td style="padding:2px 8px 2px 0;color:#8cf;font-weight:bold;">[ / ]</td><td>Rotate camera</td></tr>
+          <tr><td style="padding:2px 8px 2px 0;color:#8cf;font-weight:bold;">Scroll Wheel</td><td>Zoom in/out</td></tr>
+          <tr><td style="padding:2px 8px 2px 0;color:#8cf;font-weight:bold;">Middle Drag</td><td>Pan camera</td></tr>
+          <tr><td style="padding:2px 8px 2px 0;color:#8cf;font-weight:bold;">Shift+Mid Drag</td><td>Rotate camera</td></tr>
+          <tr><td style="padding:2px 8px 2px 0;color:#8cf;font-weight:bold;">H</td><td>Snap to base</td></tr>
+          <tr><td style="padding:2px 8px 2px 0;color:#8cf;font-weight:bold;">Space</td><td>Snap to last event</td></tr>
+          <tr><td colspan="2" style="color:#f0c040;font-weight:bold;padding:8px 0 2px;">Selection</td></tr>
+          <tr><td style="padding:2px 8px 2px 0;color:#8cf;font-weight:bold;">Left Click</td><td>Select</td></tr>
+          <tr><td style="padding:2px 8px 2px 0;color:#8cf;font-weight:bold;">Drag</td><td>Box select</td></tr>
+          <tr><td style="padding:2px 8px 2px 0;color:#8cf;font-weight:bold;">Double Click</td><td>Select all same type</td></tr>
+          <tr><td style="padding:2px 8px 2px 0;color:#8cf;font-weight:bold;">Ctrl+1-9</td><td>Assign group</td></tr>
+          <tr><td style="padding:2px 8px 2px 0;color:#8cf;font-weight:bold;">1-9</td><td>Recall group</td></tr>
         </table>
-        <p style="color:#888;font-size:11px;margin-top:12px;">Press ? to close</p>
+        <table style="border-collapse:collapse;font-size:12px;">
+          <tr><td colspan="2" style="color:#f0c040;font-weight:bold;padding:4px 0 2px;">Commands</td></tr>
+          <tr><td style="padding:2px 8px 2px 0;color:#8cf;font-weight:bold;">Right Click</td><td>Move / Attack</td></tr>
+          <tr><td style="padding:2px 8px 2px 0;color:#8cf;font-weight:bold;">Shift+RClick</td><td>Add waypoint</td></tr>
+          <tr><td style="padding:2px 8px 2px 0;color:#8cf;font-weight:bold;">A</td><td>Attack-move</td></tr>
+          <tr><td style="padding:2px 8px 2px 0;color:#8cf;font-weight:bold;">S</td><td>Stop</td></tr>
+          <tr><td style="padding:2px 8px 2px 0;color:#8cf;font-weight:bold;">G</td><td>Guard position</td></tr>
+          <tr><td style="padding:2px 8px 2px 0;color:#8cf;font-weight:bold;">P</td><td>Patrol</td></tr>
+          <tr><td style="padding:2px 8px 2px 0;color:#8cf;font-weight:bold;">V</td><td>Cycle stance</td></tr>
+          <tr><td style="padding:2px 8px 2px 0;color:#8cf;font-weight:bold;">X</td><td>Self-destruct</td></tr>
+          <tr><td colspan="2" style="color:#f0c040;font-weight:bold;padding:8px 0 2px;">Production</td></tr>
+          <tr><td style="padding:2px 8px 2px 0;color:#8cf;font-weight:bold;">Q/E/R/F/T/Y</td><td>Build hotkeys</td></tr>
+          <tr><td style="padding:2px 8px 2px 0;color:#8cf;font-weight:bold;">Shift+Click</td><td>Queue 5 units</td></tr>
+          <tr><td style="padding:2px 8px 2px 0;color:#8cf;font-weight:bold;">Right-click queue</td><td>Cancel item</td></tr>
+          <tr><td colspan="2" style="color:#f0c040;font-weight:bold;padding:8px 0 2px;">System</td></tr>
+          <tr><td style="padding:2px 8px 2px 0;color:#8cf;font-weight:bold;">F1/F2/F3</td><td>Slow/Normal/Fast</td></tr>
+          <tr><td style="padding:2px 8px 2px 0;color:#8cf;font-weight:bold;">F5 / F8</td><td>Save / Load</td></tr>
+          <tr><td style="padding:2px 8px 2px 0;color:#8cf;font-weight:bold;">F9</td><td>Pause</td></tr>
+          <tr><td style="padding:2px 8px 2px 0;color:#8cf;font-weight:bold;">Escape</td><td>Menu</td></tr>
+          <tr><td style="padding:2px 8px 2px 0;color:#8cf;font-weight:bold;">M</td><td>Mute music</td></tr>
+        </table>
+        </div>
+        <p style="color:#888;font-size:11px;margin-top:12px;">Press ? to close | Autosaves every 2 min</p>
       </div>
     </div>
   </div>

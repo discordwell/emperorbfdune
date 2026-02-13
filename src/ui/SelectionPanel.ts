@@ -142,6 +142,19 @@ export class SelectionPanel {
     const hpPct = maxHp > 0 ? Math.round((hp / maxHp) * 100) : 0;
     const hpColor = hpPct > 60 ? '#0f0' : hpPct > 30 ? '#ff0' : '#f00';
 
+    // Role tags
+    let roleHtml = '';
+    if (isUnit && def) {
+      const tags: string[] = [];
+      if (def.infantry) tags.push('<span style="color:#8cf">Infantry</span>');
+      else if (def.canFly) tags.push('<span style="color:#aaf">Aircraft</span>');
+      else tags.push('<span style="color:#db8">Vehicle</span>');
+      if (def.stealth) tags.push('<span style="color:#8f8">Stealth</span>');
+      if (def.engineer) tags.push('<span style="color:#ff0">Engineer</span>');
+      if (def.crushes) tags.push('<span style="color:#fa8">Crushes</span>');
+      if (tags.length > 0) roleHtml = `<div style="font-size:10px;margin-bottom:2px;">${tags.join(' ')}</div>`;
+    }
+
     // Stats row
     let statsHtml = '';
     const statStyle = 'display:inline-block;margin-right:12px;font-size:11px;';
@@ -150,7 +163,10 @@ export class SelectionPanel {
 
     if (hasComponent(this.world, Combat, eid)) {
       const range = Math.round(Combat.attackRange[eid]);
+      const rof = Combat.rof[eid];
+      const dps = rof > 0 ? (25 / rof).toFixed(1) : '0';
       statsHtml += `<span style="${statStyle}"><span style="${labelStyle}">Range:</span> <span style="${valStyle}">${range}</span></span>`;
+      statsHtml += `<span style="${statStyle}"><span style="${labelStyle}">DPS:</span> <span style="${valStyle}">${dps}</span></span>`;
     }
     if (hasComponent(this.world, Speed, eid) && Speed.max[eid] > 0) {
       const spd = Speed.max[eid].toFixed(1);
@@ -160,6 +176,10 @@ export class SelectionPanel {
       const armourIdx = Armour.type[eid];
       const armourName = this.rules.armourTypes[armourIdx] ?? 'None';
       statsHtml += `<span style="${statStyle}"><span style="${labelStyle}">Armor:</span> <span style="${valStyle}">${armourName}</span></span>`;
+    }
+    if (isBuilding && def) {
+      if (def.powerGenerated > 0) statsHtml += `<span style="${statStyle}"><span style="color:#4f4">Power: +${def.powerGenerated}</span></span>`;
+      if (def.powerUsed > 0) statsHtml += `<span style="${statStyle}"><span style="color:#f66">Power: -${def.powerUsed}</span></span>`;
     }
 
     // Veterancy
@@ -196,6 +216,7 @@ export class SelectionPanel {
           <span style="font-size:16px;font-weight:bold;color:#fff;">${displayName}</span>
           ${vetHtml}
         </div>
+        ${roleHtml}
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
           <div style="flex:1;height:6px;background:#333;border-radius:3px;overflow:hidden;">
             <div style="height:100%;width:${hpPct}%;background:${hpColor};"></div>

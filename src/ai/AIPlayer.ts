@@ -37,6 +37,12 @@ export class AIPlayer implements GameSystem {
   private buildPhase = 0;
   private lastBuildTick = 0;
   private buildCooldown = 200;
+  // Base defense: designated defender units stay near base
+  private defenders = new Set<number>();
+  private maxDefenders = 4;
+  // Track if base was recently attacked for priority response
+  private baseUnderAttack = false;
+  private baseAttackTick = 0;
 
   // Army management
   private attackGroupSize = 4;
@@ -83,6 +89,20 @@ export class AIPlayer implements GameSystem {
 
   setSpawnCallback(cb: (eid: number, typeName: string, owner: number, x: number, z: number) => void): void {
     this.spawnCallback = cb;
+  }
+
+  setBasePosition(x: number, z: number): void {
+    this.baseX = x;
+    this.baseZ = z;
+  }
+
+  setTargetPosition(x: number, z: number): void {
+    this.targetX = x;
+    this.targetZ = z;
+  }
+
+  getBasePosition(): { x: number; z: number } {
+    return { x: this.baseX, z: this.baseZ };
   }
 
   setProductionSystem(production: ProductionSystem, harvestSystem: HarvestSystem): void {
@@ -135,6 +155,11 @@ export class AIPlayer implements GameSystem {
     const trainInterval = Math.max(75, Math.floor(150 / this.difficulty));
     if (this.tickCounter % trainInterval === 0 && this.production && this.harvestSystem) {
       this.trainUnits();
+    }
+
+    // Detect base attacks: check if AI buildings are taking damage
+    if (this.tickCounter % 25 === 0) {
+      this.checkBaseDefense(world);
     }
 
     // Spawn wave (fallback if production system isn't connected)
@@ -215,6 +240,16 @@ export class AIPlayer implements GameSystem {
           `${px}SmWindtrap`, `${px}Factory`, `${px}Barracks`, `${px}Refinery`,
           `${px}Hanger`, `${px}Starport`, `${px}SmWindtrap`,
         ];
+        // Try building defense turrets if under attack or periodically
+        if (this.baseUnderAttack || Math.random() < 0.3) {
+          const turretTypes = [`${px}GunTurret`, `${px}RocketTurret`, `${px}Turret`];
+          for (const turret of turretTypes) {
+            if (this.production.canBuild(this.playerId, turret, true)) {
+              this.production.startProduction(this.playerId, turret, true);
+              return;
+            }
+          }
+        }
         const pick = lateBuildings[Math.floor(Math.random() * lateBuildings.length)];
         if (this.production.canBuild(this.playerId, pick, true)) {
           this.production.startProduction(this.playerId, pick, true);
@@ -288,17 +323,30 @@ export class AIPlayer implements GameSystem {
       }
     }
 
+    // Ensure we have some defenders near base
+    if (this.defenders.size < this.maxDefenders && nearBaseUnits.length > this.maxDefenders) {
+      for (const eid of nearBaseUnits) {
+        if (this.defenders.size >= this.maxDefenders) break;
+        if (!this.defenders.has(eid)) {
+          this.defenders.add(eid);
+        }
+      }
+    }
+
     // Dynamic attack group size based on difficulty
     const attackThreshold = Math.max(3, Math.floor(this.attackGroupSize * this.difficulty));
     const canAttack = this.tickCounter - this.lastAttackTick > this.attackCooldown;
 
-    if (nearBaseUnits.length >= attackThreshold && canAttack) {
+    // Filter out designated defenders from attack group
+    const attackableUnits = nearBaseUnits.filter(eid => !this.defenders.has(eid));
+
+    if (attackableUnits.length >= attackThreshold && canAttack) {
       this.lastAttackTick = this.tickCounter;
 
       // Split into groups for multi-direction attack
-      const groupSize = Math.ceil(nearBaseUnits.length / 2);
-      const group1 = nearBaseUnits.slice(0, groupSize);
-      const group2 = nearBaseUnits.slice(groupSize);
+      const groupSize = Math.ceil(attackableUnits.length / 2);
+      const group1 = attackableUnits.slice(0, groupSize);
+      const group2 = attackableUnits.slice(groupSize);
 
       // Main attack direction
       const angle1 = Math.atan2(this.targetZ - this.baseZ, this.targetX - this.baseX);
@@ -356,6 +404,60 @@ export class AIPlayer implements GameSystem {
           if (hasComponent(world, AttackTarget, eid)) {
             AttackTarget.active[eid] = 0;
           }
+        }
+      }
+    }
+  }
+
+  private checkBaseDefense(world: World): void {
+    const buildings = buildingQuery(world);
+    let underAttack = false;
+
+    for (const eid of buildings) {
+      if (Owner.playerId[eid] !== this.playerId) continue;
+      if (Health.current[eid] <= 0) continue;
+      // Check if any building is below 90% health (recently damaged)
+      if (Health.current[eid] < Health.max[eid] * 0.9) {
+        underAttack = true;
+        break;
+      }
+    }
+
+    if (underAttack && !this.baseUnderAttack) {
+      this.baseUnderAttack = true;
+      this.baseAttackTick = this.tickCounter;
+      // Emergency: recall all idle units to defend base
+      this.recallDefenders(world);
+    } else if (!underAttack && this.baseUnderAttack) {
+      // All clear after 20 seconds
+      if (this.tickCounter - this.baseAttackTick > 500) {
+        this.baseUnderAttack = false;
+      }
+    }
+
+    // Clean up dead defenders
+    for (const eid of this.defenders) {
+      if (Health.current[eid] <= 0) {
+        this.defenders.delete(eid);
+      }
+    }
+  }
+
+  private recallDefenders(world: World): void {
+    const units = unitQuery(world);
+    for (const eid of units) {
+      if (Owner.playerId[eid] !== this.playerId) continue;
+      if (Health.current[eid] <= 0) continue;
+      if (hasComponent(world, Harvester, eid)) continue;
+
+      // Only recall units that aren't already near base
+      const dist = distance2D(Position.x[eid], Position.z[eid], this.baseX, this.baseZ);
+      if (dist > 50) {
+        MoveTarget.x[eid] = this.baseX + (Math.random() - 0.5) * 15;
+        MoveTarget.z[eid] = this.baseZ + (Math.random() - 0.5) * 15;
+        MoveTarget.active[eid] = 1;
+        if (hasComponent(world, AttackTarget, eid)) {
+          AttackTarget.active[eid] = 0;
         }
       }
     }

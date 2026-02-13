@@ -202,10 +202,11 @@ export class CommandManager {
   };
 
   issueMoveCommand(entityIds: number[], x: number, z: number): void {
-    // Clear waypoints, patrols, and attack-move state
+    // Clear waypoints, patrols, guard positions, and attack-move state
     for (const eid of entityIds) {
       this.waypointQueues.delete(eid);
       this.patrolEntities.delete(eid);
+      this.combatSystem?.clearGuardPosition(eid);
     }
     this.combatSystem?.clearAttackMove(entityIds);
 
@@ -305,11 +306,15 @@ export class CommandManager {
   }
 
   private issueGuardCommand(entityIds: number[]): void {
-    // Stop moving, but keep combat active (auto-acquire will handle it)
+    // Stop moving, set guard position to current location, auto-acquire in range
     for (const eid of entityIds) {
       MoveTarget.active[eid] = 0;
       this.waypointQueues.delete(eid);
-      // Leave AttackTarget alone — auto-acquire in range handles the rest
+      this.patrolEntities.delete(eid);
+      // Store current position as guard point — unit returns here after combat
+      this.combatSystem?.setGuardPosition(eid, Position.x[eid], Position.z[eid]);
     }
+    this.combatSystem?.clearAttackMove(entityIds);
+    this.audioManager?.playSfx('select');
   }
 }
