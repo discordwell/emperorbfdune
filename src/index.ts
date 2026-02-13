@@ -1195,27 +1195,28 @@ async function main() {
     // Infantry crushing: vehicles crush infantry they overlap (every 10 ticks)
     if (game.getTickCount() % 10 === 0) {
       const allUnits = unitQuery(world);
+      // Pre-filter: collect moving crushers and crushable infantry separately
+      const crushers: number[] = [];
+      const crushable: number[] = [];
       for (const eid of allUnits) {
         if (Health.current[eid] <= 0) continue;
         const typeId = UnitType.id[eid];
         const typeName = unitTypeNames[typeId];
         const def = typeName ? gameRules.units.get(typeName) : null;
-        if (!def || !def.crushes) continue;
-        if (MoveTarget.active[eid] !== 1) continue; // Only crush while moving
-
-        // Check for nearby crushable infantry
-        for (const other of allUnits) {
-          if (other === eid) continue;
+        if (!def) continue;
+        if (def.crushes && MoveTarget.active[eid] === 1) crushers.push(eid);
+        if (def.crushable) crushable.push(eid);
+      }
+      // Only do O(crushers * crushable) check, typically much smaller than O(n^2)
+      for (const eid of crushers) {
+        const px = Position.x[eid], pz = Position.z[eid];
+        const owner = Owner.playerId[eid];
+        for (const other of crushable) {
           if (Health.current[other] <= 0) continue;
-          if (Owner.playerId[other] === Owner.playerId[eid]) continue; // Don't crush friendlies
-          const oTypeId = UnitType.id[other];
-          const oName = unitTypeNames[oTypeId];
-          const oDef = oName ? gameRules.units.get(oName) : null;
-          if (!oDef || !oDef.crushable) continue;
-
-          const dx = Position.x[eid] - Position.x[other];
-          const dz = Position.z[eid] - Position.z[other];
-          if (dx * dx + dz * dz < 2.0) { // Within 1.4 units
+          if (Owner.playerId[other] === owner) continue;
+          const dx = px - Position.x[other];
+          const dz = pz - Position.z[other];
+          if (dx * dx + dz * dz < 2.0) {
             Health.current[other] = 0;
             EventBus.emit('unit:died', { entityId: other, killerEntity: eid });
           }
