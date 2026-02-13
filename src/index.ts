@@ -339,6 +339,13 @@ async function main() {
   // Override AI unit pool for the enemy faction
   aiPlayer.setUnitPool(house.enemyPrefix);
   aiPlayer.setDifficulty(house.difficulty ?? 'normal');
+  // Give AI a random sub-house (different from player's if possible)
+  const aiSubhousePrefixes = ['FR', 'IM', 'IX', 'TL', 'GU'];
+  const playerSubPrefix = house.subhouse?.prefix ?? '';
+  const available = aiSubhousePrefixes.filter(p => p !== playerSubPrefix);
+  const aiSubPrefix = available[Math.floor(Math.random() * available.length)];
+  aiPlayer.setSubhousePrefix(aiSubPrefix);
+  console.log(`AI sub-house: ${aiSubPrefix}`);
   // Apply skirmish options
   if (house.skirmishOptions) {
     const opts = house.skirmishOptions;
@@ -1052,20 +1059,46 @@ async function main() {
         spawnBuilding(world, unitType, owner, x, z);
       }
     } else {
+      // Check if this is a starportable unit arriving via Starport
+      const uDef2 = gameRules.units.get(unitType);
+      let fromStarport = false;
+      let starportX = 0, starportZ = 0;
+
       // Spawn unit near appropriate building — find a barracks/factory owned by this player
       let baseX: number, baseZ: number;
       const spawnBuildings = buildingQuery(world);
       let found = false;
-      for (const bid of spawnBuildings) {
-        if (Owner.playerId[bid] !== owner) continue;
-        if (Health.current[bid] <= 0) continue;
-        const bTypeId = BuildingType.id[bid];
-        const bName = buildingTypeNames[bTypeId] ?? '';
-        if (bName.includes('Barracks') || bName.includes('Factory')) {
-          baseX = Position.x[bid];
-          baseZ = Position.z[bid];
-          found = true;
-          break;
+
+      // If starportable, try to spawn near the Starport first
+      if (uDef2?.starportable) {
+        for (const bid of spawnBuildings) {
+          if (Owner.playerId[bid] !== owner) continue;
+          if (Health.current[bid] <= 0) continue;
+          const bName = buildingTypeNames[BuildingType.id[bid]] ?? '';
+          if (bName.includes('Starport')) {
+            baseX = Position.x[bid];
+            baseZ = Position.z[bid];
+            starportX = baseX;
+            starportZ = baseZ;
+            fromStarport = true;
+            found = true;
+            break;
+          }
+        }
+      }
+
+      if (!found) {
+        for (const bid of spawnBuildings) {
+          if (Owner.playerId[bid] !== owner) continue;
+          if (Health.current[bid] <= 0) continue;
+          const bTypeId = BuildingType.id[bid];
+          const bName = buildingTypeNames[bTypeId] ?? '';
+          if (bName.includes('Barracks') || bName.includes('Factory')) {
+            baseX = Position.x[bid];
+            baseZ = Position.z[bid];
+            found = true;
+            break;
+          }
         }
       }
       if (!found) {
@@ -1087,6 +1120,30 @@ async function main() {
       const x = baseX! + (Math.random() - 0.5) * 10;
       const z = baseZ! + (Math.random() - 0.5) * 10;
       const eid = spawnUnit(world, unitType, owner, x, z);
+
+      // Starport arrival: descent animation from above
+      if (fromStarport && eid >= 0) {
+        Position.y[eid] = 15; // Start high
+        MoveTarget.active[eid] = 0; // Don't move during descent
+        combatSystem.setSuppressed(eid, true);
+        let frame = 0;
+        const descend = () => {
+          if (Health.current[eid] <= 0 || frame >= 30) {
+            Position.y[eid] = 0.1;
+            combatSystem.setSuppressed(eid, false);
+            return;
+          }
+          frame++;
+          Position.y[eid] = 15 * (1 - frame / 30); // Linear descent over 30 frames
+          setTimeout(descend, 33); // ~30fps
+        };
+        descend();
+        effectsManager.spawnExplosion(starportX, 8, starportZ, 'small');
+        if (owner === 0) {
+          audioManager.playSfx('build');
+          selectionPanel.addMessage('Starport delivery arriving!', '#88aaff');
+        }
+      }
 
       // Atreides veterancy bonus: infantry from upgraded barracks start at rank 1
       if (eid >= 0) {

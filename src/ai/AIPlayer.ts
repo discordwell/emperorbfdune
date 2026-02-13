@@ -32,6 +32,7 @@ export class AIPlayer implements GameSystem {
   private unitPool: string[] = [];
   private infantryPool: string[] = [];
   private vehiclePool: string[] = [];
+  private subhousePrefix = '';
 
   // Build order tracking
   private buildPhase = 0;
@@ -114,6 +115,22 @@ export class AIPlayer implements GameSystem {
 
   setBuildingTypeNames(names: string[]): void {
     this.buildingTypeNames = names;
+  }
+
+  /** Set sub-house prefix to add sub-house units/buildings to AI's pool */
+  setSubhousePrefix(prefix: string): void {
+    this.subhousePrefix = prefix;
+    // Add sub-house units to the unit pools
+    for (const [name, def] of this.rules.units) {
+      if (name.startsWith(prefix) && def.cost > 0 && !def.canFly) {
+        this.unitPool.push(name);
+        if (def.infantry) {
+          this.infantryPool.push(name);
+        } else {
+          this.vehiclePool.push(name);
+        }
+      }
+    }
   }
 
   setUnitPool(prefix: string): void {
@@ -350,6 +367,32 @@ export class AIPlayer implements GameSystem {
         for (const name of advBuildings) {
           if (this.production.canBuild(this.playerId, name, true)) {
             this.production.startProduction(this.playerId, name, true);
+            return;
+          }
+        }
+      }
+
+      // Priority 7: Sub-house buildings (Fremen Camp, Sardaukar Barracks, Ix Research Center, etc.)
+      if (this.subhousePrefix && this.difficulty > 1.3 && solaris > 1000) {
+        // Map sub-house prefix to building name
+        const subBuildings: Record<string, string[]> = {
+          'FR': ['FRFremenCamp'],
+          'IM': ['IMBarracks'],
+          'IX': ['IXResCentre'],
+          'TL': ['TLFleshVat'],
+          'GU': ['GUPalace'],
+        };
+        const candidates = subBuildings[this.subhousePrefix] ?? [];
+        for (const bName of candidates) {
+          if (this.production.canBuild(this.playerId, bName, true)) {
+            this.production.startProduction(this.playerId, bName, true);
+            return;
+          }
+        }
+        // Also try upgrading sub-house buildings
+        for (const bName of candidates) {
+          if (this.production.canUpgrade(this.playerId, bName)) {
+            this.production.startUpgrade(this.playerId, bName);
             return;
           }
         }

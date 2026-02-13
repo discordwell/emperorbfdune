@@ -25,6 +25,7 @@ export class FogOfWar {
   private fogMesh: THREE.Mesh | null = null;
   private fogTexture: THREE.DataTexture;
   private fogData: Uint8Array;
+  private rawAlphaBuffer: Uint8Array; // Temp buffer for blur pass
 
   // Buildings reveal radius (tiles)
   private buildingViewRange = 8;
@@ -38,6 +39,7 @@ export class FogOfWar {
     this.visibility = new Uint8Array(MAP_SIZE * MAP_SIZE);
     this.explored = new Uint8Array(MAP_SIZE * MAP_SIZE);
     this.fogData = new Uint8Array(MAP_SIZE * MAP_SIZE * 4);
+    this.rawAlphaBuffer = new Uint8Array(MAP_SIZE * MAP_SIZE);
     // Initialize all as unexplored (black)
     for (let i = 0; i < MAP_SIZE * MAP_SIZE; i++) {
       const idx = i * 4;
@@ -133,19 +135,37 @@ export class FogOfWar {
   }
 
   private updateTexture(): void {
+    // First pass: write raw alpha values based on visibility state
+    const rawAlpha = this.rawAlphaBuffer;
     for (let i = 0; i < MAP_SIZE * MAP_SIZE; i++) {
-      const idx = i * 4;
       const vis = this.visibility[i];
-      // RGBA: black fog with varying alpha
-      this.fogData[idx] = 0;
-      this.fogData[idx + 1] = 0;
-      this.fogData[idx + 2] = 0;
-      if (vis === FOG_VISIBLE) {
-        this.fogData[idx + 3] = 0;    // Fully transparent
-      } else if (vis === FOG_EXPLORED) {
-        this.fogData[idx + 3] = 140;  // Semi-transparent (fog)
-      } else {
-        this.fogData[idx + 3] = 240;  // Nearly opaque (unexplored)
+      if (vis === FOG_VISIBLE) rawAlpha[i] = 0;
+      else if (vis === FOG_EXPLORED) rawAlpha[i] = 140;
+      else rawAlpha[i] = 240;
+    }
+
+    // Second pass: 3x3 box blur on alpha for soft edges
+    for (let z = 0; z < MAP_SIZE; z++) {
+      for (let x = 0; x < MAP_SIZE; x++) {
+        const idx = (z * MAP_SIZE + x) * 4;
+        this.fogData[idx] = 0;
+        this.fogData[idx + 1] = 0;
+        this.fogData[idx + 2] = 0;
+
+        // Sample 3x3 neighborhood
+        let sum = 0;
+        let count = 0;
+        for (let dz = -1; dz <= 1; dz++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const nx = x + dx;
+            const nz = z + dz;
+            if (nx >= 0 && nx < MAP_SIZE && nz >= 0 && nz < MAP_SIZE) {
+              sum += rawAlpha[nz * MAP_SIZE + nx];
+              count++;
+            }
+          }
+        }
+        this.fogData[idx + 3] = Math.round(sum / count);
       }
     }
     this.fogTexture.needsUpdate = true;
