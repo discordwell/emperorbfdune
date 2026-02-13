@@ -1,10 +1,10 @@
 import type { World } from '../core/ECS';
-import { MoveTarget, Position, AttackTarget, Combat, Owner, Health, BuildingType, hasComponent } from '../core/ECS';
+import { MoveTarget, Position, AttackTarget, Combat, Owner, Health, BuildingType, Harvester, hasComponent } from '../core/ECS';
 import type { SceneManager } from '../rendering/SceneManager';
 import type { SelectionManager } from './SelectionManager';
 import type { UnitRenderer } from '../rendering/UnitRenderer';
 import { EventBus } from '../core/EventBus';
-import type { AudioManager } from '../audio/AudioManager';
+import type { AudioManager, UnitCategory } from '../audio/AudioManager';
 import type { CombatSystem } from '../simulation/CombatSystem';
 
 export type CommandMode = 'normal' | 'attack-move' | 'patrol';
@@ -18,6 +18,7 @@ export class CommandManager {
   private world: any = null;
 
   private commandMode: CommandMode = 'normal';
+  private unitClassifier: ((eid: number) => UnitCategory) | null = null;
 
   // Waypoint queue per entity
   private waypointQueues = new Map<number, Array<{ x: number; z: number }>>();
@@ -41,6 +42,15 @@ export class CommandManager {
 
   setCombatSystem(combat: CombatSystem): void {
     this.combatSystem = combat;
+  }
+
+  setUnitClassifier(fn: (eid: number) => UnitCategory): void {
+    this.unitClassifier = fn;
+  }
+
+  private getSelectedCategory(entityIds: number[]): UnitCategory {
+    if (entityIds.length === 0 || !this.unitClassifier) return 'vehicle';
+    return this.unitClassifier(entityIds[0]);
   }
 
   setWorld(world: any): void {
@@ -95,7 +105,7 @@ export class CommandManager {
     const targetEid = this.unitRenderer.getEntityAtScreen(e.clientX, e.clientY);
     if (targetEid !== null) {
       this.issueAttackCommand(selected, targetEid);
-      this.audioManager?.playSfx('attack');
+      this.audioManager?.playUnitSfx('attack', this.getSelectedCategory(selected));
       return;
     }
 
@@ -112,22 +122,23 @@ export class CommandManager {
       return;
     }
 
+    const cat = this.getSelectedCategory(selected);
     if (this.commandMode === 'attack-move') {
       this.issueAttackMoveCommand(selected, worldPos.x, worldPos.z);
-      this.audioManager?.playSfx('move');
+      this.audioManager?.playUnitSfx('move', cat);
       this.commandMode = 'normal';
       document.body.style.cursor = 'default';
     } else if (this.commandMode === 'patrol') {
       this.issuePatrolCommand(selected, worldPos.x, worldPos.z);
-      this.audioManager?.playSfx('move');
+      this.audioManager?.playUnitSfx('move', cat);
       this.commandMode = 'normal';
       document.body.style.cursor = 'default';
     } else if (shiftHeld) {
       this.addWaypoint(selected, worldPos.x, worldPos.z);
-      this.audioManager?.playSfx('move');
+      this.audioManager?.playUnitSfx('move', cat);
     } else {
       this.issueMoveCommand(selected, worldPos.x, worldPos.z);
-      this.audioManager?.playSfx('move');
+      this.audioManager?.playUnitSfx('move', cat);
     }
   };
 

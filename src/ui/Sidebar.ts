@@ -6,6 +6,8 @@ import type { BuildingDef } from '../config/BuildingDefs';
 
 type BuildCallback = (typeName: string, isBuilding: boolean) => void;
 
+const HOTKEYS = ['q', 'e', 'r', 'z', 'x', 'c'];
+
 export class Sidebar {
   private container: HTMLElement;
   private rules: GameRules;
@@ -18,6 +20,8 @@ export class Sidebar {
 
   private factionPrefix: string;
   private tooltip: HTMLElement | null;
+  // Maps hotkey letter to { name, isBuilding } for current tab
+  private hotkeyMap = new Map<string, { name: string; isBuilding: boolean }>();
 
   constructor(rules: GameRules, production: ProductionSystem, artMap: Map<string, ArtEntry>, onBuild: BuildCallback, factionPrefix = 'AT') {
     this.container = document.getElementById('sidebar')!;
@@ -28,7 +32,22 @@ export class Sidebar {
     this.factionPrefix = factionPrefix;
     this.tooltip = document.getElementById('tooltip');
     this.render();
+    window.addEventListener('keydown', this.onKeyDown);
   }
+
+  private onKeyDown = (e: KeyboardEvent): void => {
+    if (e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return;
+    // Don't fire in text inputs or when help overlay is shown
+    const tag = (e.target as HTMLElement)?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    const help = document.getElementById('help-overlay');
+    if (help && help.style.display !== 'none') return;
+
+    const entry = this.hotkeyMap.get(e.key.toLowerCase());
+    if (entry) {
+      this.onBuild(entry.name, entry.isBuilding);
+    }
+  };
 
   private render(): void {
     this.container.innerHTML = '';
@@ -65,6 +84,7 @@ export class Sidebar {
     const grid = document.createElement('div');
     grid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:2px;padding:4px;';
 
+    this.hotkeyMap.clear();
     if (this.currentTab === 'Buildings') {
       this.renderBuildingItems(grid);
     } else {
@@ -76,6 +96,7 @@ export class Sidebar {
 
   private renderBuildingItems(grid: HTMLElement): void {
     const prefix = this.factionPrefix;
+    let hotkeyIdx = 0;
 
     for (const [name, def] of this.rules.buildings) {
       const validPrefix = name.startsWith(prefix) || name.startsWith('GU') || name.startsWith('IX') || name.startsWith('FR') || name.startsWith('IM') || name.startsWith('TL');
@@ -84,13 +105,19 @@ export class Sidebar {
       if (def.cost <= 0) continue;
 
       const canBuild = this.production.canBuild(this.playerId, name, true);
-      const item = this.createBuildItem(name, def.cost, canBuild, true);
+      const hotkey = hotkeyIdx < HOTKEYS.length ? HOTKEYS[hotkeyIdx] : undefined;
+      const item = this.createBuildItem(name, def.cost, canBuild, true, hotkey);
       grid.appendChild(item);
+      if (hotkey && canBuild) {
+        this.hotkeyMap.set(hotkey, { name, isBuilding: true });
+      }
+      hotkeyIdx++;
     }
   }
 
   private renderUnitItems(grid: HTMLElement, infantryOnly: boolean): void {
     const prefix = this.factionPrefix;
+    let hotkeyIdx = 0;
 
     for (const [name, def] of this.rules.units) {
       if (!name.startsWith(prefix)) continue;
@@ -99,26 +126,33 @@ export class Sidebar {
       if (!infantryOnly && def.infantry) continue;
 
       const canBuild = this.production.canBuild(this.playerId, name, false);
-      const item = this.createBuildItem(name, def.cost, canBuild, false);
+      const hotkey = hotkeyIdx < HOTKEYS.length ? HOTKEYS[hotkeyIdx] : undefined;
+      const item = this.createBuildItem(name, def.cost, canBuild, false, hotkey);
       grid.appendChild(item);
+      if (hotkey && canBuild) {
+        this.hotkeyMap.set(hotkey, { name, isBuilding: false });
+      }
+      hotkeyIdx++;
     }
   }
 
-  private createBuildItem(name: string, cost: number, enabled: boolean, isBuilding: boolean): HTMLElement {
+  private createBuildItem(name: string, cost: number, enabled: boolean, isBuilding: boolean, hotkey?: string): HTMLElement {
     const item = document.createElement('button');
     item.style.cssText = `
       padding:4px;background:${enabled ? '#1a1a3e' : '#0a0a15'};
       border:1px solid ${enabled ? '#444' : '#222'};color:${enabled ? '#ddd' : '#555'};
       cursor:${enabled ? 'pointer' : 'default'};font-size:10px;text-align:center;
+      position:relative;
     `;
     // Short display name (strip house prefix)
     const displayName = name.replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, '');
-    item.innerHTML = `<div style="font-size:11px;font-weight:bold">${displayName}</div><div style="color:#f0c040;font-size:10px">$${cost}</div>`;
+    const hotkeyBadge = hotkey ? `<span style="position:absolute;top:1px;right:3px;font-size:9px;color:${enabled ? '#8cf' : '#335'};font-weight:bold;">${hotkey.toUpperCase()}</span>` : '';
+    item.innerHTML = `${hotkeyBadge}<div style="font-size:11px;font-weight:bold">${displayName}</div><div style="color:#f0c040;font-size:10px">$${cost}</div>`;
 
     // Tooltip on hover
     item.onmouseenter = (e) => {
       if (enabled) item.style.borderColor = '#0f0';
-      this.showTooltip(name, isBuilding, e.clientX, e.clientY);
+      this.showTooltip(name, isBuilding, e.clientX, e.clientY, hotkey);
     };
     item.onmouseleave = () => {
       if (enabled) item.style.borderColor = '#444';
@@ -138,7 +172,7 @@ export class Sidebar {
     return item;
   }
 
-  private showTooltip(name: string, isBuilding: boolean, x: number, y: number): void {
+  private showTooltip(name: string, isBuilding: boolean, x: number, y: number, hotkey?: string): void {
     if (!this.tooltip) return;
 
     const def = isBuilding
@@ -147,7 +181,8 @@ export class Sidebar {
     if (!def) return;
 
     const displayName = name.replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, '');
-    let html = `<div style="font-weight:bold;color:#fff;margin-bottom:4px;">${displayName}</div>`;
+    const hotkeyHint = hotkey ? ` <span style="color:#8cf;font-size:10px;">[${hotkey.toUpperCase()}]</span>` : '';
+    let html = `<div style="font-weight:bold;color:#fff;margin-bottom:4px;">${displayName}${hotkeyHint}</div>`;
     html += `<div style="color:#f0c040;">Cost: $${def.cost}</div>`;
     html += `<div>HP: ${def.health}</div>`;
     html += `<div>Build Time: ${def.buildTime} ticks</div>`;

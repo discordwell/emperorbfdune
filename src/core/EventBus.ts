@@ -27,6 +27,7 @@ interface EventMap {
   'worm:submerge': { x: number; z: number };
   'rally:set': { playerId: number; x: number; z: number };
   'worm:eat': { entityId: number; x: number; z: number; ownerId: number };
+  'unit:damaged': { entityId: number; attackerOwner: number; x: number; z: number; isBuilding: boolean };
 }
 
 type EventName = keyof EventMap;

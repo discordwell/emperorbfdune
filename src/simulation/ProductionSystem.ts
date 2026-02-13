@@ -20,8 +20,8 @@ export class ProductionSystem {
   private buildingQueues = new Map<number, QueueItem[]>(); // playerId -> queue
   private unitQueues = new Map<number, QueueItem[]>();
 
-  // Built buildings per player (for tech tree checking)
-  private playerBuildings = new Map<number, Set<string>>();
+  // Built buildings per player (for tech tree checking) - count allows duplicates
+  private playerBuildings = new Map<number, Map<string, number>>();
 
   // Power multiplier per player: 1.0 = full power, 0.5 = low power
   private powerMultipliers = new Map<number, number>();
@@ -48,15 +48,21 @@ export class ProductionSystem {
 
   addPlayerBuilding(playerId: number, buildingType: string): void {
     if (!this.playerBuildings.has(playerId)) {
-      this.playerBuildings.set(playerId, new Set());
+      this.playerBuildings.set(playerId, new Map());
     }
-    this.playerBuildings.get(playerId)!.add(buildingType);
+    const counts = this.playerBuildings.get(playerId)!;
+    counts.set(buildingType, (counts.get(buildingType) ?? 0) + 1);
   }
 
   removePlayerBuilding(playerId: number, buildingType: string): void {
-    const owned = this.playerBuildings.get(playerId);
-    if (owned) {
-      owned.delete(buildingType);
+    const counts = this.playerBuildings.get(playerId);
+    if (counts) {
+      const current = counts.get(buildingType) ?? 0;
+      if (current <= 1) {
+        counts.delete(buildingType);
+      } else {
+        counts.set(buildingType, current - 1);
+      }
     }
   }
 
@@ -69,7 +75,7 @@ export class ProductionSystem {
     if (this.harvestSystem.getSolaris(playerId) < def.upgradeCost) return false;
     // Must own the building
     const owned = this.playerBuildings.get(playerId);
-    if (!owned || !owned.has(buildingType)) return false;
+    if (!owned || (owned.get(buildingType) ?? 0) <= 0) return false;
     return true;
   }
 
@@ -119,7 +125,16 @@ export class ProductionSystem {
 
     // Check prerequisites (primary building must exist)
     const owned = this.playerBuildings.get(playerId);
-    if (def.primaryBuilding && owned && !owned.has(def.primaryBuilding)) return false;
+    if (def.primaryBuilding) {
+      if (!owned || !owned.has(def.primaryBuilding) || (owned.get(def.primaryBuilding) ?? 0) <= 0) return false;
+    }
+
+    // Check secondary building prerequisites
+    if (def.secondaryBuildings && def.secondaryBuildings.length > 0) {
+      for (const req of def.secondaryBuildings) {
+        if (!owned || !owned.has(req) || (owned.get(req) ?? 0) <= 0) return false;
+      }
+    }
 
     // Unit population cap (only for units, not buildings)
     if (!isBuilding && this.unitCountCallback) {

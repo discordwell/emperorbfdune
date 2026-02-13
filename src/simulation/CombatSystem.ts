@@ -22,6 +22,8 @@ export class CombatSystem implements GameSystem {
   private attackMoveEntities = new Set<number>();
   // Stored move destinations for attack-move units that pause to fight
   private attackMoveDestinations = new Map<number, { x: number; z: number }>();
+  // Buildings disabled due to low power
+  private disabledBuildings = new Set<number>();
 
   constructor(rules: GameRules) {
     this.rules = rules;
@@ -34,6 +36,11 @@ export class CombatSystem implements GameSystem {
 
   setPowerMultiplier(playerId: number, multiplier: number): void {
     this.powerMultipliers.set(playerId, multiplier);
+  }
+
+  setDisabledBuilding(eid: number, disabled: boolean): void {
+    if (disabled) this.disabledBuildings.add(eid);
+    else this.disabledBuildings.delete(eid);
   }
 
   init(_world: World): void {
@@ -72,6 +79,9 @@ export class CombatSystem implements GameSystem {
     const entities = combatQuery(world);
 
     for (const eid of entities) {
+      // Skip disabled buildings (low power)
+      if (this.disabledBuildings.has(eid)) continue;
+
       // Decrement fire timer
       if (Combat.fireTimer[eid] > 0) {
         Combat.fireTimer[eid]--;
@@ -228,6 +238,18 @@ export class CombatSystem implements GameSystem {
 
     // Apply damage
     Health.current[targetEid] -= baseDamage;
+
+    // Notify when local player's units/buildings take damage (only player 0)
+    const targetOwner = Owner.playerId[targetEid];
+    if (targetOwner === this.localPlayerId && Owner.playerId[attackerEid] !== targetOwner) {
+      EventBus.emit('unit:damaged', {
+        entityId: targetEid,
+        attackerOwner: Owner.playerId[attackerEid],
+        x: Position.x[targetEid],
+        z: Position.z[targetEid],
+        isBuilding: hasComponent(world, BuildingType, targetEid),
+      });
+    }
 
     if (Health.current[targetEid] <= 0) {
       Health.current[targetEid] = 0;

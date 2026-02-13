@@ -20,6 +20,8 @@ const MUSIC_TRACKS: TrackInfo[] = [
 // Synthesized SFX using Web Audio API (no external files needed)
 type SfxType = 'select' | 'move' | 'attack' | 'explosion' | 'build' | 'sell' | 'error' | 'victory' | 'defeat' | 'harvest' | 'shot' | 'powerlow';
 
+export type UnitCategory = 'infantry' | 'vehicle' | 'harvester';
+
 export class AudioManager {
   private audioContext: AudioContext | null = null;
   private musicElement: HTMLAudioElement | null = null;
@@ -30,6 +32,7 @@ export class AudioManager {
   private lastShotTime = 0;
   private playerFaction = 'AT';
   private musicStarted = false;
+  private unitClassifier: ((eid: number) => UnitCategory) | null = null;
 
   constructor() {
     this.setupEventListeners();
@@ -47,10 +50,21 @@ export class AudioManager {
     this.playerFaction = faction;
   }
 
+  setUnitClassifier(fn: (eid: number) => UnitCategory): void {
+    this.unitClassifier = fn;
+  }
+
   private setupEventListeners(): void {
-    EventBus.on('unit:selected', () => this.playSfx('select'));
-    EventBus.on('unit:move', () => this.playSfx('move'));
-    EventBus.on('unit:attack', () => this.playSfx('attack'));
+    // Unit selection uses classifier for category-specific response
+    EventBus.on('unit:selected', (data) => {
+      if (data.entityIds.length > 0 && this.unitClassifier) {
+        const cat = this.unitClassifier(data.entityIds[0]);
+        this.playUnitSfx('select', cat);
+      } else {
+        this.playSfx('select');
+      }
+    });
+    // unit:move and unit:attack handled by CommandManager direct calls
     EventBus.on('unit:died', () => this.playSfx('explosion'));
     EventBus.on('production:complete', () => this.playSfx('build'));
     EventBus.on('harvest:delivered', () => this.playSfx('harvest'));
@@ -373,6 +387,172 @@ export class AudioManager {
       osc.start(t + i * 0.15);
       osc.stop(t + i * 0.15 + 0.12);
     }
+  }
+
+  // --- Unit category-specific SFX ---
+
+  playUnitSfx(action: 'select' | 'move' | 'attack', category: UnitCategory): void {
+    if (this.muted) return;
+    try {
+      const ctx = this.getContext();
+      if (ctx.state === 'suspended') ctx.resume();
+
+      if (action === 'select') {
+        if (category === 'infantry') this.synthSelectInfantry(ctx);
+        else if (category === 'harvester') this.synthSelectHarvester(ctx);
+        else this.synthSelectVehicle(ctx);
+      } else if (action === 'move') {
+        if (category === 'infantry') this.synthMoveInfantry(ctx);
+        else if (category === 'harvester') this.synthMoveHarvester(ctx);
+        else this.synthMoveVehicle(ctx);
+      } else if (action === 'attack') {
+        if (category === 'infantry') this.synthAttackInfantry(ctx);
+        else if (category === 'harvester') this.synthAttackVehicle(ctx);
+        else this.synthAttackVehicle(ctx);
+      }
+    } catch {
+      // Audio not available
+    }
+  }
+
+  // Infantry select: crisp radio chirp (two quick high beeps)
+  private synthSelectInfantry(ctx: AudioContext): void {
+    const t = ctx.currentTime;
+    const p = this.randPitch();
+    for (let i = 0; i < 2; i++) {
+      const osc = ctx.createOscillator();
+      const gain = this.makeGain(ctx, 0.14);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(1200 * p, t + i * 0.07);
+      osc.frequency.exponentialRampToValueAtTime(1600 * p, t + i * 0.07 + 0.04);
+      gain.gain.setValueAtTime(0.14 * this.sfxVolume, t + i * 0.07);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + i * 0.07 + 0.06);
+      osc.connect(gain);
+      osc.start(t + i * 0.07);
+      osc.stop(t + i * 0.07 + 0.07);
+    }
+  }
+
+  // Vehicle select: mechanical clunk (low tone with slight ramp)
+  private synthSelectVehicle(ctx: AudioContext): void {
+    const t = ctx.currentTime;
+    const p = this.randPitch();
+    const osc = ctx.createOscillator();
+    const gain = this.makeGain(ctx, 0.18);
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(400 * p, t);
+    osc.frequency.exponentialRampToValueAtTime(600 * p, t + 0.06);
+    osc.frequency.exponentialRampToValueAtTime(500 * p, t + 0.12);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+    osc.connect(gain);
+    osc.start(t);
+    osc.stop(t + 0.18);
+  }
+
+  // Harvester select: deep industrial hum
+  private synthSelectHarvester(ctx: AudioContext): void {
+    const t = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const osc2 = ctx.createOscillator();
+    const gain = this.makeGain(ctx, 0.15);
+    osc.type = 'sawtooth';
+    osc.frequency.value = 150;
+    osc2.type = 'sine';
+    osc2.frequency.value = 200;
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+    osc.connect(gain);
+    osc2.connect(gain);
+    osc.start(t);
+    osc2.start(t);
+    osc.stop(t + 0.25);
+    osc2.stop(t + 0.25);
+  }
+
+  // Infantry move: short snappy confirmation beep
+  private synthMoveInfantry(ctx: AudioContext): void {
+    const t = ctx.currentTime;
+    const p = this.randPitch();
+    const osc = ctx.createOscillator();
+    const gain = this.makeGain(ctx, 0.12);
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(900 * p, t);
+    osc.frequency.exponentialRampToValueAtTime(700 * p, t + 0.06);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+    osc.connect(gain);
+    osc.start(t);
+    osc.stop(t + 0.1);
+  }
+
+  // Vehicle move: engine rev (low sweep up then down)
+  private synthMoveVehicle(ctx: AudioContext): void {
+    const t = ctx.currentTime;
+    const p = this.randPitch();
+    const osc = ctx.createOscillator();
+    const gain = this.makeGain(ctx, 0.12);
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(250 * p, t);
+    osc.frequency.exponentialRampToValueAtTime(400 * p, t + 0.08);
+    osc.frequency.exponentialRampToValueAtTime(300 * p, t + 0.15);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+    osc.connect(gain);
+    osc.start(t);
+    osc.stop(t + 0.18);
+  }
+
+  // Harvester move: heavy rumble
+  private synthMoveHarvester(ctx: AudioContext): void {
+    const t = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = this.makeGain(ctx, 0.1);
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 400;
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(120, t);
+    osc.frequency.exponentialRampToValueAtTime(180, t + 0.1);
+    osc.frequency.exponentialRampToValueAtTime(140, t + 0.2);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+    osc.connect(filter);
+    filter.connect(gain);
+    osc.start(t);
+    osc.stop(t + 0.25);
+  }
+
+  // Infantry attack: sharp burst
+  private synthAttackInfantry(ctx: AudioContext): void {
+    const t = ctx.currentTime;
+    const p = this.randPitch();
+    const osc = ctx.createOscillator();
+    const gain = this.makeGain(ctx, 0.18);
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(600 * p, t);
+    osc.frequency.exponentialRampToValueAtTime(300 * p, t + 0.1);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+    osc.connect(gain);
+    osc.start(t);
+    osc.stop(t + 0.15);
+  }
+
+  // Vehicle attack: aggressive low growl
+  private synthAttackVehicle(ctx: AudioContext): void {
+    const t = ctx.currentTime;
+    const p = this.randPitch();
+    const osc = ctx.createOscillator();
+    const osc2 = ctx.createOscillator();
+    const gain = this.makeGain(ctx, 0.15);
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(200 * p, t);
+    osc.frequency.exponentialRampToValueAtTime(100 * p, t + 0.12);
+    osc2.type = 'square';
+    osc2.frequency.setValueAtTime(150 * p, t);
+    osc2.frequency.exponentialRampToValueAtTime(80 * p, t + 0.12);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+    osc.connect(gain);
+    osc2.connect(gain);
+    osc.start(t);
+    osc2.start(t);
+    osc.stop(t + 0.2);
+    osc2.stop(t + 0.2);
   }
 
   // --- Controls ---

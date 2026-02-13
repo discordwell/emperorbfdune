@@ -111,6 +111,22 @@ async function main() {
   const selectionManager = new SelectionManager(scene, unitRenderer);
   const commandManager = new CommandManager(scene, selectionManager, unitRenderer);
   commandManager.setAudioManager(audioManager);
+
+  // Unit classifier: determines category for audio feedback
+  const classifyUnit = (eid: number): 'infantry' | 'vehicle' | 'harvester' => {
+    try {
+      const w = game.getWorld();
+      if (w && hasComponent(w, Harvester, eid)) return 'harvester';
+    } catch { /* world not ready yet */ }
+    const typeId = UnitType.id[eid];
+    const typeName = unitTypeNames[typeId] ?? '';
+    const def = gameRules.units.get(typeName);
+    if (def?.infantry) return 'infantry';
+    return 'vehicle';
+  };
+  audioManager.setUnitClassifier(classifyUnit);
+  commandManager.setUnitClassifier(classifyUnit);
+
   const pathfinder = new PathfindingSystem(terrain);
   const movement = new MovementSystem(pathfinder);
   const combatSystem = new CombatSystem(gameRules);
@@ -464,6 +480,19 @@ async function main() {
       }
     }
 
+    // Auto-replace harvesters: queue a new one if player loses a harvester
+    const owner = Owner.playerId[entityId];
+    if (owner === 0 && hasComponent(world, Harvester, entityId)) {
+      const typeId = UnitType.id[entityId];
+      const harvTypeName = unitTypeNames[typeId];
+      if (harvTypeName && findRefinery(world, 0)) {
+        // Auto-queue replacement
+        if (productionSystem.startProduction(0, harvTypeName, false)) {
+          selectionPanel.addMessage('Harvester lost - replacement queued', '#ff8800');
+        }
+      }
+    }
+
     setTimeout(() => {
       try { removeEntity(world, entityId); } catch {}
     }, 500);
@@ -485,6 +514,21 @@ async function main() {
     if (ownerId === 0) {
       selectionPanel.addMessage('Unit lost to sandworm!', '#ff4444');
     }
+  });
+
+  // Under-attack notifications (throttled to once per 5 seconds)
+  let lastAttackNotifyTime = 0;
+  EventBus.on('unit:damaged', ({ entityId, x, z, isBuilding }) => {
+    if (Owner.playerId[entityId] !== 0) return; // Only notify for local player
+    const now = Date.now();
+    if (now - lastAttackNotifyTime < 5000) return; // Throttle
+    lastAttackNotifyTime = now;
+    if (isBuilding) {
+      selectionPanel.addMessage('Base under attack!', '#ff2222');
+    } else {
+      selectionPanel.addMessage('Units under attack!', '#ff6644');
+    }
+    audioManager.playSfx('error');
   });
 
   // Rally point visuals
@@ -618,10 +662,35 @@ async function main() {
       if (unitCountEl) unitCountEl.textContent = `${unitCount}`;
 
       // Power affects gameplay: slow production and turrets when in deficit
-      const powerMult = powerGen >= powerUsed ? 1.0 : 0.5;
+      const lowPower = powerGen < powerUsed;
+      const powerMult = lowPower ? 0.5 : 1.0;
       productionSystem.setPowerMultiplier(0, powerMult);
       combatSystem.setPowerMultiplier(0, powerMult);
-      if (powerMult < 1.0 && powerUsed > 0 && game.getTickCount() % 250 === 0) {
+
+      // Disable buildings with disableWithLowPower flag when in deficit
+      for (const eid of buildings) {
+        if (Owner.playerId[eid] !== 0) continue;
+        if (Health.current[eid] <= 0) continue;
+        const typeId = BuildingType.id[eid];
+        const bName = buildingTypeNames[typeId];
+        const bDef = bName ? gameRules.buildings.get(bName) : null;
+        if (bDef?.disableWithLowPower) {
+          combatSystem.setDisabledBuilding(eid, lowPower);
+          // Visual: use opacity to dim disabled buildings (preserves original colors)
+          const obj = unitRenderer.getEntityObject(eid);
+          if (obj) {
+            obj.traverse(child => {
+              const mat = (child as any).material;
+              if (mat) {
+                mat.transparent = lowPower;
+                mat.opacity = lowPower ? 0.4 : 1.0;
+              }
+            });
+          }
+        }
+      }
+
+      if (lowPower && powerUsed > 0 && game.getTickCount() % 250 === 0) {
         audioManager.playSfx('powerlow');
         selectionPanel.addMessage('Low power! Build more Windtraps', '#ff4444');
       }
@@ -629,6 +698,36 @@ async function main() {
       // AI always gets full power (simplification - AI builds enough windtraps)
       productionSystem.setPowerMultiplier(1, 1.0);
       combatSystem.setPowerMultiplier(1, 1.0);
+    }
+
+    // Passive repair: idle units near friendly buildings heal slowly every 2 seconds
+    if (game.getTickCount() % 50 === 0) {
+      const allUnits = unitQuery(world);
+      const allBuildings = buildingQuery(world);
+      for (const eid of allUnits) {
+        if (Health.current[eid] <= 0) continue;
+        if (Health.current[eid] >= Health.max[eid]) continue;
+        // Only heal when idle (not moving, not attacking)
+        if (MoveTarget.active[eid] === 1) continue;
+        if (hasComponent(world, AttackTarget, eid) && AttackTarget.active[eid] === 1) continue;
+
+        const owner = Owner.playerId[eid];
+        const ux = Position.x[eid];
+        const uz = Position.z[eid];
+
+        // Check if near a friendly building (within 15 units)
+        let nearBase = false;
+        for (const bid of allBuildings) {
+          if (Owner.playerId[bid] !== owner) continue;
+          if (Health.current[bid] <= 0) continue;
+          const dx = Position.x[bid] - ux;
+          const dz = Position.z[bid] - uz;
+          if (dx * dx + dz * dz < 225) { nearBase = true; break; }
+        }
+        if (nearBase) {
+          Health.current[eid] = Math.min(Health.max[eid], Health.current[eid] + Health.max[eid] * 0.02);
+        }
+      }
     }
 
     // Pause game on victory/defeat
@@ -660,7 +759,11 @@ async function main() {
     sidebar.refresh();
   }, house.prefix);
 
-  setInterval(() => sidebar.updateProgress(), 200);
+  setInterval(() => {
+    sidebar.updateProgress();
+    sidebar.refresh(); // Re-render to update buildable/unbuildable items
+  }, 2000); // Refresh every 2 seconds
+  setInterval(() => sidebar.updateProgress(), 200); // Progress bar updates faster
 
   // Help overlay toggle
   const helpOverlay = document.getElementById('help-overlay');
@@ -672,6 +775,9 @@ async function main() {
     lastEventZ = Position.z[entityId];
   });
   EventBus.on('worm:emerge', ({ x, z }) => { lastEventX = x; lastEventZ = z; });
+  EventBus.on('unit:damaged', ({ entityId, x, z }) => {
+    if (Owner.playerId[entityId] === 0) { lastEventX = x; lastEventZ = z; }
+  });
 
   window.addEventListener('keydown', (e) => {
     if (e.key === '?' || (e.key === '/' && e.shiftKey)) {

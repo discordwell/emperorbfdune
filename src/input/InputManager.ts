@@ -15,6 +15,8 @@ export class InputManager implements GameSystem {
   private mouseY = 0;
   private mouseDown = false;
   private rightMouseDown = false;
+  private middleMouseDown = false;
+  private middleDragPrev: { x: number; y: number } | null = null;
   private dragStart: { x: number; y: number } | null = null;
 
   constructor(sceneManager: SceneManager) {
@@ -96,12 +98,25 @@ export class InputManager implements GameSystem {
   private onMouseMove = (e: MouseEvent): void => {
     this.mouseX = e.clientX;
     this.mouseY = e.clientY;
+
+    // Middle-click pan
+    if (this.middleMouseDown && this.middleDragPrev) {
+      const dx = (e.clientX - this.middleDragPrev.x) * -0.5;
+      const dz = (e.clientY - this.middleDragPrev.y) * -0.5;
+      const zoomFactor = this.sceneManager.getZoom() / 80;
+      this.sceneManager.panCamera(dx * zoomFactor, dz * zoomFactor);
+      this.middleDragPrev = { x: e.clientX, y: e.clientY };
+    }
   };
 
   private onMouseDown = (e: MouseEvent): void => {
     if (e.button === 0) {
       this.mouseDown = true;
       this.dragStart = { x: e.clientX, y: e.clientY };
+    } else if (e.button === 1) {
+      this.middleMouseDown = true;
+      this.middleDragPrev = { x: e.clientX, y: e.clientY };
+      e.preventDefault();
     } else if (e.button === 2) {
       this.rightMouseDown = true;
     }
@@ -111,6 +126,9 @@ export class InputManager implements GameSystem {
     if (e.button === 0) {
       this.mouseDown = false;
       this.dragStart = null;
+    } else if (e.button === 1) {
+      this.middleMouseDown = false;
+      this.middleDragPrev = null;
     } else if (e.button === 2) {
       this.rightMouseDown = false;
       // Right-click handled by CommandManager
