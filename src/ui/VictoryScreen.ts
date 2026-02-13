@@ -165,11 +165,12 @@ export class VictorySystem {
     const container = document.createElement('div');
     container.style.cssText = 'display:flex;flex-direction:column;align-items:center;max-width:600px;width:100%;';
 
-    // Title
+    // Title with entrance animation
     const titleEl = document.createElement('div');
-    titleEl.style.cssText = `color:${color};font-size:56px;font-weight:bold;text-shadow:0 0 30px ${color}40;margin-bottom:8px;`;
+    titleEl.style.cssText = `color:${color};font-size:56px;font-weight:bold;text-shadow:0 0 30px ${color}40;margin-bottom:8px;opacity:0;transform:scale(0.5);transition:opacity 0.8s,transform 0.8s;letter-spacing:6px;`;
     titleEl.textContent = title;
     container.appendChild(titleEl);
+    requestAnimationFrame(() => { titleEl.style.opacity = '1'; titleEl.style.transform = 'scale(1)'; });
 
     // Message
     const msgEl = document.createElement('div');

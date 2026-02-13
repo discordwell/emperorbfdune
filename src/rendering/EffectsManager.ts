@@ -62,6 +62,9 @@ export class EffectsManager {
   // Sandstorm overlay
   private sandstormParticles: THREE.Mesh[] = [];
   private sandstormActive = false;
+  // Dust trails from moving units
+  private dustPuffs: { mesh: THREE.Mesh; life: number; vy: number }[] = [];
+  private dustGeo: THREE.SphereGeometry | null = null;
 
   // Crate visuals: id -> mesh
   private crateVisuals = new Map<number, THREE.Mesh>();
@@ -505,6 +508,39 @@ export class EffectsManager {
 
     // Sandstorm particles
     this.updateSandstormParticles(dt);
+
+    // Dust trail puffs
+    for (let i = this.dustPuffs.length - 1; i >= 0; i--) {
+      const puff = this.dustPuffs[i];
+      puff.life -= dtSec;
+      if (puff.life <= 0) {
+        this.sceneManager.scene.remove(puff.mesh);
+        (puff.mesh.material as THREE.Material).dispose();
+        this.dustPuffs.splice(i, 1);
+      } else {
+        puff.mesh.position.y += puff.vy * dtSec;
+        const scale = 0.3 + (1 - puff.life / 0.8) * 0.4;
+        puff.mesh.scale.setScalar(scale);
+        (puff.mesh.material as THREE.MeshBasicMaterial).opacity = puff.life / 0.8 * 0.4;
+      }
+    }
+  }
+
+  /** Spawn a small dust puff at the given position (for moving ground units) */
+  spawnDustPuff(x: number, z: number): void {
+    if (this.dustPuffs.length > 100) return; // Cap dust particles
+    if (!this.dustGeo) this.dustGeo = new THREE.SphereGeometry(0.15, 3, 3);
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xc8a060, transparent: true, opacity: 0.4, depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(this.dustGeo, mat);
+    mesh.position.set(
+      x + (Math.random() - 0.5) * 0.5,
+      0.1,
+      z + (Math.random() - 0.5) * 0.5,
+    );
+    this.sceneManager.scene.add(mesh);
+    this.dustPuffs.push({ mesh, life: 0.8, vy: 0.3 + Math.random() * 0.3 });
   }
 
   setRallyPoint(playerId: number, x: number, z: number): void {

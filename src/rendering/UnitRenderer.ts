@@ -4,7 +4,7 @@ import type { ModelManager, LoadedModel } from './ModelManager';
 import type { ArtEntry } from '../config/ArtIniParser';
 import {
   Position, Rotation, Renderable, Health, Selectable, Owner,
-  BuildingType, Veterancy, hasComponent,
+  BuildingType, UnitType, MoveTarget, Veterancy, hasComponent,
   renderQuery, renderEnter, renderExit,
   type World,
 } from '../core/ECS';
@@ -49,6 +49,10 @@ export class UnitRenderer {
   private constructing = new Map<number, { progress: number; duration: number }>();
   // Deconstruction (sell) animation: eid -> { progress 0..1, duration ticks, callback }
   private deconstructing = new Map<number, { progress: number; duration: number; onComplete: () => void }>();
+  // Idle animation timer
+  private animTime = 0;
+  // Unit category classifier (returns 'infantry'|'vehicle'|'aircraft')
+  private unitCategoryFn: ((eid: number) => 'infantry' | 'vehicle' | 'aircraft' | 'building') | null = null;
 
   constructor(sceneManager: SceneManager, modelManager: ModelManager, artMap: Map<string, ArtEntry>) {
     this.sceneManager = sceneManager;
@@ -59,6 +63,10 @@ export class UnitRenderer {
   setFogOfWar(fog: FogOfWar, localPlayerId = 0): void {
     this.fogOfWar = fog;
     this.localPlayerId = localPlayerId;
+  }
+
+  setUnitCategoryFn(fn: (eid: number) => 'infantry' | 'vehicle' | 'aircraft' | 'building'): void {
+    this.unitCategoryFn = fn;
   }
 
   /** Mark a building as under construction — will animate from scaffold to solid */
@@ -185,6 +193,8 @@ export class UnitRenderer {
 
   update(world: World): void {
     this.currentWorld = world;
+    this.animTime += 0.016; // ~60fps frame time
+
     // Handle new renderable entities
     const entered = renderEnter(world);
     for (const eid of entered) {
@@ -209,6 +219,24 @@ export class UnitRenderer {
         Position.z[eid],
       );
       obj.rotation.y = Rotation.y[eid];
+
+      // Idle animations (subtle movement when not moving)
+      if (this.unitCategoryFn && !hasComponent(world, BuildingType, eid)) {
+        const isIdle = !hasComponent(world, MoveTarget, eid) || MoveTarget.active[eid] === 0;
+        const cat = this.unitCategoryFn(eid);
+        const t = this.animTime + eid * 1.37; // Phase offset per entity
+        if (cat === 'aircraft') {
+          // Aircraft: hover bob
+          obj.position.y += Math.sin(t * 2.0) * 0.15;
+          if (isIdle) obj.rotation.y += Math.sin(t * 0.5) * 0.003;
+        } else if (cat === 'infantry' && isIdle) {
+          // Infantry: subtle breathing bob
+          obj.position.y += Math.sin(t * 3.0) * 0.03;
+        } else if (cat === 'vehicle' && isIdle) {
+          // Vehicles: very subtle engine vibration
+          obj.position.y += Math.sin(t * 8.0) * 0.008;
+        }
+      }
 
       // Fog of war: hide enemy entities in non-visible tiles
       if (this.fogOfWar && this.fogOfWar.isEnabled() && Owner.playerId[eid] !== this.localPlayerId) {

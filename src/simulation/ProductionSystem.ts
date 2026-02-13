@@ -44,6 +44,10 @@ export class ProductionSystem {
     this.powerMultipliers.set(playerId, multiplier);
   }
 
+  getPowerMultiplier(playerId: number): number {
+    return this.powerMultipliers.get(playerId) ?? 1.0;
+  }
+
   setUnitCountCallback(cb: (playerId: number) => number): void {
     this.unitCountCallback = cb;
   }
@@ -252,7 +256,7 @@ export class ProductionSystem {
         EventBus.emit('production:complete', { unitType: completedName, owner: playerId, buildingId: 0 });
         // Auto-requeue if on repeat and can afford it
         if (this.repeatUnits.get(playerId)?.has(completedName)) {
-          this.queueUnit(playerId, completedName);
+          this.startProduction(playerId, completedName, false);
         }
       }
     }

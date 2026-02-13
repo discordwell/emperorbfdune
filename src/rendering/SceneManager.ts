@@ -215,6 +215,15 @@ export class SceneManager implements RenderSystem {
     return result;
   }
 
+  // Camera shake
+  private shakeIntensity = 0;
+  private shakeDecay = 0.92;
+
+  /** Trigger camera shake (intensity 0-1, decays over time) */
+  shake(intensity: number): void {
+    this.shakeIntensity = Math.max(this.shakeIntensity, intensity);
+  }
+
   updateCameraPosition(): void {
     const offset = new THREE.Vector3(
       Math.sin(this.cameraRotation) * Math.cos(this.cameraAngle) * this.cameraDistance,
@@ -222,6 +231,18 @@ export class SceneManager implements RenderSystem {
       Math.cos(this.cameraRotation) * Math.cos(this.cameraAngle) * this.cameraDistance
     );
     this.camera.position.copy(this.cameraTarget).add(offset);
+
+    // Apply shake
+    if (this.shakeIntensity > 0.01) {
+      const s = this.shakeIntensity * 0.5;
+      this.camera.position.x += (Math.random() - 0.5) * s;
+      this.camera.position.y += (Math.random() - 0.5) * s;
+      this.camera.position.z += (Math.random() - 0.5) * s;
+      this.shakeIntensity *= this.shakeDecay;
+    } else {
+      this.shakeIntensity = 0;
+    }
+
     this.camera.lookAt(this.cameraTarget);
   }
 

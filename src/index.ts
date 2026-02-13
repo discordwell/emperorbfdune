@@ -231,6 +231,18 @@ async function main() {
   const fogOfWar = new FogOfWar(scene, 0);
   minimapRenderer.setFogOfWar(fogOfWar);
   unitRenderer.setFogOfWar(fogOfWar, 0);
+  unitRenderer.setUnitCategoryFn((eid: number): 'infantry' | 'vehicle' | 'aircraft' | 'building' => {
+    const w = game.getWorld();
+    if (w && hasComponent(w, BuildingType, eid)) return 'building';
+    const typeId = UnitType.id[eid];
+    const typeName = unitTypeNames[typeId];
+    if (!typeName) return 'vehicle';
+    const def = gameRules.units.get(typeName);
+    if (!def) return 'vehicle';
+    if (def.canFly) return 'aircraft';
+    if (def.infantry) return 'infantry';
+    return 'vehicle';
+  });
   combatSystem.setFogOfWar(fogOfWar, 0);
 
   // Unit population cap
@@ -960,6 +972,21 @@ async function main() {
           MoveTarget.active[eid] = 1;
         }
       }
+
+      // AI auto-deploys MCVs into ConYards
+      if (owner !== 0 && eid >= 0 && unitType === 'MCV') {
+        const prefix = unitType.substring(0, 2);
+        const conYardName = `${prefix}ConYard`;
+        if (gameRules.buildings.has(conYardName)) {
+          // Deploy near current base with some offset
+          const aiBase = aiPlayer.getBasePosition();
+          const deployX = aiBase.x + (Math.random() - 0.5) * 10;
+          const deployZ = aiBase.z + (Math.random() - 0.5) * 10;
+          Health.current[eid] = 0;
+          EventBus.emit('unit:died', { entityId: eid, killerEntity: -1 });
+          spawnBuilding(world, conYardName, owner, deployX, deployZ);
+        }
+      }
     }
   });
 
@@ -990,11 +1017,259 @@ async function main() {
   let nextCrateId = 0;
   const activeCrates = new Map<number, { x: number; z: number; type: string }>();
 
+  // --- SUPERWEAPON SYSTEM ---
+  // Palace type -> superweapon config
+  const SUPERWEAPON_CONFIG: Record<string, { name: string; chargeTime: number; radius: number; damage: number; style: 'missile' | 'airstrike' | 'lightning' }> = {
+    'HKPalace': { name: 'Death Hand Missile', chargeTime: 5184, radius: 15, damage: 800, style: 'missile' },
+    'ATPalace': { name: 'Hawk Strike', chargeTime: 4536, radius: 10, damage: 500, style: 'airstrike' },
+    'ORPalace': { name: 'Chaos Lightning', chargeTime: 6220, radius: 12, damage: 600, style: 'lightning' },
+    'GUPalace': { name: 'Guild NIAB Strike', chargeTime: 5500, radius: 10, damage: 700, style: 'lightning' },
+  };
+  // Per-player superweapon state
+  const superweaponState = new Map<number, { palaceType: string; charge: number; ready: boolean }>();
+  let superweaponTargetMode = false;
+
+  // Superweapon UI button (bottom of sidebar area)
+  const swButton = document.createElement('div');
+  swButton.id = 'superweapon-btn';
+  swButton.style.cssText = `
+    position:absolute;bottom:8px;right:8px;width:184px;height:36px;
+    background:linear-gradient(180deg,#2a1a1a,#1a0a0a);border:1px solid #555;
+    border-radius:4px;display:none;align-items:center;justify-content:center;
+    font-family:'Segoe UI',Tahoma,sans-serif;font-size:12px;color:#f88;
+    cursor:pointer;pointer-events:auto;z-index:15;text-align:center;
+    user-select:none;transition:background 0.3s,border-color 0.3s;
+  `;
+  document.getElementById('sidebar')?.appendChild(swButton);
+
+  // Superweapon charge bar on the button
+  const swChargeBar = document.createElement('div');
+  swChargeBar.style.cssText = `
+    position:absolute;bottom:0;left:0;height:3px;width:0%;
+    background:linear-gradient(90deg,#f44,#ff8800);border-radius:0 0 3px 3px;
+    transition:width 0.5s;
+  `;
+  swButton.appendChild(swChargeBar);
+
+  const swLabel = document.createElement('span');
+  swLabel.style.cssText = 'position:relative;z-index:1;';
+  swButton.appendChild(swLabel);
+
+  swButton.addEventListener('click', () => {
+    const sw = superweaponState.get(0);
+    if (!sw || !sw.ready) return;
+    superweaponTargetMode = true;
+    const cmdMode = document.getElementById('command-mode');
+    if (cmdMode) {
+      cmdMode.style.display = 'block';
+      cmdMode.textContent = `${SUPERWEAPON_CONFIG[sw.palaceType]?.name ?? 'Superweapon'} - Click to target`;
+      cmdMode.style.background = 'rgba(200,0,0,0.85)';
+    }
+  });
+
+  // Listen for targeting click when superweapon is active
+  window.addEventListener('mousedown', (e) => {
+    if (!superweaponTargetMode || e.button !== 0) return;
+    // Don't fire on UI areas
+    if (e.clientY < 32 || e.clientX > window.innerWidth - 200) return;
+    if (e.clientX < 200 && e.clientY > window.innerHeight - 200) return;
+
+    superweaponTargetMode = false;
+    const cmdMode = document.getElementById('command-mode');
+    if (cmdMode) cmdMode.style.display = 'none';
+
+    // Raycast to get world position
+    const worldPos = scene.screenToWorld(e.clientX, e.clientY);
+    if (worldPos) {
+      fireSuperweapon(0, worldPos.x, worldPos.z);
+    }
+  });
+
+  // Cancel superweapon targeting on Escape
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && superweaponTargetMode) {
+      superweaponTargetMode = false;
+      const cmdMode = document.getElementById('command-mode');
+      if (cmdMode) cmdMode.style.display = 'none';
+      e.stopPropagation();
+    }
+  }, true);
+
+  function fireSuperweapon(playerId: number, targetX: number, targetZ: number): void {
+    const sw = superweaponState.get(playerId);
+    if (!sw || !sw.ready) return;
+
+    const config = SUPERWEAPON_CONFIG[sw.palaceType];
+    if (!config) return;
+
+    // Reset charge
+    sw.charge = 0;
+    sw.ready = false;
+
+    EventBus.emit('superweapon:fired', { owner: playerId, type: sw.palaceType, x: targetX, z: targetZ });
+
+    // Visual effects based on style
+    if (config.style === 'missile') {
+      // Death Hand: large explosion cascade
+      effectsManager.spawnExplosion(targetX, 0, targetZ, 'large');
+      setTimeout(() => effectsManager.spawnExplosion(targetX + 3, 0, targetZ + 2, 'large'), 100);
+      setTimeout(() => effectsManager.spawnExplosion(targetX - 2, 0, targetZ - 3, 'large'), 200);
+      setTimeout(() => effectsManager.spawnExplosion(targetX + 1, 0, targetZ + 4, 'large'), 300);
+      setTimeout(() => effectsManager.spawnExplosion(targetX - 3, 0, targetZ + 1, 'large'), 400);
+    } else if (config.style === 'airstrike') {
+      // Hawk Strike: line of explosions
+      for (let i = -3; i <= 3; i++) {
+        const delay = (i + 3) * 120;
+        const ox = targetX + i * 2 + (Math.random() - 0.5) * 2;
+        const oz = targetZ + (Math.random() - 0.5) * 3;
+        setTimeout(() => effectsManager.spawnExplosion(ox, 0, oz, 'medium'), delay);
+      }
+    } else if (config.style === 'lightning') {
+      // Chaos Lightning: rapid chain of small explosions
+      for (let i = 0; i < 8; i++) {
+        const delay = i * 80;
+        const angle = (i / 8) * Math.PI * 2;
+        const dist = 2 + Math.random() * (config.radius * 0.5);
+        const ox = targetX + Math.cos(angle) * dist;
+        const oz = targetZ + Math.sin(angle) * dist;
+        setTimeout(() => effectsManager.spawnExplosion(ox, 0, oz, 'small'), delay);
+      }
+      // Central flash
+      setTimeout(() => effectsManager.spawnExplosion(targetX, 0, targetZ, 'large'), 200);
+    }
+
+    audioManager.playSfx('explosion');
+    scene.shake(config.style === 'missile' ? 1.0 : 0.6); // Camera shake!
+
+    // Apply damage to all entities in radius
+    const w = game.getWorld();
+    const allUnits = unitQuery(w);
+    const allBuildings = buildingQuery(w);
+    const targets = [...allUnits, ...allBuildings];
+    for (const eid of targets) {
+      if (Health.current[eid] <= 0) continue;
+      const dx = Position.x[eid] - targetX;
+      const dz = Position.z[eid] - targetZ;
+      const dist2 = dx * dx + dz * dz;
+      const r2 = config.radius * config.radius;
+      if (dist2 < r2) {
+        const dist = Math.sqrt(dist2);
+        const dmg = Math.floor(config.damage * (1 - dist / config.radius));
+        Health.current[eid] = Math.max(0, Health.current[eid] - dmg);
+        if (Health.current[eid] <= 0) {
+          if (hasComponent(w, BuildingType, eid)) {
+            EventBus.emit('building:destroyed', { entityId: eid });
+          }
+          EventBus.emit('unit:died', { entityId: eid, killerEntity: -1 });
+        }
+      }
+    }
+
+    // Messages
+    if (playerId === 0) {
+      selectionPanel.addMessage(`${config.name} launched!`, '#ff4444');
+    } else {
+      selectionPanel.addMessage(`Enemy ${config.name} incoming!`, '#ff4444');
+      minimapRenderer.flashPing(targetX, targetZ, '#ff0000');
+    }
+  }
+
   EventBus.on('game:tick', () => {
     const world = game.getWorld();
 
     productionSystem.update();
     productionSystem.updateStarportPrices();
+
+    // --- Superweapon charge ---
+    if (game.getTickCount() % 25 === 0) { // Check every second
+      for (let pid = 0; pid <= 1; pid++) {
+        // Check if player owns a Palace
+        const blds = buildingQuery(world);
+        let palaceType: string | null = null;
+        for (const bid of blds) {
+          if (Owner.playerId[bid] !== pid || Health.current[bid] <= 0) continue;
+          const bTypeId = BuildingType.id[bid];
+          const bName = buildingTypeNames[bTypeId] ?? '';
+          if (SUPERWEAPON_CONFIG[bName]) {
+            palaceType = bName;
+            break;
+          }
+        }
+
+        if (palaceType) {
+          if (!superweaponState.has(pid)) {
+            superweaponState.set(pid, { palaceType, charge: 0, ready: false });
+          }
+          const sw = superweaponState.get(pid)!;
+          sw.palaceType = palaceType;
+          const config = SUPERWEAPON_CONFIG[palaceType];
+          if (!sw.ready) {
+            const mult = productionSystem.getPowerMultiplier(pid);
+            sw.charge += 25 * mult; // 25 ticks per check
+            if (sw.charge >= config.chargeTime) {
+              sw.charge = config.chargeTime;
+              sw.ready = true;
+              EventBus.emit('superweapon:ready', { owner: pid, type: palaceType });
+              if (pid === 0) {
+                selectionPanel.addMessage(`${config.name} ready!`, '#ff8800');
+              } else {
+                selectionPanel.addMessage(`Warning: Enemy superweapon detected!`, '#ff4444');
+              }
+            }
+          }
+        } else {
+          superweaponState.delete(pid);
+        }
+      }
+
+      // Update UI button for player
+      const sw = superweaponState.get(0);
+      if (sw) {
+        swButton.style.display = 'flex';
+        const config = SUPERWEAPON_CONFIG[sw.palaceType];
+        const pct = Math.min(100, (sw.charge / (config?.chargeTime ?? 1)) * 100);
+        swChargeBar.style.width = `${pct}%`;
+        if (sw.ready) {
+          swLabel.textContent = `${config?.name ?? 'Superweapon'} - READY`;
+          swLabel.style.color = '#ff4444';
+          swButton.style.borderColor = '#f44';
+          swButton.style.cursor = 'pointer';
+          swChargeBar.style.background = '#f44';
+        } else {
+          swLabel.textContent = `${config?.name ?? 'Charging...'} ${Math.floor(pct)}%`;
+          swLabel.style.color = '#f88';
+          swButton.style.borderColor = '#555';
+          swButton.style.cursor = 'default';
+        }
+      } else {
+        swButton.style.display = 'none';
+      }
+
+      // AI fires superweapon at player base when ready
+      const aiSw = superweaponState.get(1);
+      if (aiSw?.ready) {
+        // Target player's building cluster
+        const playerBlds = buildingQuery(world);
+        let bestX = 100, bestZ = 100, bestCount = 0;
+        for (const bid of playerBlds) {
+          if (Owner.playerId[bid] !== 0 || Health.current[bid] <= 0) continue;
+          const bx = Position.x[bid], bz = Position.z[bid];
+          let count = 0;
+          for (const bid2 of playerBlds) {
+            if (Owner.playerId[bid2] !== 0 || Health.current[bid2] <= 0) continue;
+            const dx = Position.x[bid2] - bx, dz = Position.z[bid2] - bz;
+            if (dx * dx + dz * dz < 225) count++; // 15 unit radius
+          }
+          if (count > bestCount) { bestCount = count; bestX = bx; bestZ = bz; }
+        }
+        if (bestCount > 0) {
+          // Add some inaccuracy
+          bestX += (Math.random() - 0.5) * 6;
+          bestZ += (Math.random() - 0.5) * 6;
+          fireSuperweapon(1, bestX, bestZ);
+        }
+      }
+    }
 
     // Revert deviated units when timer expires
     if (game.getTickCount() % 25 === 0 && deviatedUnits.size > 0) {
@@ -1006,6 +1281,20 @@ async function main() {
           }
           deviatedUnits.delete(eid);
         }
+      }
+    }
+
+    // Dust trails for moving ground units (every 3rd tick to limit particles)
+    if (game.getTickCount() % 3 === 0) {
+      const dustUnits = unitQuery(world);
+      for (const eid of dustUnits) {
+        if (Health.current[eid] <= 0) continue;
+        if (MoveTarget.active[eid] !== 1) continue;
+        const typeId = UnitType.id[eid];
+        const typeName = unitTypeNames[typeId];
+        const def = typeName ? gameRules.units.get(typeName) : null;
+        if (!def || def.canFly || def.infantry) continue; // Only ground vehicles
+        effectsManager.spawnDustPuff(Position.x[eid], Position.z[eid]);
       }
     }
 
@@ -1552,6 +1841,7 @@ async function main() {
         effectsManager.spawnExplosion(ex - 2, 0, ez - 2, 'large');
         audioManager.playSfx('explosion');
         selectionPanel.addMessage('SELF-DESTRUCT!', '#ff4444');
+        scene.shake(0.8);
         // Damage all nearby units (friend and foe) in 12 unit radius
         const allUnits = unitQuery(w);
         const allBuildings = buildingQuery(w);
@@ -1573,6 +1863,31 @@ async function main() {
         // Kill the Devastator
         Health.current[eid] = 0;
         EventBus.emit('unit:died', { entityId: eid, killerEntity: -1 });
+      }
+    } else if (e.key === 'd' && !e.ctrlKey && !e.altKey) {
+      // MCV deployment: D key deploys selected MCV into Construction Yard
+      const selected = selectionManager.getSelectedEntities();
+      const w = game.getWorld();
+      for (const eid of selected) {
+        if (Owner.playerId[eid] !== 0) continue;
+        if (Health.current[eid] <= 0) continue;
+        const typeId = UnitType.id[eid];
+        const typeName = unitTypeNames[typeId];
+        if (typeName !== 'MCV') continue;
+        // Determine which ConYard to deploy based on faction
+        const conYardName = `${house.prefix}ConYard`;
+        const bDef = gameRules.buildings.get(conYardName);
+        if (!bDef) continue;
+        // Deploy at current position
+        const dx = Position.x[eid], dz = Position.z[eid];
+        // Kill the MCV
+        Health.current[eid] = 0;
+        EventBus.emit('unit:died', { entityId: eid, killerEntity: -1 });
+        // Spawn ConYard at that location
+        spawnBuilding(w, conYardName, 0, dx, dz);
+        selectionPanel.addMessage('MCV deployed!', '#44ff44');
+        audioManager.playSfx('build');
+        break; // Only deploy first MCV
       }
     } else if (e.key === 'F1') {
       e.preventDefault();
