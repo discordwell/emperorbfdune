@@ -53,6 +53,10 @@ export class EffectsManager {
   private sandstormParticles: THREE.Mesh[] = [];
   private sandstormActive = false;
 
+  // Crate visuals: id -> mesh
+  private crateVisuals = new Map<number, THREE.Mesh>();
+  private crateGeo: THREE.BoxGeometry;
+
   // Shared geometry for particles
   private particleGeo: THREE.SphereGeometry;
   private projectileGeo: THREE.SphereGeometry;
@@ -63,6 +67,7 @@ export class EffectsManager {
 
   constructor(sceneManager: SceneManager) {
     this.sceneManager = sceneManager;
+    this.crateGeo = new THREE.BoxGeometry(1.0, 1.0, 1.0);
     this.particleGeo = new THREE.SphereGeometry(0.15, 4, 4);
     this.projectileGeo = new THREE.SphereGeometry(0.1, 4, 4);
     this.wormRingGeo = new THREE.RingGeometry(1.5, 3.0, 16);
@@ -385,6 +390,9 @@ export class EffectsManager {
       marker.children[0].position.y = 1.5 + Math.sin(Date.now() * 0.003) * 0.15;
     }
 
+    // Crate animations
+    this.updateCrates(dt);
+
     // Sandstorm particles
     this.updateSandstormParticles(dt);
   }
@@ -557,6 +565,41 @@ export class EffectsManager {
 
   isSandstormActive(): boolean {
     return this.sandstormActive;
+  }
+
+  /** Add a crate visual at world position */
+  spawnCrate(id: number, x: number, z: number, type: string): void {
+    const colorMap: Record<string, number> = {
+      credits: 0xffd700,    // Gold
+      veterancy: 0x44ff44,  // Green
+      heal: 0x4488ff,       // Blue
+    };
+    const color = colorMap[type] ?? 0xffd700;
+    const mat = new THREE.MeshLambertMaterial({ color, emissive: color, emissiveIntensity: 0.3 });
+    const mesh = new THREE.Mesh(this.crateGeo, mat);
+    mesh.position.set(x, 0.7, z);
+    this.sceneManager.scene.add(mesh);
+    this.crateVisuals.set(id, mesh);
+  }
+
+  /** Remove a crate visual with a sparkle effect */
+  removeCrate(id: number): void {
+    const mesh = this.crateVisuals.get(id);
+    if (mesh) {
+      this.spawnExplosion(mesh.position.x, mesh.position.y, mesh.position.z, 'small');
+      this.sceneManager.scene.remove(mesh);
+      (mesh.material as THREE.Material).dispose();
+      this.crateVisuals.delete(id);
+    }
+  }
+
+  /** Animate spinning crates (call in update) */
+  private updateCrates(dt: number): void {
+    const dtSec = dt / 1000;
+    for (const [, mesh] of this.crateVisuals) {
+      mesh.rotation.y += dtSec * 2;
+      mesh.position.y = 0.7 + Math.sin(Date.now() * 0.003) * 0.2;
+    }
   }
 
   /** Animate sandstorm particles (call in update) */

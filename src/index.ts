@@ -262,6 +262,12 @@ async function main() {
       unitRenderer.setEntityModel(eid, art.xaf);
     }
 
+    // Register aircraft for flight system
+    if (def.canFly) {
+      movement.registerFlyer(eid);
+      Position.y[eid] = 5.0; // Flight altitude
+    }
+
     // Auto-add harvester component for harvester units
     if (typeName.includes('Harvester') || typeName.includes('Harv')) {
       addComponent(world, Harvester, eid);
@@ -448,6 +454,7 @@ async function main() {
     const z = Position.z[entityId];
 
     combatSystem.unregisterUnit(entityId);
+    movement.unregisterFlyer(entityId);
     effectsManager.clearBuildingDamage(entityId);
 
     // Visual effects — infantry get small, vehicles medium, buildings large
@@ -462,6 +469,7 @@ async function main() {
     }
     effectsManager.spawnExplosion(x, y, z, explosionSize);
     effectsManager.spawnWreckage(x, y, z, isBuilding);
+    audioManager.playSfx('explosion');
 
     // Death animation: tilt the 3D model before removal
     const obj = unitRenderer.getEntityObject(entityId);
@@ -612,6 +620,10 @@ async function main() {
   const powerEl = document.getElementById('power-status');
   const unitCountEl = document.getElementById('unit-count');
   const commandModeEl = document.getElementById('command-mode');
+
+  // Crate/power-up state
+  let nextCrateId = 0;
+  const activeCrates = new Map<number, { x: number; z: number; type: string }>();
 
   EventBus.on('game:tick', () => {
     const world = game.getWorld();
@@ -821,6 +833,57 @@ async function main() {
         const worldZ = bz * 2;
         effectsManager.spawnExplosion(worldX, 0.5, worldZ, 'medium');
         selectionPanel.addMessage('Spice bloom detected!', '#ff8800');
+      }
+    }
+
+    // Crate drops: spawn a random crate every ~40 seconds
+    if (game.getTickCount() % 1000 === 500 && activeCrates.size < 3) {
+      const crateTypes = ['credits', 'veterancy', 'heal'];
+      const type = crateTypes[Math.floor(Math.random() * crateTypes.length)];
+      const cx = 20 + Math.random() * (MAP_SIZE * 2 - 40);
+      const cz = 20 + Math.random() * (MAP_SIZE * 2 - 40);
+      const crateId = nextCrateId++;
+      activeCrates.set(crateId, { x: cx, z: cz, type });
+      effectsManager.spawnCrate(crateId, cx, cz, type);
+    }
+
+    // Crate collection: check if any unit is near a crate (every 10 ticks)
+    if (game.getTickCount() % 10 === 0 && activeCrates.size > 0) {
+      const allUnits = unitQuery(world);
+      for (const [crateId, crate] of activeCrates) {
+        let collected = false;
+        for (const eid of allUnits) {
+          if (Health.current[eid] <= 0) continue;
+          const dx = Position.x[eid] - crate.x;
+          const dz = Position.z[eid] - crate.z;
+          if (dx * dx + dz * dz < 4.0) { // Within 2 units
+            const owner = Owner.playerId[eid];
+            // Apply crate bonus
+            if (crate.type === 'credits') {
+              harvestSystem.addSolaris(owner, 500);
+              if (owner === 0) selectionPanel.addMessage('+500 Solaris!', '#ffd700');
+            } else if (crate.type === 'veterancy') {
+              Veterancy.xp[eid] += 100;
+              if (owner === 0) selectionPanel.addMessage('Unit experience boost!', '#44ff44');
+            } else if (crate.type === 'heal') {
+              // Heal all nearby friendly units
+              for (const other of allUnits) {
+                if (Owner.playerId[other] !== owner) continue;
+                if (Health.current[other] <= 0) continue;
+                const ox = Position.x[other] - crate.x;
+                const oz = Position.z[other] - crate.z;
+                if (ox * ox + oz * oz < 100) { // Within 10 units
+                  Health.current[other] = Math.min(Health.max[other], Health.current[other] + Health.max[other] * 0.25);
+                }
+              }
+              if (owner === 0) selectionPanel.addMessage('Area heal!', '#4488ff');
+            }
+            effectsManager.removeCrate(crateId);
+            collected = true;
+            break;
+          }
+        }
+        if (collected) activeCrates.delete(crateId);
       }
     }
 

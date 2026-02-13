@@ -10,15 +10,26 @@ import { worldToTile, angleBetween, lerpAngle, distance2D } from '../utils/MathU
 const ARRIVAL_THRESHOLD = 1.0;
 const SEPARATION_RADIUS = 2.0;
 const SEPARATION_FORCE = 0.5;
+const FLIGHT_ALTITUDE = 5.0;
 
 export class MovementSystem implements GameSystem {
   private pathfinder: PathfindingSystem;
   // Path cache per entity
   private paths = new Map<number, { x: number; z: number }[]>();
   private pathIndex = new Map<number, number>();
+  // Flying entities skip pathfinding
+  private flyingEntities = new Set<number>();
 
   constructor(pathfinder: PathfindingSystem) {
     this.pathfinder = pathfinder;
+  }
+
+  registerFlyer(eid: number): void {
+    this.flyingEntities.add(eid);
+  }
+
+  unregisterFlyer(eid: number): void {
+    this.flyingEntities.delete(eid);
   }
 
   init(_world: World): void {}
@@ -37,6 +48,33 @@ export class MovementSystem implements GameSystem {
       const pz = Position.z[eid];
       const targetX = MoveTarget.x[eid];
       const targetZ = MoveTarget.z[eid];
+      const isFlyer = this.flyingEntities.has(eid);
+
+      // Aircraft: fly direct (no pathfinding), maintain altitude
+      if (isFlyer) {
+        Position.y[eid] = FLIGHT_ALTITUDE;
+        const dist = distance2D(px, pz, targetX, targetZ);
+        if (dist < ARRIVAL_THRESHOLD) {
+          MoveTarget.active[eid] = 0;
+          Velocity.x[eid] = 0;
+          Velocity.z[eid] = 0;
+          continue;
+        }
+        const dx = targetX - px;
+        const dz = targetZ - pz;
+        const dirX = dx / dist;
+        const dirZ = dz / dist;
+        const speed = Speed.max[eid];
+        const desiredAngle = angleBetween(px, pz, targetX, targetZ);
+        Rotation.y[eid] = lerpAngle(Rotation.y[eid], desiredAngle, Math.min(1, Speed.turnRate[eid] * 3));
+        const vx = dirX * speed;
+        const vz = dirZ * speed;
+        Velocity.x[eid] = vx;
+        Velocity.z[eid] = vz;
+        Position.x[eid] = px + vx * 0.04;
+        Position.z[eid] = pz + vz * 0.04;
+        continue;
+      }
 
       // Get or compute path
       let path = this.paths.get(eid);
@@ -106,6 +144,7 @@ export class MovementSystem implements GameSystem {
       let sepZ = 0;
       for (const other of entities) {
         if (other === eid) continue;
+        if (this.flyingEntities.has(other)) continue; // Don't separate from flyers
         const ox = Position.x[other];
         const oz = Position.z[other];
         const d = distance2D(px, pz, ox, oz);
