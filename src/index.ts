@@ -28,6 +28,7 @@ import { CampaignMap } from './ui/CampaignMap';
 import { SelectionPanel } from './ui/SelectionPanel';
 import { EffectsManager } from './rendering/EffectsManager';
 import { SandwormSystem } from './simulation/SandwormSystem';
+import { showMissionBriefing } from './ui/MissionBriefing';
 import {
   addEntity, addComponent, removeEntity, hasComponent,
   Position, Velocity, Rotation, Health, Owner, UnitType, Selectable,
@@ -152,6 +153,30 @@ async function main() {
 
   console.log(`Playing as ${house.name} vs ${house.enemyName}`);
   audioManager.setPlayerFaction(house.prefix);
+
+  // Show mission briefing for campaign mode
+  if (house.gameMode === 'campaign' && house.campaignTerritoryId !== undefined && !savedGame) {
+    const TERRITORY_DATA: Record<number, { name: string; description: string; difficulty: 'easy' | 'normal' | 'hard' }> = {
+      0: { name: 'Carthag Basin', description: 'A wide desert basin near the Carthag spaceport. Light enemy presence.', difficulty: 'easy' },
+      1: { name: 'Habbanya Ridge', description: 'Rocky ridge with scattered spice fields. Good defensive terrain.', difficulty: 'easy' },
+      2: { name: 'Wind Pass', description: 'A narrow canyon pass battered by constant sandstorms.', difficulty: 'normal' },
+      3: { name: 'Arrakeen Flats', description: 'Open desert near the capital. Rich spice deposits attract worms.', difficulty: 'normal' },
+      4: { name: 'Sietch Tabr', description: 'Central crossroads territory. Controls access to the deep desert.', difficulty: 'normal' },
+      5: { name: 'Shield Wall', description: 'Mountainous terrain near the Shield Wall. Heavily defended.', difficulty: 'normal' },
+      6: { name: 'Spice Fields', description: 'The richest spice fields on Arrakis. A strategic prize.', difficulty: 'hard' },
+      7: { name: 'Old Gap', description: 'Ancient rock formations hide enemy strongholds.', difficulty: 'hard' },
+      8: { name: 'Enemy Capital', description: "The enemy's main base of operations. Final battle.", difficulty: 'hard' },
+    };
+    const tData = TERRITORY_DATA[house.campaignTerritoryId];
+    if (tData) {
+      const objectiveOverride = house.campaignTerritoryId === 3 ? 'Survive for 8 minutes against enemy assault' : undefined;
+      await showMissionBriefing(
+        { id: house.campaignTerritoryId, name: tData.name, description: tData.description, difficulty: tData.difficulty, x: 0, y: 0, adjacent: [], mapSeed: 0, owner: 'enemy' },
+        house.name, house.prefix, house.enemyName, objectiveOverride
+      );
+    }
+  }
+
   audioManager.startGameMusic();
 
   // Create game and systems
@@ -228,6 +253,27 @@ async function main() {
 
   // Campaign progress tracking
   if (house.gameMode === 'campaign' && house.campaignTerritoryId !== undefined) {
+    // Territory-specific victory conditions
+    const tId = house.campaignTerritoryId;
+    if (tId <= 1) {
+      // Easy territories: destroy conyard only
+      victorySystem.setVictoryCondition('conyard');
+      victorySystem.setObjectiveLabel('Destroy the enemy Construction Yard');
+    } else if (tId === 3) {
+      // Arrakeen Flats: survival mission - survive 8 minutes
+      victorySystem.setVictoryCondition('survival');
+      victorySystem.setSurvivalTicks(25 * 60 * 8); // 8 minutes
+      victorySystem.setObjectiveLabel('Survive for 8 minutes');
+    } else if (tId >= 7) {
+      // Hard territories: total annihilation
+      victorySystem.setVictoryCondition('annihilate');
+      victorySystem.setObjectiveLabel('Destroy all enemy structures');
+    } else {
+      // Normal territories: destroy conyard
+      victorySystem.setVictoryCondition('conyard');
+      victorySystem.setObjectiveLabel('Destroy the enemy Construction Yard');
+    }
+
     const campaign = new CampaignMap(audioManager, house.prefix, house.name, house.enemyPrefix, house.enemyName);
     victorySystem.setVictoryCallback(() => {
       campaign.recordVictory(house.campaignTerritoryId!);
@@ -562,6 +608,7 @@ async function main() {
       selectionPanel.addMessage('Cannot upgrade', '#ff4444');
     }
   });
+  selectionPanel.setCombatSystem(combatSystem);
 
   // --- AI SPAWN CALLBACK ---
 
@@ -748,6 +795,7 @@ async function main() {
   // Rally point visuals
   EventBus.on('rally:set', ({ playerId, x, z }) => {
     effectsManager.setRallyPoint(playerId, x, z);
+    if (playerId === 0) minimapRenderer.setRallyPoint(x, z);
     selectionPanel.addMessage('Rally point set', '#44ff44');
   });
 
@@ -916,6 +964,20 @@ async function main() {
   const commandModeEl = document.getElementById('command-mode');
   const lowPowerEl = document.getElementById('low-power-warning');
 
+  // Objective display for campaign
+  let objectiveEl: HTMLDivElement | null = null;
+  if (victorySystem.getObjectiveLabel()) {
+    objectiveEl = document.createElement('div');
+    objectiveEl.style.cssText = `
+      position:fixed;top:36px;left:50%;transform:translateX(-50%);
+      background:rgba(0,0,0,0.6);border:1px solid #555;padding:3px 16px;
+      border-radius:3px;font-family:'Segoe UI',Tahoma,sans-serif;
+      font-size:11px;color:#ff8;pointer-events:none;z-index:15;
+    `;
+    objectiveEl.textContent = `Objective: ${victorySystem.getObjectiveLabel()}`;
+    document.body.appendChild(objectiveEl);
+  }
+
   // Crate/power-up state
   let nextCrateId = 0;
   const activeCrates = new Map<number, { x: number; z: number; type: string }>();
@@ -947,6 +1009,18 @@ async function main() {
     effectsManager.updateWormVisuals(sandwormSystem.getWorms(), 40);
     fogOfWar.update(world);
     victorySystem.update(world);
+    audioManager.updateIntensity();
+    // Update survival objective timer display
+    if (objectiveEl && victorySystem.getObjectiveLabel().includes('Survive')) {
+      const progress = victorySystem.getSurvivalProgress();
+      if (progress > 0 && progress < 1) {
+        const remaining = Math.ceil((1 - progress) * 8 * 60); // 8 minute survival
+        const mins = Math.floor(remaining / 60);
+        const secs = remaining % 60;
+        objectiveEl.textContent = `Objective: Survive (${mins}:${secs.toString().padStart(2, '0')} remaining)`;
+        objectiveEl.style.borderColor = progress > 0.7 ? '#4f4' : progress > 0.4 ? '#ff8' : '#f44';
+      }
+    }
     commandManager.setWorld(world);
     commandManager.updateWaypoints();
     buildingPlacement.updateOccupiedTiles(world);

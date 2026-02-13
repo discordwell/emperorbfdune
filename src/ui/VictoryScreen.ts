@@ -1,7 +1,7 @@
 import { Owner, Health, BuildingType, buildingQuery, type World } from '../core/ECS';
 import type { AudioManager } from '../audio/AudioManager';
 
-export type VictoryCondition = 'annihilate' | 'conyard';
+export type VictoryCondition = 'annihilate' | 'conyard' | 'survival';
 export type GameOutcome = 'playing' | 'victory' | 'defeat';
 
 /** Tracks per-player game statistics */
@@ -54,6 +54,8 @@ export class VictorySystem {
   private victoryCondition: VictoryCondition = 'annihilate';
   // Building type names for ConYard check (set externally)
   private buildingTypeNames: string[] = [];
+  private survivalTicks = 0; // Ticks to survive (0 = disabled)
+  private objectiveLabel = '';
 
   constructor(audioManager: AudioManager, localPlayerId: number, onRestart?: () => void) {
     this.audioManager = audioManager;
@@ -66,6 +68,13 @@ export class VictorySystem {
   setVictoryCondition(cond: VictoryCondition): void { this.victoryCondition = cond; }
   setCampaignContinue(cb: () => void): void { this.onCampaignContinue = cb; }
   setBuildingTypeNames(names: string[]): void { this.buildingTypeNames = names; }
+  setSurvivalTicks(ticks: number): void { this.survivalTicks = ticks; }
+  setObjectiveLabel(label: string): void { this.objectiveLabel = label; }
+  getObjectiveLabel(): string { return this.objectiveLabel; }
+  getSurvivalProgress(): number {
+    if (this.survivalTicks <= 0 || this.tickCounter < this.graceperiodTicks) return 0;
+    return Math.min(1, (this.tickCounter - this.graceperiodTicks) / this.survivalTicks);
+  }
 
   getOutcome(): GameOutcome {
     return this.outcome;
@@ -78,12 +87,12 @@ export class VictorySystem {
     if (this.tickCounter < this.graceperiodTicks) return;
     if (this.tickCounter % this.checkInterval !== 0) return;
 
+    // Check if player is still alive (always needed)
     const buildings = buildingQuery(world);
     let playerAlive = false;
     let enemyAlive = false;
 
     if (this.victoryCondition === 'conyard') {
-      // Only check ConYard buildings
       for (const eid of buildings) {
         if (Health.current[eid] <= 0) continue;
         const typeId = BuildingType.id[eid];
@@ -91,21 +100,32 @@ export class VictorySystem {
         if (!typeName.includes('ConYard')) continue;
         if (Owner.playerId[eid] === this.localPlayerId) playerAlive = true;
         else enemyAlive = true;
-        if (playerAlive && enemyAlive) return;
       }
     } else {
-      // Check all buildings
       for (const eid of buildings) {
         if (Health.current[eid] <= 0) continue;
         if (Owner.playerId[eid] === this.localPlayerId) playerAlive = true;
         else enemyAlive = true;
-        if (playerAlive && enemyAlive) return;
       }
     }
 
-    if (!playerAlive && this.tickCounter > this.graceperiodTicks) {
+    // Defeat: player has no buildings
+    if (!playerAlive) {
       this.triggerDefeat();
-    } else if (!enemyAlive && this.tickCounter > this.graceperiodTicks) {
+      return;
+    }
+
+    // Survival mode: win after surviving N ticks
+    if (this.victoryCondition === 'survival') {
+      const elapsed = this.tickCounter - this.graceperiodTicks;
+      if (elapsed >= this.survivalTicks) {
+        this.triggerVictory();
+      }
+      return;
+    }
+
+    // Normal victory: enemy has no buildings
+    if (!enemyAlive) {
       this.triggerVictory();
     }
   }

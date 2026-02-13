@@ -25,11 +25,33 @@ export class SceneManager implements RenderSystem {
   readonly raycaster = new THREE.Raycaster();
   readonly groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 
+  // Sand particle system
+  private sandParticles: THREE.Points | null = null;
+  private sandParticlePositions: Float32Array | null = null;
+
   constructor() {
     this.canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x1a0f00); // Dark desert sky
+
+    // Desert sky gradient
+    const skyCanvas = document.createElement('canvas');
+    skyCanvas.width = 2;
+    skyCanvas.height = 256;
+    const ctx = skyCanvas.getContext('2d')!;
+    const grad = ctx.createLinearGradient(0, 0, 0, 256);
+    grad.addColorStop(0, '#1a1a3a');    // Zenith: dark blue
+    grad.addColorStop(0.4, '#3a2a1a');  // Mid: warm brown
+    grad.addColorStop(0.7, '#c08040');  // Horizon: orange haze
+    grad.addColorStop(1.0, '#e0a050');  // Below horizon: sandy glow
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 2, 256);
+    const skyTex = new THREE.CanvasTexture(skyCanvas);
+    skyTex.mapping = THREE.EquirectangularReflectionMapping;
+    this.scene.background = skyTex;
+
+    // Distance fog for heat haze effect
+    this.scene.fog = new THREE.FogExp2(0xc09050, 0.003);
 
     // Perspective camera with slight ortho feel (narrow FOV)
     this.camera = new THREE.PerspectiveCamera(
@@ -69,9 +91,34 @@ export class SceneManager implements RenderSystem {
     const hemiLight = new THREE.HemisphereLight(0x87CEEB, 0xC2B280, 0.3);
     this.scene.add(hemiLight);
 
+    // Drifting sand particles
+    this.createSandParticles();
+
     this.updateCameraPosition();
 
     window.addEventListener('resize', this.onResize);
+  }
+
+  private createSandParticles(): void {
+    const count = 600;
+    const positions = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      positions[i * 3] = Math.random() * 300 - 50;
+      positions[i * 3 + 1] = Math.random() * 15 + 0.5;
+      positions[i * 3 + 2] = Math.random() * 300 - 50;
+    }
+    this.sandParticlePositions = positions;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const mat = new THREE.PointsMaterial({
+      color: 0xd4b06a,
+      size: 0.3,
+      transparent: true,
+      opacity: 0.4,
+      depthWrite: false,
+    });
+    this.sandParticles = new THREE.Points(geo, mat);
+    this.scene.add(this.sandParticles);
   }
 
   init(): void {
@@ -89,6 +136,22 @@ export class SceneManager implements RenderSystem {
       }
       this.updateCameraPosition();
     }
+
+    // Animate sand particles - drift with wind
+    if (this.sandParticlePositions) {
+      const pos = this.sandParticlePositions;
+      for (let i = 0; i < pos.length; i += 3) {
+        pos[i] += 0.08;      // Wind X
+        pos[i + 2] += 0.03;  // Wind Z
+        pos[i + 1] += (Math.random() - 0.5) * 0.04; // Flutter
+        // Wrap around camera vicinity
+        if (pos[i] > this.cameraTarget.x + 150) pos[i] = this.cameraTarget.x - 150;
+        if (pos[i + 2] > this.cameraTarget.z + 150) pos[i + 2] = this.cameraTarget.z - 150;
+        pos[i + 1] = Math.max(0.3, Math.min(15, pos[i + 1]));
+      }
+      this.sandParticles!.geometry.attributes.position.needsUpdate = true;
+    }
+
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -170,6 +233,13 @@ export class SceneManager implements RenderSystem {
 
   dispose(): void {
     window.removeEventListener('resize', this.onResize);
+    if (this.sandParticles) {
+      this.sandParticles.geometry.dispose();
+      (this.sandParticles.material as THREE.PointsMaterial).dispose();
+    }
+    if (this.scene.background instanceof THREE.Texture) {
+      this.scene.background.dispose();
+    }
     this.renderer.dispose();
   }
 }

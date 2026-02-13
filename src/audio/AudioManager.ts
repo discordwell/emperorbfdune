@@ -25,6 +25,7 @@ export type UnitCategory = 'infantry' | 'vehicle' | 'harvester';
 export class AudioManager {
   private audioContext: AudioContext | null = null;
   private musicElement: HTMLAudioElement | null = null;
+  private fadingOutElement: HTMLAudioElement | null = null;
   private currentTrackIndex = -1;
   private musicVolume = 0.3;
   private sfxVolume = 0.5;
@@ -33,6 +34,10 @@ export class AudioManager {
   private playerFaction = 'AT';
   private musicStarted = false;
   private unitClassifier: ((eid: number) => UnitCategory) | null = null;
+  private crossfadeDuration = 2000; // ms
+  private crossfadeTimer: ReturnType<typeof setInterval> | null = null;
+  private combatIntensity = 0; // 0-1
+  private lastCombatEvent = 0;
 
   constructor() {
     this.setupEventListeners();
@@ -65,7 +70,7 @@ export class AudioManager {
       }
     });
     // unit:move and unit:attack handled by CommandManager direct calls
-    EventBus.on('unit:died', () => this.playSfx('explosion'));
+    EventBus.on('unit:died', () => { this.playSfx('explosion'); this.bumpCombatIntensity(0.15); });
     EventBus.on('production:complete', () => this.playSfx('build'));
     EventBus.on('harvest:delivered', () => this.playSfx('harvest'));
     EventBus.on('combat:fire', () => {
@@ -74,6 +79,7 @@ export class AudioManager {
         this.lastShotTime = now;
         this.playSfx('shot');
       }
+      this.bumpCombatIntensity(0.02);
     });
 
     // Start music on first user interaction
@@ -113,17 +119,52 @@ export class AudioManager {
     this.currentTrackIndex = (this.currentTrackIndex + 1) % playlist.length;
     const track = playlist[this.currentTrackIndex];
 
-    if (this.musicElement) {
-      this.musicElement.pause();
-      this.musicElement.removeEventListener('ended', this.onTrackEnded);
+    this.crossfadeTo(track.path, false);
+  }
+
+  private crossfadeTo(path: string, loop: boolean): void {
+    const newElement = new Audio(path);
+    newElement.volume = 0;
+    newElement.loop = loop;
+    if (!loop) newElement.addEventListener('ended', this.onTrackEnded);
+
+    // Start fade out of old element
+    const oldElement = this.musicElement;
+    if (oldElement) {
+      oldElement.removeEventListener('ended', this.onTrackEnded);
+      this.fadingOutElement = oldElement;
     }
 
-    this.musicElement = new Audio(track.path);
-    this.musicElement.volume = this.muted ? 0 : this.musicVolume;
-    this.musicElement.addEventListener('ended', this.onTrackEnded);
-    this.musicElement.play().catch(() => {
-      // Autoplay blocked — will retry on next user interaction
-    });
+    this.musicElement = newElement;
+    newElement.play().catch(() => {});
+
+    if (this.crossfadeTimer) clearInterval(this.crossfadeTimer);
+
+    const steps = 20;
+    const interval = this.crossfadeDuration / steps;
+    let step = 0;
+
+    this.crossfadeTimer = setInterval(() => {
+      step++;
+      const progress = step / steps;
+      const vol = this.muted ? 0 : this.musicVolume;
+
+      // Fade in new
+      newElement.volume = vol * progress;
+      // Fade out old
+      if (oldElement) {
+        oldElement.volume = this.muted ? 0 : Math.max(0, vol * (1 - progress));
+      }
+
+      if (step >= steps) {
+        if (this.crossfadeTimer) clearInterval(this.crossfadeTimer);
+        this.crossfadeTimer = null;
+        if (oldElement) {
+          oldElement.pause();
+          this.fadingOutElement = null;
+        }
+      }
+    }, interval);
   }
 
   private onTrackEnded = (): void => {
@@ -133,31 +174,14 @@ export class AudioManager {
   playMenuMusic(): void {
     const menu = MUSIC_TRACKS.find(t => t.faction === 'IN' && t.name === 'Menu');
     if (!menu) return;
-
-    if (this.musicElement) {
-      this.musicElement.pause();
-      this.musicElement.removeEventListener('ended', this.onTrackEnded);
-    }
-
-    this.musicElement = new Audio(menu.path);
-    this.musicElement.volume = this.muted ? 0 : this.musicVolume;
-    this.musicElement.loop = true;
-    this.musicElement.play().catch(() => {});
+    this.crossfadeTo(menu.path, true);
     this.musicStarted = true;
   }
 
   playVictoryMusic(): void {
     const score = MUSIC_TRACKS.find(t => t.name === 'Score');
     if (!score) return;
-
-    if (this.musicElement) {
-      this.musicElement.pause();
-      this.musicElement.removeEventListener('ended', this.onTrackEnded);
-    }
-
-    this.musicElement = new Audio(score.path);
-    this.musicElement.volume = this.muted ? 0 : this.musicVolume;
-    this.musicElement.play().catch(() => {});
+    this.crossfadeTo(score.path, false);
   }
 
   startGameMusic(): void {
@@ -611,6 +635,26 @@ export class AudioManager {
     }
   }
 
+  // --- Combat intensity ---
+
+  private bumpCombatIntensity(amount: number): void {
+    this.combatIntensity = Math.min(1, this.combatIntensity + amount);
+    this.lastCombatEvent = Date.now();
+  }
+
+  /** Call periodically from game loop to decay intensity */
+  updateIntensity(): void {
+    const elapsed = Date.now() - this.lastCombatEvent;
+    if (elapsed > 3000) {
+      // Decay after 3 seconds of no combat
+      this.combatIntensity = Math.max(0, this.combatIntensity - 0.005);
+    }
+  }
+
+  getCombatIntensity(): number {
+    return this.combatIntensity;
+  }
+
   // --- Controls ---
 
   toggleMute(): void {
@@ -618,12 +662,16 @@ export class AudioManager {
     if (this.musicElement) {
       this.musicElement.volume = this.muted ? 0 : this.musicVolume;
     }
+    if (this.fadingOutElement) {
+      this.fadingOutElement.volume = this.muted ? 0 : this.fadingOutElement.volume;
+    }
   }
 
   setMusicVolume(v: number): void {
     this.musicVolume = Math.max(0, Math.min(1, v));
-    if (this.musicElement && !this.muted) {
-      this.musicElement.volume = this.musicVolume;
+    if (!this.muted) {
+      if (this.musicElement) this.musicElement.volume = this.musicVolume;
+      if (this.fadingOutElement) this.fadingOutElement.volume = Math.min(this.fadingOutElement.volume, this.musicVolume);
     }
   }
 
@@ -636,10 +684,15 @@ export class AudioManager {
   }
 
   stopAll(): void {
+    if (this.crossfadeTimer) { clearInterval(this.crossfadeTimer); this.crossfadeTimer = null; }
     if (this.musicElement) {
       this.musicElement.pause();
       this.musicElement.removeEventListener('ended', this.onTrackEnded);
       this.musicElement = null;
+    }
+    if (this.fadingOutElement) {
+      this.fadingOutElement.pause();
+      this.fadingOutElement = null;
     }
   }
 }

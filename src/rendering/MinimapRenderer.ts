@@ -32,6 +32,8 @@ export class MinimapRenderer {
   private onRightClick: ((worldX: number, worldZ: number) => void) | null = null;
   // Click ping animation
   private clickPing: { x: number; y: number; age: number } | null = null;
+  // Rally point for player 0
+  private rallyPoint: { x: number; z: number } | null = null;
 
   constructor(terrain: TerrainRenderer, sceneManager: SceneManager) {
     this.canvas = document.getElementById('minimap-canvas') as HTMLCanvasElement;
@@ -55,6 +57,10 @@ export class MinimapRenderer {
 
   setFogOfWar(fog: FogOfWar): void {
     this.fogOfWar = fog;
+  }
+
+  setRallyPoint(x: number, z: number): void {
+    this.rallyPoint = { x, z };
   }
 
   private renderTerrain(): void {
@@ -142,6 +148,21 @@ export class MinimapRenderer {
     this.ctx.strokeStyle = '#fff';
     this.ctx.lineWidth = 1;
     this.ctx.strokeRect(cx - viewW / 2, cz - viewH / 2, viewW, viewH);
+
+    // Draw rally point flag
+    if (this.rallyPoint) {
+      const rx = this.rallyPoint.x * scale;
+      const rz = this.rallyPoint.z * scale;
+      // Pulsing yellow circle
+      const pulse = 0.5 + Math.sin(Date.now() * 0.005) * 0.3;
+      this.ctx.fillStyle = `rgba(255, 200, 0, ${pulse})`;
+      this.ctx.beginPath();
+      this.ctx.arc(rx, rz, 3, 0, Math.PI * 2);
+      this.ctx.fill();
+      this.ctx.strokeStyle = '#ff8800';
+      this.ctx.lineWidth = 1;
+      this.ctx.stroke();
+    }
 
     // Draw click ping animation
     if (this.clickPing) {

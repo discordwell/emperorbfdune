@@ -7,6 +7,7 @@ import type { GameRules } from '../config/RulesParser';
 import { EventBus } from '../core/EventBus';
 import type { AudioManager } from '../audio/AudioManager';
 import type { ProductionSystem } from '../simulation/ProductionSystem';
+import type { CombatSystem } from '../simulation/CombatSystem';
 
 type SellCallback = (eid: number) => void;
 type RepairCallback = (eid: number) => void;
@@ -24,10 +25,13 @@ export class SelectionPanel {
   private onRepair: RepairCallback;
   private onUpgrade: UpgradeCallback | null = null;
   private production: ProductionSystem | null = null;
+  private combatSystem: CombatSystem | null = null;
 
   // Message log
   private messageLog: string[] = [];
   private messageContainer: HTMLDivElement;
+  private sellConfirmEid: number | null = null;
+  private sellConfirmTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     rules: GameRules,
@@ -58,10 +62,12 @@ export class SelectionPanel {
     // Listen for events
     EventBus.on('unit:selected', ({ entityIds }) => {
       this.selectedEntities = entityIds;
+      this.sellConfirmEid = null;
       this.render();
     });
     EventBus.on('unit:deselected', () => {
       this.selectedEntities = [];
+      this.sellConfirmEid = null;
       this.render();
     });
     EventBus.on('unit:died', ({ entityId }) => {
@@ -83,6 +89,10 @@ export class SelectionPanel {
   setProductionSystem(prod: ProductionSystem, onUpgrade: UpgradeCallback): void {
     this.production = prod;
     this.onUpgrade = onUpgrade;
+  }
+
+  setCombatSystem(combat: CombatSystem): void {
+    this.combatSystem = combat;
   }
 
   addMessage(text: string, color = '#ccc'): void {
@@ -194,6 +204,16 @@ export class SelectionPanel {
       }
     }
 
+    // Stance display for units
+    let stanceHtml = '';
+    if (isUnit && this.combatSystem && hasComponent(this.world!, Combat, eid)) {
+      const stance = this.combatSystem.getStance(eid);
+      const stanceNames = ['Aggressive', 'Defensive', 'Hold Position'];
+      const stanceColors = ['#f44', '#4af', '#888'];
+      const stanceIcons = ['\u2694', '\u26e8', '\u2693']; // crossed swords, shield, anchor
+      stanceHtml = `<span style="font-size:11px;color:${stanceColors[stance]};">${stanceIcons[stance]} ${stanceNames[stance]}</span> <span style="font-size:9px;color:#666;">(V to cycle)</span>`;
+    }
+
     let buttons = '';
     if (isBuilding) {
       // Check if building can be upgraded
@@ -203,9 +223,15 @@ export class SelectionPanel {
       const upgradeBtn = canUpgrade
         ? `<button id="upgrade-btn" style="padding:4px 12px;background:#111144;border:1px solid #44f;color:#88f;cursor:pointer;font-size:11px;">Upgrade $${bDef!.upgradeCost}</button>`
         : '';
+      const refund = def ? Math.floor(def.cost * 0.5) : 0;
+      const isSellConfirm = this.sellConfirmEid === eid;
+      const sellLabel = isSellConfirm ? `Confirm Sell ($${refund})` : `Sell ($${refund})`;
+      const sellBg = isSellConfirm ? '#661111' : '#441111';
+      const sellBorder = isSellConfirm ? '#ff4' : '#f44';
+      const sellColor = isSellConfirm ? '#ff4' : '#f88';
       buttons = `
         ${upgradeBtn}
-        <button id="sell-btn" style="padding:4px 12px;background:#441111;border:1px solid #f44;color:#f88;cursor:pointer;font-size:11px;">Sell</button>
+        <button id="sell-btn" style="padding:4px 12px;background:${sellBg};border:1px solid ${sellBorder};color:${sellColor};cursor:pointer;font-size:11px;">${sellLabel}</button>
         <button id="repair-btn" style="padding:4px 12px;background:#114411;border:1px solid #4f4;color:#8f8;cursor:pointer;font-size:11px;">Repair</button>
       `;
     }
@@ -224,6 +250,7 @@ export class SelectionPanel {
           <span style="font-size:11px;color:${hpColor};">${Math.ceil(hp)}/${maxHp}</span>
         </div>
         <div>${statsHtml}</div>
+        ${stanceHtml ? `<div style="margin-top:2px;">${stanceHtml}</div>` : ''}
       </div>
       <div style="display:flex;gap:6px;">${buttons}</div>
     `;
@@ -232,8 +259,24 @@ export class SelectionPanel {
     const sellBtn = document.getElementById('sell-btn');
     if (sellBtn) {
       sellBtn.onclick = () => {
-        this.audioManager.playSfx('sell');
-        this.onSell(eid);
+        if (this.sellConfirmEid === eid) {
+          // Second click - confirm sell
+          if (this.sellConfirmTimer) clearTimeout(this.sellConfirmTimer);
+          this.sellConfirmEid = null;
+          this.sellConfirmTimer = null;
+          this.audioManager.playSfx('sell');
+          this.onSell(eid);
+        } else {
+          // First click - enter confirm state
+          this.sellConfirmEid = eid;
+          if (this.sellConfirmTimer) clearTimeout(this.sellConfirmTimer);
+          this.sellConfirmTimer = setTimeout(() => {
+            this.sellConfirmEid = null;
+            this.sellConfirmTimer = null;
+            this.render();
+          }, 3000);
+          this.render();
+        }
       };
     }
     const repairBtn = document.getElementById('repair-btn');
@@ -255,6 +298,33 @@ export class SelectionPanel {
   private renderMulti(): void {
     if (!this.world) return;
     const count = this.selectedEntities.length;
+
+    // Group units by type for summary
+    const typeCounts = new Map<string, number>();
+    let totalHp = 0, totalMaxHp = 0;
+    for (const eid of this.selectedEntities) {
+      const isUnit = hasComponent(this.world, UnitType, eid);
+      let name = 'Unit';
+      if (isUnit) {
+        const typeId = UnitType.id[eid];
+        name = this.unitTypeNames[typeId]?.replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, '') ?? 'Unit';
+      }
+      typeCounts.set(name, (typeCounts.get(name) ?? 0) + 1);
+      totalHp += Health.current[eid];
+      totalMaxHp += Health.max[eid];
+    }
+
+    // Build group summary (e.g. "4x LightInf, 2x Buzzsaw")
+    const groups = [...typeCounts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 4)
+      .map(([name, ct]) => `<span style="color:#aaa;">${ct}x</span> <span style="color:#ddd;">${name}</span>`)
+      .join('<span style="color:#444;"> | </span>');
+    const moreTypes = typeCounts.size > 4 ? `<span style="color:#666;"> +${typeCounts.size - 4} types</span>` : '';
+
+    // Overall health bar
+    const avgRatio = totalMaxHp > 0 ? totalHp / totalMaxHp : 1;
+    const avgColor = avgRatio > 0.6 ? '#0f0' : avgRatio > 0.3 ? '#ff0' : '#f00';
 
     // Build portrait grid (max 20 shown)
     let gridHtml = '';
@@ -286,7 +356,14 @@ export class SelectionPanel {
 
     this.container.innerHTML = `
       <div style="flex:1;">
-        <div style="font-size:13px;font-weight:bold;color:#fff;margin-bottom:4px;">${count} units selected</div>
+        <div style="font-size:13px;font-weight:bold;color:#fff;margin-bottom:2px;">${count} units selected</div>
+        <div style="font-size:11px;margin-bottom:4px;">${groups}${moreTypes}</div>
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+          <div style="flex:1;height:4px;background:#333;border-radius:2px;overflow:hidden;">
+            <div style="height:100%;width:${Math.round(avgRatio * 100)}%;background:${avgColor};"></div>
+          </div>
+          <span style="font-size:10px;color:${avgColor};">${Math.round(avgRatio * 100)}%</span>
+        </div>
         <div style="display:flex;flex-wrap:wrap;gap:2px;">${gridHtml}${moreText}</div>
       </div>
     `;
