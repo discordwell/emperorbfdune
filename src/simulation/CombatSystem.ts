@@ -242,19 +242,25 @@ export class CombatSystem implements GameSystem {
         MoveTarget.active[eid] = 0;
       }
 
-      // Rotate unit to face target (buildings don't rotate)
-      if (!hasComponent(world, BuildingType, eid) && hasComponent(world, Rotation, eid)) {
+      // Rotate unit/turret to face target
+      if (hasComponent(world, Rotation, eid)) {
+        const isBuilding = hasComponent(world, BuildingType, eid);
         const desiredAngle = angleBetween(
           Position.x[eid], Position.z[eid],
           Position.x[targetEid], Position.z[targetEid]
         );
-        const turnRate = hasComponent(world, Speed, eid) ? Speed.turnRate[eid] : 0.15;
-        Rotation.y[eid] = lerpAngle(Rotation.y[eid], desiredAngle, Math.min(1, turnRate * 3));
-        // Don't fire until roughly facing target (within ~20 degrees)
-        let angleDiff = desiredAngle - Rotation.y[eid];
-        if (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-        if (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-        if (Math.abs(angleDiff) > 0.35) continue;
+        if (isBuilding) {
+          // Buildings: instant turret rotation (visual only)
+          Rotation.y[eid] = desiredAngle;
+        } else {
+          const turnRate = hasComponent(world, Speed, eid) ? Speed.turnRate[eid] : 0.15;
+          Rotation.y[eid] = lerpAngle(Rotation.y[eid], desiredAngle, Math.min(1, turnRate * 3));
+          // Don't fire until roughly facing target (within ~20 degrees)
+          let angleDiff = desiredAngle - Rotation.y[eid];
+          if (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+          if (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+          if (Math.abs(angleDiff) > 0.35) continue;
+        }
       }
 
       // Only fire when cooldown is done

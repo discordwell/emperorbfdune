@@ -51,6 +51,7 @@ export interface UnitDef {
   apc: boolean;
   passengerCapacity: number;
   ornithopter: boolean; // needs rearming at landing pad
+  saboteur: boolean; // auto-suicide on building contact
 
   // AI
   aiSpecial: boolean;
@@ -109,6 +110,7 @@ export function createDefaultUnitDef(name: string): UnitDef {
     apc: false,
     passengerCapacity: 0,
     ornithopter: false,
+    saboteur: false,
     aiSpecial: false,
     aiThreat: 0,
     veterancy: [],

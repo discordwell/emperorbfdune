@@ -31,6 +31,8 @@ export class HarvestSystem implements GameSystem {
   // Harvesters being airlifted: eid -> ticks remaining
   private airlifting = new Map<number, number>();
 
+  // Income rate tracking
+  private lastSolarisSnapshot = 0;
   // Tracked harvester entity IDs
   private knownHarvesters = new Set<number>();
   // Harvesters that recently took damage - flee to refinery
@@ -162,6 +164,24 @@ export class HarvestSystem implements GameSystem {
         el.classList.remove('flash-green');
         el.classList.add('flash-red');
         setTimeout(() => el.classList.remove('flash-red'), 400);
+      }
+    }
+
+    // Income rate display (update every 2 seconds / 50 ticks)
+    if (this.tickCounter % 50 === 0) {
+      const rate = Math.floor(p0Credits) - this.lastSolarisSnapshot;
+      this.lastSolarisSnapshot = Math.floor(p0Credits);
+      const rateEl = document.getElementById('income-rate');
+      if (rateEl) {
+        if (rate > 0) {
+          rateEl.textContent = `+${rate}/2s`;
+          rateEl.style.color = '#44ff44';
+        } else if (rate < 0) {
+          rateEl.textContent = `${rate}/2s`;
+          rateEl.style.color = '#ff4444';
+        } else {
+          rateEl.textContent = '';
+        }
       }
     }
   }

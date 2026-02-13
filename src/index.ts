@@ -1714,6 +1714,45 @@ async function main() {
       }
     }
 
+    // Saboteur auto-suicide: saboteurs destroy enemy buildings on contact (same tick as engineer check)
+    if (game.getTickCount() % 10 === 5) {
+      const sabUnits = unitQuery(world);
+      const sabBlds = buildingQuery(world);
+      for (const eid of sabUnits) {
+        if (Health.current[eid] <= 0) continue;
+        const typeId = UnitType.id[eid];
+        const typeName = unitTypeNames[typeId];
+        const def = typeName ? gameRules.units.get(typeName) : null;
+        if (!def?.saboteur) continue;
+
+        const sabOwner = Owner.playerId[eid];
+        for (const bid of sabBlds) {
+          if (Health.current[bid] <= 0) continue;
+          if (Owner.playerId[bid] === sabOwner) continue;
+          const dx = Position.x[eid] - Position.x[bid];
+          const dz = Position.z[eid] - Position.z[bid];
+          if (dx * dx + dz * dz < 9.0) { // Within 3 units
+            // Massive damage to the building (usually kills it)
+            const dmg = Math.max(Health.max[bid] * 0.8, 2000);
+            Health.current[bid] = Math.max(0, Health.current[bid] - dmg);
+            // Explosion effects
+            effectsManager.spawnExplosion(Position.x[bid], 0, Position.z[bid], 'large');
+            audioManager.playSfx('explosion');
+            scene.shake(0.5);
+            if (Health.current[bid] <= 0) {
+              EventBus.emit('unit:died', { entityId: bid, killerEntity: eid });
+            }
+            // Saboteur is consumed
+            Health.current[eid] = 0;
+            EventBus.emit('unit:died', { entityId: eid, killerEntity: -1 });
+            if (sabOwner === 0) selectionPanel.addMessage('Saboteur detonated!', '#ff8800');
+            else if (Owner.playerId[bid] === 0) selectionPanel.addMessage('Saboteur attack on base!', '#ff4444');
+            break;
+          }
+        }
+      }
+    }
+
     // Passive repair: idle units near friendly buildings heal slowly every 2 seconds
     if (game.getTickCount() % 50 === 0) {
       const allUnits = unitQuery(world);

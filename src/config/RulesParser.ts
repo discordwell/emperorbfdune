@@ -207,6 +207,7 @@ function parseUnitDef(name: string, section: Section): UnitDef {
       case 'Devastator': def.selfDestruct = parseBool(value); break;
       case 'APC': if (parseBool(value)) { def.apc = true; def.passengerCapacity = 5; } break;
       case 'Ornithoptor': def.ornithopter = parseBool(value); break;
+      case 'Saboteur': def.saboteur = parseBool(value); break;
       case 'AiSpecial': def.aiSpecial = parseBool(value); break;
       case 'AIThreat': def.aiThreat = parseNum(value); break;
       case 'StormDamage': def.stormDamage = parseNum(value); break;
