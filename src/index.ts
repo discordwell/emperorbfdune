@@ -244,6 +244,8 @@ async function main() {
     return 'vehicle';
   });
   combatSystem.setFogOfWar(fogOfWar, 0);
+  combatSystem.setPlayerFaction(0, house.prefix);
+  combatSystem.setPlayerFaction(1, house.enemyPrefix);
 
   // Unit population cap
   productionSystem.setUnitCountCallback((playerId: number) => {
@@ -963,6 +965,20 @@ async function main() {
       const z = baseZ! + (Math.random() - 0.5) * 10;
       const eid = spawnUnit(world, unitType, owner, x, z);
 
+      // Atreides veterancy bonus: infantry from upgraded barracks start at rank 1
+      if (eid >= 0) {
+        const ownerPrefix = owner === 0 ? house.prefix : house.enemyPrefix;
+        if (ownerPrefix === 'AT') {
+          const uDef = gameRules.units.get(unitType);
+          if (uDef?.infantry && productionSystem.isUpgraded(owner, `${ownerPrefix}Barracks`)) {
+            if (hasComponent(world, Veterancy, eid) && Veterancy.rank[eid] < 1) {
+              Veterancy.rank[eid] = 1;
+              Veterancy.xp[eid] = 1;
+            }
+          }
+        }
+      }
+
       // Send to rally point if player has one set
       if (owner === 0 && eid >= 0) {
         const rally = commandManager.getRallyPoint(0);
@@ -1138,7 +1154,7 @@ async function main() {
       setTimeout(() => effectsManager.spawnExplosion(targetX, 0, targetZ, 'large'), 200);
     }
 
-    audioManager.playSfx('explosion');
+    audioManager.playSfx('superweaponLaunch');
     scene.shake(config.style === 'missile' ? 1.0 : 0.6); // Camera shake!
 
     // Apply damage to all entities in radius
@@ -1210,6 +1226,7 @@ async function main() {
               sw.charge = config.chargeTime;
               sw.ready = true;
               EventBus.emit('superweapon:ready', { owner: pid, type: palaceType });
+              audioManager.playSfx('superweaponReady');
               if (pid === 0) {
                 selectionPanel.addMessage(`${config.name} ready!`, '#ff8800');
               } else {
@@ -1633,6 +1650,30 @@ async function main() {
 
     // Spice bloom visuals are now handled via HarvestSystem events (bloom:warning/tremor/eruption)
 
+    // --- FACTION-SPECIFIC BONUSES (every 2 seconds) ---
+    if (game.getTickCount() % 50 === 25) {
+      const allUnits = unitQuery(world);
+
+      for (let pid = 0; pid <= 1; pid++) {
+        const prefix = pid === 0 ? house.prefix : house.enemyPrefix;
+
+        // ORDOS: self-regeneration (units slowly heal 1% HP per 2 seconds)
+        if (prefix === 'OR') {
+          for (const eid of allUnits) {
+            if (Owner.playerId[eid] !== pid) continue;
+            if (Health.current[eid] <= 0 || Health.current[eid] >= Health.max[eid]) continue;
+            Health.current[eid] = Math.min(Health.max[eid],
+              Health.current[eid] + Health.max[eid] * 0.01);
+          }
+        }
+
+        // HARKONNEN: no damage degradation — implemented via combat system bonus
+        // (In the real game, all units deal less damage as they lose HP. Harkonnen are exempt.
+        //  Our implementation: Harkonnen get +10% damage at all times to represent this advantage.)
+        // This is handled in the damage calculation below.
+      }
+    }
+
     // Crate drops: spawn a random crate every ~40 seconds
     if (game.getTickCount() % 1000 === 500 && activeCrates.size < 3) {
       const crateTypes = ['credits', 'veterancy', 'heal'];
@@ -1796,6 +1837,15 @@ async function main() {
     if (Owner.playerId[entityId] === 0) { lastEventX = x; lastEventZ = z; }
   });
 
+  const speedEl = document.getElementById('game-speed');
+  function updateSpeedIndicator(speed: number): void {
+    if (!speedEl) return;
+    const label = speed <= 0.5 ? '0.5x' : speed >= 2.0 ? '2x' : '1x';
+    const color = speed <= 0.5 ? '#88aaff' : speed >= 2.0 ? '#ff8844' : '#888';
+    speedEl.textContent = label;
+    speedEl.style.color = color;
+  }
+
   window.addEventListener('keydown', (e) => {
     if (e.key === '?' || (e.key === '/' && e.shiftKey)) {
       if (helpOverlay) {
@@ -1893,14 +1943,17 @@ async function main() {
       e.preventDefault();
       game.setSpeed(0.5);
       selectionPanel.addMessage('Speed: Slow', '#888');
+      updateSpeedIndicator(0.5);
     } else if (e.key === 'F2') {
       e.preventDefault();
       game.setSpeed(1.0);
       selectionPanel.addMessage('Speed: Normal', '#888');
+      updateSpeedIndicator(1.0);
     } else if (e.key === 'F3') {
       e.preventDefault();
       game.setSpeed(2.0);
       selectionPanel.addMessage('Speed: Fast', '#888');
+      updateSpeedIndicator(2.0);
     } else if (e.key === 'F5') {
       e.preventDefault();
       saveGame();

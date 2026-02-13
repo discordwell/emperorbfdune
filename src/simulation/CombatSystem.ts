@@ -30,9 +30,15 @@ export class CombatSystem implements GameSystem {
   private stealthedEntities = new Set<number>();
   // Guard positions: units return here after combat
   private guardPositions = new Map<number, { x: number; z: number }>();
+  // Faction prefix per player (for faction-specific damage bonuses)
+  private playerFactions = new Map<number, string>();
 
   constructor(rules: GameRules) {
     this.rules = rules;
+  }
+
+  setPlayerFaction(playerId: number, prefix: string): void {
+    this.playerFactions.set(playerId, prefix);
   }
 
   setFogOfWar(fog: FogOfWar, localPlayerId = 0): void {
@@ -306,6 +312,17 @@ export class CombatSystem implements GameSystem {
       const defRank = Veterancy.rank[targetEid];
       const defBonus = [1.0, 0.9, 0.8, 0.7][defRank] ?? 1.0;
       baseDamage = Math.round(baseDamage * defBonus);
+    }
+
+    // Damage degradation: damaged units deal less damage (proportional to HP ratio)
+    // Harkonnen are exempt — they maintain full combat power until destroyed
+    const attackerOwner = Owner.playerId[attackerEid];
+    const attackerFaction = this.playerFactions.get(attackerOwner);
+    if (attackerFaction !== 'HK') {
+      const hpRatio = Health.current[attackerEid] / Math.max(1, Health.max[attackerEid]);
+      // Scale: 100% HP = full damage, 50% HP = 75% damage, 0% HP = 50% damage
+      const degradation = 0.5 + hpRatio * 0.5;
+      baseDamage = Math.round(baseDamage * degradation);
     }
 
     // Emit fire event for visual projectile

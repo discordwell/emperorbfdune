@@ -18,7 +18,7 @@ const MUSIC_TRACKS: TrackInfo[] = [
 ];
 
 // Synthesized SFX using Web Audio API (no external files needed)
-type SfxType = 'select' | 'move' | 'attack' | 'explosion' | 'build' | 'sell' | 'error' | 'victory' | 'defeat' | 'harvest' | 'shot' | 'powerlow' | 'place' | 'worm' | 'underattack' | 'deathInfantry' | 'deathVehicle' | 'deathBuilding';
+type SfxType = 'select' | 'move' | 'attack' | 'explosion' | 'build' | 'sell' | 'error' | 'victory' | 'defeat' | 'harvest' | 'shot' | 'powerlow' | 'place' | 'worm' | 'underattack' | 'deathInfantry' | 'deathVehicle' | 'deathBuilding' | 'superweaponReady' | 'superweaponLaunch';
 
 export type UnitCategory = 'infantry' | 'vehicle' | 'harvester';
 
@@ -240,6 +240,8 @@ export class AudioManager {
         case 'deathInfantry': this.synthDeathInfantry(ctx); break;
         case 'deathVehicle': this.synthDeathVehicle(ctx); break;
         case 'deathBuilding': this.synthDeathBuilding(ctx); break;
+        case 'superweaponReady': this.synthSuperweaponReady(ctx); break;
+        case 'superweaponLaunch': this.synthSuperweaponLaunch(ctx); break;
       }
     } catch {
       // Audio not available
@@ -745,6 +747,48 @@ export class AudioManager {
     osc.connect(oscGain);
     osc.start(t);
     osc.stop(t + 0.6);
+  }
+
+  private synthSuperweaponReady(ctx: AudioContext): void {
+    const t = ctx.currentTime;
+    // Ascending alarm tones (3 notes)
+    for (let i = 0; i < 3; i++) {
+      const osc = ctx.createOscillator();
+      const gain = this.makeGain(ctx, 0.2);
+      osc.type = 'square';
+      osc.frequency.value = 600 + i * 200;
+      gain.gain.setValueAtTime(0.2 * this.sfxVolume, t + i * 0.15);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + i * 0.15 + 0.12);
+      osc.connect(gain);
+      osc.start(t + i * 0.15);
+      osc.stop(t + i * 0.15 + 0.12);
+    }
+  }
+
+  private synthSuperweaponLaunch(ctx: AudioContext): void {
+    const t = ctx.currentTime;
+    // Descending siren + explosion
+    const osc = ctx.createOscillator();
+    const gain = this.makeGain(ctx, 0.3);
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(1200, t);
+    osc.frequency.exponentialRampToValueAtTime(100, t + 0.6);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.7);
+    osc.connect(gain);
+    osc.start(t);
+    osc.stop(t + 0.7);
+    // Low boom follows
+    const osc2 = ctx.createOscillator();
+    const gain2 = this.makeGain(ctx, 0.25);
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(60, t + 0.3);
+    osc2.frequency.exponentialRampToValueAtTime(30, t + 0.8);
+    gain2.gain.setValueAtTime(0, t);
+    gain2.gain.linearRampToValueAtTime(0.25 * this.sfxVolume, t + 0.35);
+    gain2.gain.exponentialRampToValueAtTime(0.001, t + 0.9);
+    osc2.connect(gain2);
+    osc2.start(t + 0.3);
+    osc2.stop(t + 0.9);
   }
 
   // --- Combat intensity ---
