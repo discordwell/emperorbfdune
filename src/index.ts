@@ -715,6 +715,8 @@ async function main() {
       niabCooldowns.delete(entityId);
       combatSystem.setSuppressed(entityId, false);
     }
+    // Dismount worm if rider dies
+    sandwormSystem.dismountWorm(entityId);
     // If this entity was being leeched, detach the leech(es)
     const leechesToDetach: number[] = [];
     for (const [leechEid, targetEid] of leechTargets) {
@@ -2628,6 +2630,36 @@ async function main() {
         if (count > 0) {
           selectionPanel.addMessage(`Unloaded ${count} infantry`, '#44ff44');
           audioManager.playSfx('select');
+        }
+      }
+    } else if (e.key === 'w' && !e.ctrlKey && !e.altKey) {
+      // Mount/dismount sandworm (Fremen worm riders)
+      const selected = selectionManager.getSelectedEntities();
+      for (const eid of selected) {
+        if (Owner.playerId[eid] !== 0 || Health.current[eid] <= 0) continue;
+        const typeId = UnitType.id[eid];
+        const typeName = unitTypeNames[typeId];
+        const def = typeName ? gameRules.units.get(typeName) : null;
+        if (!def?.wormRider) continue;
+
+        // Check if already mounted — dismount
+        const riderWorm = sandwormSystem.getRiderWorm(eid);
+        if (riderWorm) {
+          sandwormSystem.dismountWorm(eid);
+          selectionPanel.addMessage('Dismounted worm', '#aaa');
+          audioManager.playSfx('select');
+          continue;
+        }
+
+        // Try to mount a nearby worm
+        const mounted = sandwormSystem.mountWorm(
+          eid, Position.x[eid], Position.z[eid], Owner.playerId[eid]
+        );
+        if (mounted) {
+          selectionPanel.addMessage('Worm mounted!', '#f0c040');
+          audioManager.playSfx('move');
+        } else {
+          selectionPanel.addMessage('No worm nearby to mount', '#888');
         }
       }
     } else if (e.key === 'F1') {

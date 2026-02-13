@@ -217,6 +217,9 @@ function parseUnitDef(name: string, section: Section): UnitDef {
       case 'TeleportSleepTime': def.teleportSleepTime = parseNum(value); break;
       case 'Kobra': def.kobra = parseBool(value); break;
       case 'Repair': def.repair = parseBool(value); break;
+      case 'Resource':
+        if (value === 'WormRider') def.wormRider = true;
+        break;
       case 'AiSpecial': def.aiSpecial = parseBool(value); break;
       case 'AIThreat': def.aiThreat = parseNum(value); break;
       case 'StormDamage': def.stormDamage = parseNum(value); break;

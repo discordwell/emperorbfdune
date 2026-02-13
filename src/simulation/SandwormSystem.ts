@@ -1,7 +1,7 @@
 import type { GameSystem } from '../core/Game';
 import type { World } from '../core/ECS';
 import {
-  Position, Health, Owner, UnitType, Harvester,
+  Position, Health, Owner, UnitType, Harvester, MoveTarget,
   unitQuery, hasComponent,
 } from '../core/ECS';
 import type { TerrainRenderer } from '../rendering/TerrainRenderer';
@@ -19,8 +19,10 @@ interface Worm {
   speed: number;
   life: number; // Ticks remaining before burrowing
   huntingEid: number | null; // Entity being hunted
-  state: 'roaming' | 'hunting' | 'emerging' | 'submerging';
+  state: 'roaming' | 'hunting' | 'emerging' | 'submerging' | 'mounted';
   emergeTicks: number;
+  riderEid?: number; // Entity riding this worm
+  riderOwner?: number; // Owner of the rider
 }
 
 export class SandwormSystem implements GameSystem {
@@ -56,6 +58,12 @@ export class SandwormSystem implements GameSystem {
       worm.life--;
 
       if (worm.life <= 0) {
+        // Dismount rider before removing worm
+        if (worm.state === 'mounted' && worm.riderEid != null) {
+          Position.y[worm.riderEid] = 0.1;
+          worm.riderEid = undefined;
+          worm.riderOwner = undefined;
+        }
         // Submerge and remove
         this.effects.spawnExplosion(worm.x, 0, worm.z, 'medium');
         EventBus.emit('worm:submerge', { x: worm.x, z: worm.z });
@@ -77,6 +85,10 @@ export class SandwormSystem implements GameSystem {
 
         case 'hunting':
           this.updateHunting(world, worm);
+          break;
+
+        case 'mounted':
+          this.updateMounted(world, worm);
           break;
 
         case 'submerging':
@@ -218,6 +230,9 @@ export class SandwormSystem implements GameSystem {
     for (const eid of units) {
       if (Health.current[eid] <= 0) continue;
 
+      // Skip units mounted on worms
+      if (this.isRider(eid)) continue;
+
       // Check if unit is on sand (worm can't eat units on rock)
       const tile = worldToTile(Position.x[eid], Position.z[eid]);
       const terrainType = this.terrain.getTerrainType(tile.tx, tile.tz);
@@ -239,7 +254,113 @@ export class SandwormSystem implements GameSystem {
     return bestEid;
   }
 
+  private updateMounted(world: World, worm: Worm): void {
+    if (worm.riderEid == null) {
+      worm.state = 'roaming';
+      worm.speed = 0.3;
+      return;
+    }
+
+    // Check if rider is still alive
+    if (Health.current[worm.riderEid] <= 0) {
+      worm.state = 'roaming';
+      worm.speed = 0.3;
+      worm.riderEid = undefined;
+      worm.riderOwner = undefined;
+      return;
+    }
+
+    // Follow rider's move target (rider controls the worm)
+    if (MoveTarget.active[worm.riderEid] === 1) {
+      const tx = MoveTarget.x[worm.riderEid];
+      const tz = MoveTarget.z[worm.riderEid];
+      const dx = tx - worm.x;
+      const dz = tz - worm.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      if (dist > 2) {
+        const nextX = worm.x + (dx / dist) * worm.speed;
+        const nextZ = worm.z + (dz / dist) * worm.speed;
+        // Worm can't traverse rock/cliff even when mounted
+        const tile = worldToTile(nextX, nextZ);
+        const tt = this.terrain.getTerrainType(tile.tx, tile.tz);
+        if (tt !== TerrainType.Rock && tt !== TerrainType.Cliff && tt !== TerrainType.InfantryRock) {
+          worm.x = nextX;
+          worm.z = nextZ;
+        }
+      }
+    }
+
+    // Keep rider on top of the worm
+    Position.x[worm.riderEid] = worm.x;
+    Position.z[worm.riderEid] = worm.z;
+    Position.y[worm.riderEid] = 1.5; // Riding on top
+
+    // Mounted worm eats any enemy units it passes near
+    if (this.tickCounter % 10 === 0) {
+      const units = unitQuery(world);
+      for (const eid of units) {
+        if (eid === worm.riderEid) continue;
+        if (Health.current[eid] <= 0) continue;
+        if (Owner.playerId[eid] === worm.riderOwner) continue; // Don't eat friendlies
+        const dx = Position.x[eid] - worm.x;
+        const dz = Position.z[eid] - worm.z;
+        if (dx * dx + dz * dz < 9) { // Within 3 units
+          this.eatUnit(world, eid, worm);
+        }
+      }
+    }
+  }
+
   getWorms(): ReadonlyArray<Worm> {
     return this.worms;
+  }
+
+  /** Try to mount a worm near the given position. Returns true if successful. */
+  mountWorm(riderEid: number, riderX: number, riderZ: number, riderOwner: number): boolean {
+    for (const worm of this.worms) {
+      if (worm.state === 'mounted' || worm.state === 'emerging' || worm.state === 'submerging') continue;
+      const dx = worm.x - riderX;
+      const dz = worm.z - riderZ;
+      if (dx * dx + dz * dz < 25) { // Within 5 units
+        worm.state = 'mounted';
+        worm.riderEid = riderEid;
+        worm.riderOwner = riderOwner;
+        worm.life = Math.max(worm.life, 1500); // Mounted worms last longer (~1 minute)
+        worm.speed = 0.8; // Faster when mounted
+        worm.huntingEid = null;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Dismount a rider from their worm */
+  dismountWorm(riderEid: number): void {
+    for (const worm of this.worms) {
+      if (worm.riderEid === riderEid) {
+        worm.state = 'roaming';
+        worm.speed = 0.3;
+        Position.y[riderEid] = 0.1; // Return rider to ground level
+        worm.riderEid = undefined;
+        worm.riderOwner = undefined;
+        break;
+      }
+    }
+  }
+
+  /** Check if an entity is currently riding a worm */
+  private isRider(eid: number): boolean {
+    for (const worm of this.worms) {
+      if (worm.riderEid === eid) return true;
+    }
+    return false;
+  }
+
+  /** Get the worm a rider is on, if any */
+  getRiderWorm(riderEid: number): Worm | null {
+    for (const worm of this.worms) {
+      if (worm.riderEid === riderEid) return worm;
+    }
+    return null;
   }
 }

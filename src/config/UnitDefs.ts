@@ -60,6 +60,7 @@ export interface UnitDef {
   teleportSleepTime: number; // ticks before teleported unit can act
   kobra: boolean; // deploys to extend range
   repair: boolean; // repair vehicle - heals nearby friendly vehicles
+  wormRider: boolean; // can mount sandworms (Fremen)
 
   // AI
   aiSpecial: boolean;
@@ -127,6 +128,7 @@ export function createDefaultUnitDef(name: string): UnitDef {
     teleportSleepTime: 93,
     kobra: false,
     repair: false,
+    wormRider: false,
     aiSpecial: false,
     aiThreat: 0,
     veterancy: [],
