@@ -111,6 +111,20 @@ async function main() {
   const fogOfWar = new FogOfWar(scene, 0);
   minimapRenderer.setFogOfWar(fogOfWar);
   unitRenderer.setFogOfWar(fogOfWar, 0);
+  combatSystem.setFogOfWar(fogOfWar, 0);
+
+  // Unit population cap
+  productionSystem.setUnitCountCallback((playerId: number) => {
+    const world = game.getWorld();
+    const units = unitQuery(world);
+    let count = 0;
+    for (const eid of units) {
+      if (Owner.playerId[eid] !== playerId) continue;
+      if (Health.current[eid] <= 0) continue;
+      count++;
+    }
+    return count;
+  });
   const effectsManager = new EffectsManager(scene);
   const victorySystem = new VictorySystem(audioManager, 0);
 
@@ -579,6 +593,22 @@ async function main() {
       e.preventDefault();
       scene.cameraTarget.set(lastEventX, 0, lastEventZ);
       scene.updateCameraPosition();
+    } else if (e.key === 'F1') {
+      e.preventDefault();
+      game.setSpeed(0.5);
+      selectionPanel.addMessage('Speed: Slow', '#888');
+    } else if (e.key === 'F2') {
+      e.preventDefault();
+      game.setSpeed(1.0);
+      selectionPanel.addMessage('Speed: Normal', '#888');
+    } else if (e.key === 'F3') {
+      e.preventDefault();
+      game.setSpeed(2.0);
+      selectionPanel.addMessage('Speed: Fast', '#888');
+    } else if (e.key === 'F9') {
+      e.preventDefault();
+      game.pause();
+      selectionPanel.addMessage(game.isPaused() ? 'Game Paused' : 'Game Resumed', '#888');
     }
   });
 

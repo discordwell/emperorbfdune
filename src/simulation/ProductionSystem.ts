@@ -25,6 +25,9 @@ export class ProductionSystem {
 
   // Power multiplier per player: 1.0 = full power, 0.5 = low power
   private powerMultipliers = new Map<number, number>();
+  // Unit count callback for population cap
+  private unitCountCallback: ((playerId: number) => number) | null = null;
+  private maxUnits = 50;
 
   constructor(rules: GameRules, harvestSystem: HarvestSystem) {
     this.rules = rules;
@@ -33,6 +36,10 @@ export class ProductionSystem {
 
   setPowerMultiplier(playerId: number, multiplier: number): void {
     this.powerMultipliers.set(playerId, multiplier);
+  }
+
+  setUnitCountCallback(cb: (playerId: number) => number): void {
+    this.unitCountCallback = cb;
   }
 
   addPlayerBuilding(playerId: number, buildingType: string): void {
@@ -61,6 +68,11 @@ export class ProductionSystem {
     // Check prerequisites (primary building must exist)
     const owned = this.playerBuildings.get(playerId);
     if (def.primaryBuilding && owned && !owned.has(def.primaryBuilding)) return false;
+
+    // Unit population cap (only for units, not buildings)
+    if (!isBuilding && this.unitCountCallback) {
+      if (this.unitCountCallback(playerId) >= this.maxUnits) return false;
+    }
 
     return true;
   }

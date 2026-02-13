@@ -25,6 +25,7 @@ export class Game {
   private tickCount = 0;
   private accumulator = 0;
   private lastTime = 0;
+  private speedMultiplier = 1.0;
 
   // FPS tracking
   private frameCount = 0;
@@ -72,6 +73,18 @@ export class Game {
     }
   }
 
+  setSpeed(multiplier: number): void {
+    this.speedMultiplier = Math.max(0.5, Math.min(3.0, multiplier));
+  }
+
+  getSpeed(): number {
+    return this.speedMultiplier;
+  }
+
+  isPaused(): boolean {
+    return this.paused;
+  }
+
   getWorld(): World {
     return this.world;
   }
@@ -91,7 +104,7 @@ export class Game {
     const capped = Math.min(elapsed, 200);
 
     if (!this.paused) {
-      this.accumulator += capped;
+      this.accumulator += capped * this.speedMultiplier;
 
       // Fixed timestep simulation
       while (this.accumulator >= TICK_INTERVAL) {

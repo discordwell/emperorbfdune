@@ -5,8 +5,9 @@ import {
   Armour, BuildingType, combatQuery, hasComponent,
 } from '../core/ECS';
 import type { GameRules } from '../config/RulesParser';
-import { distance2D } from '../utils/MathUtils';
+import { distance2D, worldToTile } from '../utils/MathUtils';
 import { EventBus } from '../core/EventBus';
+import type { FogOfWar } from '../rendering/FogOfWar';
 
 export class CombatSystem implements GameSystem {
   private rules: GameRules;
@@ -14,9 +15,16 @@ export class CombatSystem implements GameSystem {
   private unitTypeMap = new Map<number, string>(); // eid -> unit type name
   // Power multiplier per player: affects building turret fire rate
   private powerMultipliers = new Map<number, number>();
+  private fogOfWar: FogOfWar | null = null;
+  private localPlayerId = 0;
 
   constructor(rules: GameRules) {
     this.rules = rules;
+  }
+
+  setFogOfWar(fog: FogOfWar, localPlayerId = 0): void {
+    this.fogOfWar = fog;
+    this.localPlayerId = localPlayerId;
   }
 
   setPowerMultiplier(playerId: number, multiplier: number): void {
@@ -157,6 +165,12 @@ export class CombatSystem implements GameSystem {
       if (Owner.playerId[other] === myOwner) continue;
       if (!hasComponent(world, Health, other)) continue;
       if (Health.current[other] <= 0) continue;
+
+      // Player units can only auto-target enemies in visible fog tiles
+      if (myOwner === this.localPlayerId && this.fogOfWar && this.fogOfWar.isEnabled()) {
+        const tile = worldToTile(Position.x[other], Position.z[other]);
+        if (!this.fogOfWar.isTileVisible(tile.tx, tile.tz)) continue;
+      }
 
       const dist = distance2D(px, pz, Position.x[other], Position.z[other]);
       if (dist < bestDist) {
