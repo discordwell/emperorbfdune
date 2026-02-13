@@ -91,6 +91,38 @@ export class HouseSelect {
 
   show(): Promise<HouseChoice> {
     return new Promise((resolve) => {
+      // Check for campaign continuation (auto-start next mission)
+      const nextMission = localStorage.getItem('ebfd_campaign_next');
+      const campaignState = localStorage.getItem('ebfd_campaign');
+      if (nextMission && campaignState) {
+        localStorage.removeItem('ebfd_campaign_next');
+        try {
+          const next = JSON.parse(nextMission);
+          const state = JSON.parse(campaignState);
+          // Reconstruct house choice from saved campaign state
+          const houseMap: Record<string, { name: string; enemyPrefix: string; enemyName: string }> = {
+            'AT': { name: 'Atreides', enemyPrefix: 'HK', enemyName: 'Harkonnen' },
+            'HK': { name: 'Harkonnen', enemyPrefix: 'AT', enemyName: 'Atreides' },
+            'OR': { name: 'Ordos', enemyPrefix: 'HK', enemyName: 'Harkonnen' },
+          };
+          const info = houseMap[state.housePrefix] ?? houseMap['AT'];
+          const house: HouseChoice = {
+            id: state.housePrefix.toLowerCase(),
+            name: info.name,
+            prefix: state.housePrefix,
+            color: '#f0c040',
+            description: '',
+            enemyPrefix: state.enemyPrefix ?? info.enemyPrefix,
+            enemyName: state.enemyHouse ?? info.enemyName,
+            difficulty: next.difficulty ?? 'normal',
+            gameMode: 'campaign',
+            campaignTerritoryId: next.territoryId,
+            mapChoice: { id: `campaign-${next.territoryId}`, name: 'Campaign Mission', seed: next.mapSeed, description: '' },
+          };
+          resolve(house);
+          return;
+        } catch { /* fall through to normal menu */ }
+      }
       this.audioManager.playMenuMusic();
       this.showHouseSelect(resolve);
     });

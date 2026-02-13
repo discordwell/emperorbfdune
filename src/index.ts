@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import { Game } from './core/Game';
 import { SceneManager } from './rendering/SceneManager';
 import { TerrainRenderer, MAP_SIZE } from './rendering/TerrainRenderer';
@@ -231,6 +232,39 @@ async function main() {
     victorySystem.setVictoryCallback(() => {
       campaign.recordVictory(house.campaignTerritoryId!);
     });
+    victorySystem.setCampaignContinue(async () => {
+      // Check if campaign is won (all territories captured)
+      if (campaign.isVictory()) {
+        // Show campaign victory message then return to menu
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.95);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:3000;font-family:inherit;';
+        overlay.innerHTML = `
+          <div style="color:#f0c040;font-size:48px;font-weight:bold;text-shadow:0 0 20px #f0c04060;margin-bottom:12px;">CAMPAIGN COMPLETE</div>
+          <div style="color:#ccc;font-size:18px;margin-bottom:8px;">House ${house.name} has conquered Arrakis!</div>
+          <div style="color:#888;font-size:14px;margin-bottom:24px;">The spice must flow under your command.</div>
+        `;
+        const menuBtn = document.createElement('button');
+        menuBtn.textContent = 'Return to Menu';
+        menuBtn.style.cssText = 'padding:12px 36px;font-size:16px;background:#f0c04022;border:2px solid #f0c040;color:#fff;cursor:pointer;';
+        menuBtn.onclick = () => window.location.reload();
+        overlay.appendChild(menuBtn);
+        document.body.appendChild(overlay);
+        return;
+      }
+      // Show campaign map for next territory selection
+      const choice = await campaign.show();
+      if (choice) {
+        // Save selected territory and reload to start new mission
+        localStorage.setItem('ebfd_campaign_next', JSON.stringify({
+          territoryId: choice.territory.id,
+          difficulty: choice.difficulty,
+          mapSeed: choice.mapSeed,
+        }));
+        window.location.reload();
+      } else {
+        window.location.reload(); // Back to main menu
+      }
+    });
   }
 
   const sandwormSystem = new SandwormSystem(terrain, effectsManager);
@@ -259,6 +293,7 @@ async function main() {
   }
   // Connect AI to production/economy systems
   aiPlayer.setProductionSystem(productionSystem, harvestSystem);
+  aiPlayer.setBuildingTypeNames(buildingTypeNames);
 
   // Register systems
   game.addSystem(input);
@@ -647,6 +682,47 @@ async function main() {
     }
   });
 
+  // Spice bloom events
+  const bloomMarkers = new Map<string, { mesh: THREE.Mesh; ticks: number }>();
+  EventBus.on('bloom:warning', ({ x, z }) => {
+    selectionPanel.addMessage('Spice bloom forming...', '#ff8800');
+    // Create pulsing ground marker at bloom site
+    const geo = new THREE.RingGeometry(1.5, 3.0, 16);
+    geo.rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshBasicMaterial({ color: 0xff6600, transparent: true, opacity: 0.3, side: THREE.DoubleSide });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(x, 0.1, z);
+    sceneManager.scene.add(mesh);
+    bloomMarkers.set(`${x},${z}`, { mesh, ticks: 0 });
+  });
+  EventBus.on('bloom:tremor', ({ x, z, intensity }) => {
+    // Spawn small dust particles at bloom site
+    effectsManager.spawnExplosion(x + (Math.random() - 0.5) * 4, 0, z + (Math.random() - 0.5) * 4, 'small');
+    // Pulse the bloom marker
+    const key = `${x},${z}`;
+    const marker = bloomMarkers.get(key);
+    if (marker) {
+      (marker.mesh.material as THREE.MeshBasicMaterial).opacity = 0.3 + intensity * 0.5;
+      const scale = 1.0 + intensity * 0.5;
+      marker.mesh.scale.set(scale, scale, scale);
+    }
+  });
+  EventBus.on('bloom:eruption', ({ x, z }) => {
+    effectsManager.spawnExplosion(x, 0.5, z, 'large');
+    selectionPanel.addMessage('Spice bloom detected!', '#ff8800');
+    audioManager.playSfx('worm'); // Rumble sound
+    terrain.updateSpiceVisuals();
+    // Remove bloom marker
+    const key = `${x},${z}`;
+    const marker = bloomMarkers.get(key);
+    if (marker) {
+      sceneManager.scene.remove(marker.mesh);
+      marker.mesh.geometry.dispose();
+      (marker.mesh.material as THREE.Material).dispose();
+      bloomMarkers.delete(key);
+    }
+  });
+
   // Under-attack notifications (throttled to once per 5 seconds)
   let lastAttackNotifyTime = 0;
   EventBus.on('unit:damaged', ({ entityId, x, z, isBuilding }) => {
@@ -735,6 +811,30 @@ async function main() {
   // Auto-spawn produced units
   EventBus.on('production:complete', ({ unitType, owner }) => {
     const world = game.getWorld();
+
+    // Handle upgrade completions (unitType ends with " Upgrade")
+    if (unitType.endsWith(' Upgrade')) {
+      const baseName = unitType.replace(' Upgrade', '');
+      if (owner === 0) {
+        const displayName = baseName.replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, '');
+        selectionPanel.addMessage(`${displayName} upgraded!`, '#ffcc00');
+        audioManager.playSfx('build');
+      }
+      // Add glow effect to all buildings of this type owned by this player
+      const buildings = buildingQuery(world);
+      for (const bid of buildings) {
+        if (Owner.playerId[bid] !== owner) continue;
+        if (Health.current[bid] <= 0) continue;
+        const bTypeId = BuildingType.id[bid];
+        const bName = buildingTypeNames[bTypeId] ?? '';
+        if (bName === baseName) {
+          effectsManager.spawnExplosion(Position.x[bid], 1, Position.z[bid], 'medium');
+          unitRenderer.markUpgraded(bid);
+        }
+      }
+      return;
+    }
+
     const isBuilding = gameRules.buildings.has(unitType);
 
     // Track stats
@@ -1153,36 +1253,7 @@ async function main() {
       }
     }
 
-    // Spice bloom: randomly spawn new spice fields every ~60 seconds
-    if (game.getTickCount() % 1500 === 0 && Math.random() < 0.5) {
-      // Find a random sand tile to bloom
-      const bx = 10 + Math.floor(Math.random() * (MAP_SIZE - 20));
-      const bz = 10 + Math.floor(Math.random() * (MAP_SIZE - 20));
-      const tType = terrain.getTerrainType(bx, bz);
-      // Only bloom on sand or dunes
-      if (tType === 0 || tType === 4) { // Sand=0, Dunes=4
-        // Create a 3-5 tile radius spice field
-        const radius = 3 + Math.floor(Math.random() * 3);
-        for (let dz = -radius; dz <= radius; dz++) {
-          for (let dx = -radius; dx <= radius; dx++) {
-            if (dx * dx + dz * dz > radius * radius) continue;
-            const tx = bx + dx;
-            const tz = bz + dz;
-            if (tx < 0 || tx >= MAP_SIZE || tz < 0 || tz >= MAP_SIZE) continue;
-            const existing = terrain.getSpice(tx, tz);
-            const dist = Math.sqrt(dx * dx + dz * dz);
-            const amount = Math.min(1.0, existing + (1.0 - dist / radius) * 0.8);
-            terrain.setSpice(tx, tz, amount);
-          }
-        }
-        terrain.updateSpiceVisuals();
-        // Visual explosion at bloom site
-        const worldX = bx * 2; // Approximate tile->world
-        const worldZ = bz * 2;
-        effectsManager.spawnExplosion(worldX, 0.5, worldZ, 'medium');
-        selectionPanel.addMessage('Spice bloom detected!', '#ff8800');
-      }
-    }
+    // Spice bloom visuals are now handled via HarvestSystem events (bloom:warning/tremor/eruption)
 
     // Crate drops: spawn a random crate every ~40 seconds
     if (game.getTickCount() % 1000 === 500 && activeCrates.size < 3) {
@@ -1369,13 +1440,11 @@ async function main() {
           break;
         }
       }
-      scene.cameraTarget.set(baseX, 0, baseZ);
-      scene.updateCameraPosition();
+      scene.panTo(baseX, baseZ);
     } else if (e.key === ' ' && !e.ctrlKey) {
       // Snap to last event
       e.preventDefault();
-      scene.cameraTarget.set(lastEventX, 0, lastEventZ);
-      scene.updateCameraPosition();
+      scene.panTo(lastEventX, lastEventZ);
     } else if (e.key === 'x' && !e.ctrlKey && !e.altKey) {
       // Self-destruct for Devastator units
       const selected = selectionManager.getSelectedEntities();
@@ -1542,6 +1611,7 @@ async function main() {
   }
 
   function showPauseMenu(): void {
+    if (pauseMenu) return; // Prevent duplicate menus
     pauseMenu = document.createElement('div');
     pauseMenu.style.cssText = `
       position:fixed;top:0;left:0;right:0;bottom:0;
@@ -1563,7 +1633,14 @@ async function main() {
       { label: 'Resume', action: () => { pauseMenu?.remove(); pauseMenu = null; game.pause(); } },
       { label: 'Settings', action: () => { showSettingsPanel(); } },
       { label: 'Save / Load', action: () => { showSaveLoadPanel(); } },
-      { label: 'Restart', action: () => { window.location.reload(); } },
+      { label: 'Restart Mission', action: () => { window.location.reload(); } },
+      { label: 'Quit to Menu', action: () => {
+        // Clear campaign continuation and reload to main menu
+        localStorage.removeItem('ebfd_campaign_next');
+        localStorage.removeItem('ebfd_load');
+        localStorage.removeItem('ebfd_load_data');
+        window.location.reload();
+      }},
     ];
 
     for (const { label, action } of buttons) {

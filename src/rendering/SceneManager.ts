@@ -17,6 +17,10 @@ export class SceneManager implements RenderSystem {
   private readonly MIN_ZOOM = 20;
   private readonly MAX_ZOOM = 200;
 
+  // Smooth pan target for animated camera movements
+  private panTarget: THREE.Vector3 | null = null;
+  private panSpeed = 0.12; // Lerp factor per frame
+
   // Raycaster for picking
   readonly raycaster = new THREE.Raycaster();
   readonly groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -75,7 +79,29 @@ export class SceneManager implements RenderSystem {
   }
 
   render(_alpha: number): void {
+    // Smooth camera pan animation
+    if (this.panTarget) {
+      this.cameraTarget.lerp(this.panTarget, this.panSpeed);
+      const dist = this.cameraTarget.distanceTo(this.panTarget);
+      if (dist < 0.5) {
+        this.cameraTarget.copy(this.panTarget);
+        this.panTarget = null;
+      }
+      this.updateCameraPosition();
+    }
     this.renderer.render(this.scene, this.camera);
+  }
+
+  /** Smoothly pan the camera to a world position */
+  panTo(x: number, z: number): void {
+    this.panTarget = new THREE.Vector3(x, 0, z);
+  }
+
+  /** Instantly snap camera (cancels any smooth pan) */
+  snapTo(x: number, z: number): void {
+    this.panTarget = null;
+    this.cameraTarget.set(x, 0, z);
+    this.updateCameraPosition();
   }
 
   // Camera controls

@@ -50,6 +50,7 @@ export class VictorySystem {
   private stats: GameStats | null = null;
   private startTime = Date.now();
   private onVictoryCallback: (() => void) | null = null;
+  private onCampaignContinue: (() => void) | null = null;
   private victoryCondition: VictoryCondition = 'annihilate';
   // Building type names for ConYard check (set externally)
   private buildingTypeNames: string[] = [];
@@ -63,6 +64,7 @@ export class VictorySystem {
   setStats(stats: GameStats): void { this.stats = stats; }
   setVictoryCallback(cb: () => void): void { this.onVictoryCallback = cb; }
   setVictoryCondition(cond: VictoryCondition): void { this.victoryCondition = cond; }
+  setCampaignContinue(cb: () => void): void { this.onCampaignContinue = cb; }
   setBuildingTypeNames(names: string[]): void { this.buildingTypeNames = names; }
 
   getOutcome(): GameOutcome {
@@ -175,15 +177,38 @@ export class VictorySystem {
       }
     }
 
-    // Play Again button
+    // Button row
+    const btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display:flex;gap:16px;margin-top:24px;';
+
+    // Campaign continue button (only on victory in campaign mode)
+    if (this.onCampaignContinue && title === 'VICTORY') {
+      const campaignBtn = document.createElement('button');
+      campaignBtn.style.cssText = `
+        padding:14px 48px;font-size:18px;
+        background:#f0c04022;border:2px solid #f0c040;
+        color:#fff;cursor:pointer;font-family:inherit;
+        transition:background 0.2s;
+      `;
+      campaignBtn.textContent = 'Continue Campaign';
+      campaignBtn.onmouseenter = () => campaignBtn.style.background = '#f0c04055';
+      campaignBtn.onmouseleave = () => campaignBtn.style.background = '#f0c04022';
+      campaignBtn.onclick = () => {
+        if (this.overlay) this.overlay.remove();
+        this.onCampaignContinue!();
+      };
+      btnRow.appendChild(campaignBtn);
+    }
+
+    // Play Again / Restart button
     const btn = document.createElement('button');
     btn.style.cssText = `
       padding:14px 48px;font-size:18px;
       background:${color}22;border:2px solid ${color};
       color:#fff;cursor:pointer;font-family:inherit;
-      transition:background 0.2s;margin-top:24px;
+      transition:background 0.2s;
     `;
-    btn.textContent = 'Play Again';
+    btn.textContent = this.onCampaignContinue ? 'Restart Mission' : 'Play Again';
     btn.onmouseenter = () => btn.style.background = `${color}55`;
     btn.onmouseleave = () => btn.style.background = `${color}22`;
     btn.onclick = () => {
@@ -193,7 +218,8 @@ export class VictorySystem {
         window.location.reload();
       }
     };
-    container.appendChild(btn);
+    btnRow.appendChild(btn);
+    container.appendChild(btnRow);
 
     this.overlay.appendChild(container);
     document.body.appendChild(this.overlay);

@@ -54,6 +54,7 @@ export class ModelManager {
     }
 
     this.notFound.add(key);
+    console.warn(`Model not found: ${xafName}${suffix} (tried ${this.basePaths.length} paths)`);
     return null;
   }
 

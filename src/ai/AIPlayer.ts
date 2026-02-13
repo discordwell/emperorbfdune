@@ -37,6 +37,8 @@ export class AIPlayer implements GameSystem {
   private buildPhase = 0;
   private lastBuildTick = 0;
   private buildCooldown = 200;
+  // Building type name lookup (set externally)
+  private buildingTypeNames: string[] = [];
   // Base defense: designated defender units stay near base
   private defenders = new Set<number>();
   private maxDefenders = 4;
@@ -108,6 +110,10 @@ export class AIPlayer implements GameSystem {
   setProductionSystem(production: ProductionSystem, harvestSystem: HarvestSystem): void {
     this.production = production;
     this.harvestSystem = harvestSystem;
+  }
+
+  setBuildingTypeNames(names: string[]): void {
+    this.buildingTypeNames = names;
   }
 
   setUnitPool(prefix: string): void {
@@ -208,6 +214,8 @@ export class AIPlayer implements GameSystem {
       { name: `${px}SmWindtrap`, minSolaris: 300, phase: 4 },
       { name: `${px}SmWindtrap`, minSolaris: 300, phase: 5 },
       { name: `${px}Refinery`, minSolaris: 1600, phase: 6 }, // Second refinery
+      { name: `${px}Hanger`, minSolaris: 1000, phase: 7 },
+      { name: `${px}SmWindtrap`, minSolaris: 300, phase: 8 },
     ];
 
     if (this.buildPhase < buildOrder.length) {
@@ -234,25 +242,73 @@ export class AIPlayer implements GameSystem {
         }
       }
 
-      // Late game: expand economy, military, and advanced buildings
-      if (solaris > 2000 && totalBuildings < 15) {
-        const lateBuildings = [
-          `${px}SmWindtrap`, `${px}Factory`, `${px}Barracks`, `${px}Refinery`,
-          `${px}Hanger`, `${px}Starport`, `${px}SmWindtrap`,
-        ];
-        // Try building defense turrets if under attack or periodically
-        if (this.baseUnderAttack || Math.random() < 0.3) {
-          const turretTypes = [`${px}GunTurret`, `${px}RocketTurret`, `${px}Turret`];
-          for (const turret of turretTypes) {
-            if (this.production.canBuild(this.playerId, turret, true)) {
-              this.production.startProduction(this.playerId, turret, true);
-              return;
-            }
+      // Count specific building types for smart expansion
+      let refineryCount = 0, windtrapCount = 0, turretCount = 0, factoryCount = 0;
+      for (const eid of buildings) {
+        if (Owner.playerId[eid] !== this.playerId || Health.current[eid] <= 0) continue;
+        const typeId = BuildingType.id[eid];
+        const name = this.buildingTypeNames[typeId] ?? '';
+        if (name.includes('Refinery')) refineryCount++;
+        if (name.includes('Windtrap')) windtrapCount++;
+        if (name.includes('Turret')) turretCount++;
+        if (name.includes('Factory')) factoryCount++;
+      }
+
+      // Priority 1: Defense turrets (especially when under attack)
+      if (this.baseUnderAttack && turretCount < 4 && solaris > 500) {
+        const turretTypes = [`${px}GunTurret`, `${px}RocketTurret`, `${px}Turret`];
+        for (const turret of turretTypes) {
+          if (this.production.canBuild(this.playerId, turret, true)) {
+            this.production.startProduction(this.playerId, turret, true);
+            return;
           }
         }
-        const pick = lateBuildings[Math.floor(Math.random() * lateBuildings.length)];
-        if (this.production.canBuild(this.playerId, pick, true)) {
-          this.production.startProduction(this.playerId, pick, true);
+      }
+
+      // Priority 2: Power — maintain at least 1 windtrap per 3 buildings
+      if (windtrapCount < Math.ceil(totalBuildings / 3) && solaris > 300) {
+        if (this.production.canBuild(this.playerId, `${px}SmWindtrap`, true)) {
+          this.production.startProduction(this.playerId, `${px}SmWindtrap`, true);
+          return;
+        }
+      }
+
+      // Priority 3: Economy — scale up refineries with difficulty
+      const desiredRefineries = Math.min(4, 2 + Math.floor(this.difficulty));
+      if (refineryCount < desiredRefineries && solaris > 1600) {
+        if (this.production.canBuild(this.playerId, `${px}Refinery`, true)) {
+          this.production.startProduction(this.playerId, `${px}Refinery`, true);
+          return;
+        }
+      }
+
+      // Priority 4: Military production — second factory at high difficulty
+      if (factoryCount < 2 && this.difficulty > 1.5 && solaris > 1100) {
+        if (this.production.canBuild(this.playerId, `${px}Factory`, true)) {
+          this.production.startProduction(this.playerId, `${px}Factory`, true);
+          return;
+        }
+      }
+
+      // Priority 5: Turrets periodically (cap at 6)
+      if (turretCount < 6 && solaris > 800 && Math.random() < 0.25) {
+        const turretTypes = [`${px}GunTurret`, `${px}RocketTurret`, `${px}Turret`];
+        for (const turret of turretTypes) {
+          if (this.production.canBuild(this.playerId, turret, true)) {
+            this.production.startProduction(this.playerId, turret, true);
+            return;
+          }
+        }
+      }
+
+      // Priority 6: Advanced structures (starport, hangar)
+      if (totalBuildings < 20 && solaris > 2000) {
+        const advBuildings = [`${px}Starport`, `${px}Hanger`];
+        for (const name of advBuildings) {
+          if (this.production.canBuild(this.playerId, name, true)) {
+            this.production.startProduction(this.playerId, name, true);
+            return;
+          }
         }
       }
     }
@@ -317,16 +373,19 @@ export class AIPlayer implements GameSystem {
 
       if (MoveTarget.active[eid] === 0) {
         idleUnits.push(eid);
-        // Check if near base
+        // Check if near base (wider radius for larger armies)
         const dist = distance2D(Position.x[eid], Position.z[eid], this.baseX, this.baseZ);
-        if (dist < 40) nearBaseUnits.push(eid);
+        if (dist < 60) nearBaseUnits.push(eid);
       }
     }
 
+    // Scale max defenders with difficulty
+    const scaledMaxDefenders = Math.floor(this.maxDefenders * this.difficulty);
+
     // Ensure we have some defenders near base
-    if (this.defenders.size < this.maxDefenders && nearBaseUnits.length > this.maxDefenders) {
+    if (this.defenders.size < scaledMaxDefenders && nearBaseUnits.length > scaledMaxDefenders) {
       for (const eid of nearBaseUnits) {
-        if (this.defenders.size >= this.maxDefenders) break;
+        if (this.defenders.size >= scaledMaxDefenders) break;
         if (!this.defenders.has(eid)) {
           this.defenders.add(eid);
         }

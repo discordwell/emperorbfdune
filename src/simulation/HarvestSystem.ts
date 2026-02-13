@@ -24,6 +24,8 @@ export class HarvestSystem implements GameSystem {
   private harvestTimers = new Map<number, number>(); // eid -> ticks spent harvesting
   private tickCounter = 0;
   private bloomInterval = 500; // ~20 seconds between bloom checks
+  // Pending bloom: coordinates of upcoming spice bloom (for pre-warning effect)
+  private pendingBloom: { tx: number; tz: number; ticksLeft: number } | null = null;
   // Carryall: players that have a Hanger get auto-airlift for harvesters
   private playersWithCarryall = new Set<number>();
   // Harvesters being airlifted: eid -> ticks remaining
@@ -102,8 +104,23 @@ export class HarvestSystem implements GameSystem {
 
     // Spice bloom: periodically regenerate spice on sand tiles
     this.tickCounter++;
-    if (this.tickCounter % this.bloomInterval === 0) {
-      this.spiceBloom();
+
+    // Process pending bloom countdown
+    if (this.pendingBloom) {
+      this.pendingBloom.ticksLeft--;
+      // Emit tremor events during countdown for visual effects
+      if (this.pendingBloom.ticksLeft % 25 === 0 && this.pendingBloom.ticksLeft > 0) {
+        const wx = tileToWorld(this.pendingBloom.tx, this.pendingBloom.tz);
+        EventBus.emit('bloom:tremor', { x: wx.x, z: wx.z, intensity: 1 - this.pendingBloom.ticksLeft / 125 });
+      }
+      if (this.pendingBloom.ticksLeft <= 0) {
+        this.executeBloom(this.pendingBloom.tx, this.pendingBloom.tz);
+        this.pendingBloom = null;
+      }
+    }
+
+    if (this.tickCounter % this.bloomInterval === 0 && !this.pendingBloom) {
+      this.scheduleBloom();
     }
 
     // Update UI with flash animation
@@ -125,7 +142,7 @@ export class HarvestSystem implements GameSystem {
     }
   }
 
-  private spiceBloom(): void {
+  private scheduleBloom(): void {
     // Count current spice tiles
     let spiceTileCount = 0;
     for (let tz = 0; tz < 128; tz++) {
@@ -134,30 +151,38 @@ export class HarvestSystem implements GameSystem {
       }
     }
 
-    // If less than 20 spice tiles, spawn a bloom
-    if (spiceTileCount < 20) {
-      // Find a random sand tile and create a spice patch
-      for (let attempt = 0; attempt < 50; attempt++) {
-        const tx = 10 + Math.floor(Math.random() * 108);
-        const tz = 10 + Math.floor(Math.random() * 108);
-        const type = this.terrain.getTerrainType(tx, tz);
-        if (type === TerrainType.Sand) {
-          // Create a small spice patch (3x3 to 5x5)
-          const radius = 1 + Math.floor(Math.random() * 2);
-          for (let dz = -radius; dz <= radius; dz++) {
-            for (let dx = -radius; dx <= radius; dx++) {
-              const stx = tx + dx;
-              const stz = tz + dz;
-              if (stx < 0 || stx >= 128 || stz < 0 || stz >= 128) continue;
-              if (this.terrain.getTerrainType(stx, stz) !== TerrainType.Sand) continue;
-              const amount = 0.3 + Math.random() * 0.7;
-              this.terrain.setSpice(stx, stz, amount);
-            }
-          }
-          break;
-        }
+    if (spiceTileCount >= 20) return;
+
+    // Find a valid sand tile for the bloom
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const tx = 10 + Math.floor(Math.random() * 108);
+      const tz = 10 + Math.floor(Math.random() * 108);
+      const type = this.terrain.getTerrainType(tx, tz);
+      if (type === TerrainType.Sand) {
+        // Schedule bloom with 5-second warning (125 ticks)
+        this.pendingBloom = { tx, tz, ticksLeft: 125 };
+        const wx = tileToWorld(tx, tz);
+        EventBus.emit('bloom:warning', { x: wx.x, z: wx.z });
+        return;
       }
     }
+  }
+
+  private executeBloom(tx: number, tz: number): void {
+    // Create a small spice patch (3x3 to 5x5)
+    const radius = 1 + Math.floor(Math.random() * 2);
+    for (let dz = -radius; dz <= radius; dz++) {
+      for (let dx = -radius; dx <= radius; dx++) {
+        const stx = tx + dx;
+        const stz = tz + dz;
+        if (stx < 0 || stx >= 128 || stz < 0 || stz >= 128) continue;
+        if (this.terrain.getTerrainType(stx, stz) !== TerrainType.Sand) continue;
+        const amount = 0.3 + Math.random() * 0.7;
+        this.terrain.setSpice(stx, stz, amount);
+      }
+    }
+    const wx = tileToWorld(tx, tz);
+    EventBus.emit('bloom:eruption', { x: wx.x, z: wx.z });
   }
 
   private handleIdle(eid: number): void {

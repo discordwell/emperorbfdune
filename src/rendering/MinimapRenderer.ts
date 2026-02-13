@@ -30,6 +30,8 @@ export class MinimapRenderer {
   private fogOfWar: FogOfWar | null = null;
   private terrainImageData: ImageData | null = null;
   private onRightClick: ((worldX: number, worldZ: number) => void) | null = null;
+  // Click ping animation
+  private clickPing: { x: number; y: number; age: number } | null = null;
 
   constructor(terrain: TerrainRenderer, sceneManager: SceneManager) {
     this.canvas = document.getElementById('minimap-canvas') as HTMLCanvasElement;
@@ -140,6 +142,23 @@ export class MinimapRenderer {
     this.ctx.strokeStyle = '#fff';
     this.ctx.lineWidth = 1;
     this.ctx.strokeRect(cx - viewW / 2, cz - viewH / 2, viewW, viewH);
+
+    // Draw click ping animation
+    if (this.clickPing) {
+      this.clickPing.age++;
+      const t = this.clickPing.age / 20; // 20 frames of animation
+      if (t >= 1) {
+        this.clickPing = null;
+      } else {
+        const radius = 3 + t * 8;
+        const alpha = 1 - t;
+        this.ctx.strokeStyle = `rgba(255, 255, 255, ${alpha})`;
+        this.ctx.lineWidth = 2 * (1 - t);
+        this.ctx.beginPath();
+        this.ctx.arc(this.clickPing.x, this.clickPing.y, radius, 0, Math.PI * 2);
+        this.ctx.stroke();
+      }
+    }
   }
 
   private isDragging = false;
@@ -162,9 +181,20 @@ export class MinimapRenderer {
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
     const scale = (MAP_SIZE * 2) / 200;
-    this.sceneManager.cameraTarget.x = mx * scale;
-    this.sceneManager.cameraTarget.z = my * scale;
-    this.sceneManager.updateCameraPosition();
+    const worldX = mx * scale;
+    const worldZ = my * scale;
+
+    // Use smooth pan for single clicks, instant for drag
+    if (this.isDragging && e.type === 'mousemove') {
+      this.sceneManager.cameraTarget.x = worldX;
+      this.sceneManager.cameraTarget.z = worldZ;
+      this.sceneManager.updateCameraPosition();
+    } else {
+      this.sceneManager.panTo(worldX, worldZ);
+    }
+
+    // Show click ping
+    this.clickPing = { x: mx, y: my, age: 0 };
   }
 
   private onContextMenu = (e: MouseEvent): void => {

@@ -454,6 +454,36 @@ export class UnitRenderer {
     return null;
   }
 
+  /** Add a visual upgrade indicator (gold ring) to a building */
+  markUpgraded(eid: number): void {
+    const obj = this.entityObjects.get(eid);
+    if (!obj) return;
+    // Remove existing upgrade ring if present
+    for (const child of obj.children) {
+      if (child.userData.upgradeRing) {
+        obj.remove(child);
+        if (child instanceof THREE.Mesh) {
+          child.geometry.dispose();
+          (child.material as THREE.Material).dispose();
+        }
+        break;
+      }
+    }
+    // Add a gold ring at the building's base to indicate upgrade
+    const ringGeo = new THREE.RingGeometry(2.2, 2.5, 24);
+    ringGeo.rotateX(-Math.PI / 2);
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: 0xffd700,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.6,
+    });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.position.y = 0.06;
+    ring.userData.upgradeRing = true;
+    obj.add(ring);
+  }
+
   getEntityObject(eid: number): THREE.Group | undefined {
     return this.entityObjects.get(eid);
   }
