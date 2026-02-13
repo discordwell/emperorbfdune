@@ -2364,6 +2364,21 @@ async function main() {
     sidebar.refresh();
   }, house.prefix, house.subhouse?.prefix ?? '');
 
+  // Concrete slab placement
+  const CONCRETE_COST = 20;
+  sidebar.setConcreteCallback(() => {
+    buildingPlacement.startConcretePlacement((tx, tz) => {
+      if (harvestSystem.getSolaris(0) < CONCRETE_COST) {
+        selectionPanel.addMessage('Insufficient funds', '#ff4444');
+        return false;
+      }
+      harvestSystem.spendSolaris(0, CONCRETE_COST);
+      terrain.setTerrainType(tx, tz, 6); // TerrainType.ConcreteSlab
+      terrain.updateSpiceVisuals();
+      return true;
+    });
+  });
+
   setInterval(() => {
     sidebar.updateProgress();
     sidebar.refresh(); // Re-render to update buildable/unbuildable items

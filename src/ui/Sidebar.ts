@@ -5,6 +5,7 @@ import type { UnitDef } from '../config/UnitDefs';
 import type { BuildingDef } from '../config/BuildingDefs';
 
 type BuildCallback = (typeName: string, isBuilding: boolean) => void;
+type ConcreteCallback = () => void;
 
 const HOTKEYS = ['q', 'e', 'r', 'f', 't', 'y'];
 
@@ -14,6 +15,7 @@ export class Sidebar {
   private production: ProductionSystem;
   private artMap: Map<string, ArtEntry>;
   private onBuild: BuildCallback;
+  private onConcreteClick: ConcreteCallback | null = null;
   private playerId = 0;
   private currentTab: 'Buildings' | 'Units' | 'Infantry' | 'Starport' = 'Buildings';
   private progressBar: HTMLDivElement | null = null;
@@ -35,6 +37,10 @@ export class Sidebar {
     this.tooltip = document.getElementById('tooltip');
     this.render();
     window.addEventListener('keydown', this.onKeyDown);
+  }
+
+  setConcreteCallback(cb: ConcreteCallback): void {
+    this.onConcreteClick = cb;
   }
 
   private onKeyDown = (e: KeyboardEvent): void => {
@@ -147,6 +153,17 @@ export class Sidebar {
     const prefix = this.factionPrefix;
     const subPrefix = this.subhousePrefix;
     let hotkeyIdx = 0;
+
+    // Concrete slab button (always available)
+    if (this.onConcreteClick) {
+      const concreteBtn = document.createElement('button');
+      concreteBtn.style.cssText = 'padding:4px;background:#1a1a3e;border:1px solid #444;color:#ddd;cursor:pointer;font-size:10px;text-align:center;';
+      concreteBtn.innerHTML = '<div style="font-size:11px;font-weight:bold">Concrete</div><div style="color:#f0c040;font-size:10px">$20</div>';
+      concreteBtn.onclick = () => this.onConcreteClick?.();
+      concreteBtn.onmouseenter = () => { concreteBtn.style.borderColor = '#0f0'; };
+      concreteBtn.onmouseleave = () => { concreteBtn.style.borderColor = '#444'; };
+      grid.appendChild(concreteBtn);
+    }
 
     for (const [name, def] of this.rules.buildings) {
       const validPrefix = name.startsWith(prefix) || (subPrefix && name.startsWith(subPrefix));

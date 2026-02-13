@@ -19,6 +19,8 @@ export class BuildingPlacement {
   private active = false;
   private typeName = '';
   private buildingSize = { w: 3, h: 3 }; // Tiles
+  private concreteMode = false; // Special mode for placing concrete slabs
+  private onConcrete: ((tx: number, tz: number) => boolean) | null = null;
 
   // Ghost preview
   private ghostMesh: THREE.Mesh | null = null;
@@ -208,7 +210,9 @@ export class BuildingPlacement {
     this.gridHelper.position.x = snapped.x;
     this.gridHelper.position.z = snapped.z;
 
-    this.isValidPlacement = this.checkValidity(tile.tx, tile.tz);
+    this.isValidPlacement = this.concreteMode
+      ? this.checkConcreteValidity(tile.tx, tile.tz)
+      : this.checkValidity(tile.tx, tile.tz);
     const color = this.isValidPlacement ? this.validColor : this.invalidColor;
 
     (this.ghostMesh.material as THREE.MeshBasicMaterial).color = color;
@@ -223,17 +227,47 @@ export class BuildingPlacement {
     if (!this.active) return;
 
     if (e.button === 0 && this.isValidPlacement) {
-      // Place the building
-      const snapped = tileToWorld(this.currentTile.tx, this.currentTile.tz);
-      this.onPlace(this.typeName, snapped.x, snapped.z);
-      this.audioManager.playSfx('build');
-      this.cancel();
-      e.preventDefault();
-      e.stopPropagation();
+      if (this.concreteMode && this.onConcrete) {
+        // Concrete: place slab and stay in placement mode
+        if (this.onConcrete(this.currentTile.tx, this.currentTile.tz)) {
+          this.audioManager.playSfx('build');
+        } else {
+          this.audioManager.playSfx('error');
+        }
+        e.preventDefault();
+        e.stopPropagation();
+      } else {
+        // Place the building
+        const snapped = tileToWorld(this.currentTile.tx, this.currentTile.tz);
+        this.onPlace(this.typeName, snapped.x, snapped.z);
+        this.audioManager.playSfx('build');
+        this.cancel();
+        e.preventDefault();
+        e.stopPropagation();
+      }
     } else if (e.button === 2) {
       // Cancel on right-click
-      this.audioManager.playSfx('error');
-      this.cancel();
+      if (this.concreteMode) {
+        // Exit concrete mode without refund event
+        this.active = false;
+        this.concreteMode = false;
+        this.onConcrete = null;
+        this.typeName = '';
+        if (this.ghostMesh) {
+          this.sceneManager.scene.remove(this.ghostMesh);
+          this.ghostMesh.geometry.dispose();
+          (this.ghostMesh.material as THREE.Material).dispose();
+          this.ghostMesh = null;
+        }
+        if (this.gridHelper) {
+          this.sceneManager.scene.remove(this.gridHelper);
+          this.gridHelper = null;
+        }
+        document.body.style.cursor = 'default';
+      } else {
+        this.audioManager.playSfx('error');
+        this.cancel();
+      }
       e.preventDefault();
       e.stopPropagation();
     } else if (e.button === 0 && !this.isValidPlacement) {
@@ -242,6 +276,40 @@ export class BuildingPlacement {
       e.stopPropagation();
     }
   };
+
+  /** Start concrete slab placement mode — can place multiple slabs */
+  startConcretePlacement(onPlace: (tx: number, tz: number) => boolean): void {
+    this.cancel();
+    this.concreteMode = true;
+    this.onConcrete = onPlace;
+    this.active = true;
+    this.typeName = '__concrete__';
+    this.buildingSize = { w: 1, h: 1 };
+
+    // Small single-tile ghost
+    const geo = new THREE.BoxGeometry(TILE_SIZE, 0.15, TILE_SIZE);
+    const mat = new THREE.MeshBasicMaterial({
+      color: this.validColor,
+      transparent: true,
+      opacity: 0.5,
+      side: THREE.DoubleSide,
+    });
+    this.ghostMesh = new THREE.Mesh(geo, mat);
+    this.ghostMesh.position.y = 0.1;
+    this.sceneManager.scene.add(this.ghostMesh);
+
+    this.gridHelper = new THREE.Group();
+    this.sceneManager.scene.add(this.gridHelper);
+
+    document.body.style.cursor = 'crosshair';
+  }
+
+  private checkConcreteValidity(tx: number, tz: number): boolean {
+    if (tx < 2 || tx >= MAP_SIZE - 2 || tz < 2 || tz >= MAP_SIZE - 2) return false;
+    const t = this.terrain.getTerrainType(tx, tz);
+    // Can place on sand, dunes — not on rock, cliff, spice, or existing concrete
+    return t === TerrainType.Sand || t === TerrainType.Dunes;
+  }
 
   private onKeyDown = (e: KeyboardEvent): void => {
     if (!this.active) return;
