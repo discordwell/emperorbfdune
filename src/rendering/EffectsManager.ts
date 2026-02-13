@@ -266,9 +266,13 @@ export class EffectsManager {
       const pulseScale = 1.0 + Math.sin(Date.now() * 0.001 * pulseSpeed) * 0.2;
       vis.ringMesh.scale.set(pulseScale, pulseScale, 1);
 
-      // Ring color: orange when hunting, sandy when roaming
+      // Ring color based on worm state
+      const isMounted = worm.state === 'mounted';
       const ringMat = vis.ringMesh.material as THREE.MeshBasicMaterial;
-      if (isHunting) {
+      if (isMounted) {
+        ringMat.color.setHex(0x00cc88);
+        ringMat.opacity = 0.7;
+      } else if (isHunting) {
         ringMat.color.setHex(0xff6600);
         ringMat.opacity = 0.6;
       } else if (isEmerging) {

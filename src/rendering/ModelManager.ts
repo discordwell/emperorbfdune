@@ -36,25 +36,34 @@ export class ModelManager {
     }
   }
 
+  // Fallback LOD suffixes when the requested one isn't found
+  private static readonly LOD_FALLBACKS: Record<string, string[]> = {
+    '_H0': ['_H0', '_h0', '_H1', '_h1', '_M0', '_m0', '_M1', '_L0', '_L1', '_H2', '_H3', '_M2'],
+    '_M0': ['_M0', '_m0', '_M1', '_L0', '_L1'],
+    '_L0': ['_L0', '_L1', '_L2'],
+  };
+
   private async tryLoad(xafName: string, suffix: string, key: string): Promise<LoadedModel | null> {
-    // Try each base path
-    for (const basePath of this.basePaths) {
-      const url = `${basePath}${xafName}${suffix}.gltf`;
-      try {
-        const gltf = await this.loadGltf(url);
-        const model: LoadedModel = {
-          scene: gltf.scene,
-          animations: gltf.animations,
-        };
-        this.cache.set(key, model);
-        return model;
-      } catch {
-        // Try next path
+    const fallbacks = ModelManager.LOD_FALLBACKS[suffix] || [suffix];
+
+    for (const trySuffix of fallbacks) {
+      for (const basePath of this.basePaths) {
+        const url = `${basePath}${xafName}${trySuffix}.gltf`;
+        try {
+          const gltf = await this.loadGltf(url);
+          const model: LoadedModel = {
+            scene: gltf.scene,
+            animations: gltf.animations,
+          };
+          this.cache.set(key, model);
+          return model;
+        } catch {
+          // Try next
+        }
       }
     }
 
     this.notFound.add(key);
-    console.warn(`Model not found: ${xafName}${suffix} (tried ${this.basePaths.length} paths)`);
     return null;
   }
 
