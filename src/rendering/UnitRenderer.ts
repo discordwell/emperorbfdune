@@ -4,7 +4,7 @@ import type { ModelManager, LoadedModel } from './ModelManager';
 import type { ArtEntry } from '../config/ArtIniParser';
 import {
   Position, Rotation, Renderable, Health, Selectable, Owner,
-  BuildingType, hasComponent,
+  BuildingType, Veterancy, hasComponent,
   renderQuery, renderEnter, renderExit,
   type World,
 } from '../core/ECS';
@@ -34,6 +34,8 @@ export class UnitRenderer {
   private selectionCircles = new Map<number, THREE.Mesh>();
   // Health bars
   private healthBars = new Map<number, THREE.Sprite>();
+  // Veterancy rank sprites
+  private rankSprites = new Map<number, THREE.Sprite>();
 
   // Preloaded model templates keyed by xaf name
   private modelTemplates = new Map<string, LoadedModel>();
@@ -43,6 +45,8 @@ export class UnitRenderer {
   private currentWorld: World | null = null;
   private fogOfWar: FogOfWar | null = null;
   private localPlayerId = 0;
+  // Construction animation: eid -> { progress 0..1, duration ticks }
+  private constructing = new Map<number, { progress: number; duration: number }>();
 
   constructor(sceneManager: SceneManager, modelManager: ModelManager, artMap: Map<string, ArtEntry>) {
     this.sceneManager = sceneManager;
@@ -53,6 +57,55 @@ export class UnitRenderer {
   setFogOfWar(fog: FogOfWar, localPlayerId = 0): void {
     this.fogOfWar = fog;
     this.localPlayerId = localPlayerId;
+  }
+
+  /** Mark a building as under construction — will animate from scaffold to solid */
+  startConstruction(eid: number, durationTicks: number): void {
+    this.constructing.set(eid, { progress: 0, duration: Math.max(1, durationTicks) });
+    // Start with scaffold appearance
+    const obj = this.entityObjects.get(eid);
+    if (obj) {
+      obj.scale.setScalar(0.5);
+      obj.traverse(child => {
+        if (child instanceof THREE.Mesh && child.material) {
+          const mat = child.material as THREE.Material;
+          mat.transparent = true;
+          mat.opacity = 0.3;
+        }
+      });
+    }
+  }
+
+  /** Advance construction animation by one tick */
+  tickConstruction(): void {
+    for (const [eid, state] of this.constructing) {
+      state.progress += 1 / state.duration;
+      if (state.progress >= 1) {
+        state.progress = 1;
+        this.constructing.delete(eid);
+      }
+      const obj = this.entityObjects.get(eid);
+      if (!obj) continue;
+
+      const t = state.progress;
+      // Scale from 0.5 -> 1.0
+      const s = 0.5 + t * 0.5;
+      obj.scale.setScalar(s);
+      // Opacity from 0.3 -> 1.0
+      const opacity = 0.3 + t * 0.7;
+      obj.traverse(child => {
+        if (child instanceof THREE.Mesh && child.material) {
+          const mat = child.material as THREE.Material;
+          if (t >= 1) {
+            mat.transparent = false;
+            mat.opacity = 1;
+          } else {
+            mat.transparent = true;
+            mat.opacity = opacity;
+          }
+        }
+      });
+    }
   }
 
   async preloadModels(unitTypeNames: string[]): Promise<void> {
@@ -138,6 +191,9 @@ export class UnitRenderer {
 
       // Update health bar
       this.updateHealthBar(eid);
+
+      // Update veterancy indicator
+      this.updateRankSprite(eid);
     }
   }
 
@@ -277,6 +333,37 @@ export class UnitRenderer {
     return sprite;
   }
 
+  private updateRankSprite(eid: number): void {
+    if (!this.currentWorld || !hasComponent(this.currentWorld, Veterancy, eid)) return;
+    const rank = Veterancy.rank[eid];
+    if (rank === 0) {
+      const existing = this.rankSprites.get(eid);
+      if (existing) existing.visible = false;
+      return;
+    }
+
+    let sprite = this.rankSprites.get(eid);
+    if (!sprite) {
+      // Gold chevron/star for rank
+      const mat = new THREE.SpriteMaterial({ color: 0xffd700 });
+      sprite = new THREE.Sprite(mat);
+      const obj = this.entityObjects.get(eid);
+      if (obj) {
+        obj.add(sprite);
+        sprite.position.y = 2.5;
+      }
+      this.rankSprites.set(eid, sprite);
+    }
+
+    sprite.visible = true;
+    // Scale stars by rank: 1=small, 2=medium, 3=large
+    const size = 0.2 + rank * 0.1;
+    sprite.scale.set(size * rank, size, 1);
+    // Color by rank: bronze -> silver -> gold
+    const colors = [0, 0xCD7F32, 0xC0C0C0, 0xFFD700];
+    (sprite.material as THREE.SpriteMaterial).color.setHex(colors[rank] ?? 0xFFD700);
+  }
+
   private removeVisual(eid: number): void {
     const obj = this.entityObjects.get(eid);
     if (obj) {
@@ -285,6 +372,7 @@ export class UnitRenderer {
     }
     this.selectionCircles.delete(eid);
     this.healthBars.delete(eid);
+    this.rankSprites.delete(eid);
     this.pendingModels.delete(eid);
   }
 

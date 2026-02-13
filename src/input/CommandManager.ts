@@ -5,6 +5,7 @@ import type { SelectionManager } from './SelectionManager';
 import type { UnitRenderer } from '../rendering/UnitRenderer';
 import { EventBus } from '../core/EventBus';
 import type { AudioManager } from '../audio/AudioManager';
+import type { CombatSystem } from '../simulation/CombatSystem';
 
 export type CommandMode = 'normal' | 'attack-move' | 'patrol';
 
@@ -13,6 +14,7 @@ export class CommandManager {
   private selectionManager: SelectionManager;
   private unitRenderer: UnitRenderer;
   private audioManager: AudioManager | null = null;
+  private combatSystem: CombatSystem | null = null;
   private world: any = null;
 
   private commandMode: CommandMode = 'normal';
@@ -35,6 +37,10 @@ export class CommandManager {
 
   setAudioManager(audio: AudioManager): void {
     this.audioManager = audio;
+  }
+
+  setCombatSystem(combat: CombatSystem): void {
+    this.combatSystem = combat;
   }
 
   setWorld(world: any): void {
@@ -164,11 +170,12 @@ export class CommandManager {
   };
 
   issueMoveCommand(entityIds: number[], x: number, z: number): void {
-    // Clear waypoints and patrols
+    // Clear waypoints, patrols, and attack-move state
     for (const eid of entityIds) {
       this.waypointQueues.delete(eid);
       this.patrolEntities.delete(eid);
     }
+    this.combatSystem?.clearAttackMove(entityIds);
 
     // Formation spreading
     const count = entityIds.length;
@@ -233,10 +240,10 @@ export class CommandManager {
 
   private issueAttackMoveCommand(entityIds: number[], x: number, z: number): void {
     // Move to position but attack anything encountered en route
-    // Implementation: set move target AND set a temporary flag to auto-engage
+    // Note: issueMoveCommand calls clearAttackMove, so we call setAttackMove AFTER
     this.issueMoveCommand(entityIds, x, z);
-    // The combat system's auto-acquire logic handles the "attack" part
-    // For attack-move, we just ensure attack targets aren't cleared
+    // Tag these units for attack-move in combat system (reads MoveTarget with formation offsets)
+    this.combatSystem?.setAttackMove(entityIds);
     for (const eid of entityIds) {
       AttackTarget.active[eid] = 0; // Will auto-acquire in CombatSystem
     }
@@ -262,6 +269,7 @@ export class CommandManager {
       this.waypointQueues.delete(eid);
       this.patrolEntities.delete(eid);
     }
+    this.combatSystem?.clearAttackMove(entityIds);
   }
 
   private issueGuardCommand(entityIds: number[]): void {

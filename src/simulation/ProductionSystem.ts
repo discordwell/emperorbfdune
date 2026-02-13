@@ -28,6 +28,10 @@ export class ProductionSystem {
   // Unit count callback for population cap
   private unitCountCallback: ((playerId: number) => number) | null = null;
   private maxUnits = 50;
+  // Upgraded buildings: playerId -> Set of building type names that have been upgraded
+  private upgradedBuildings = new Map<number, Set<string>>();
+  // Upgrade queues (same structure as building queues but for upgrades)
+  private upgradeQueues = new Map<number, QueueItem[]>();
 
   constructor(rules: GameRules, harvestSystem: HarvestSystem) {
     this.rules = rules;
@@ -54,6 +58,54 @@ export class ProductionSystem {
     if (owned) {
       owned.delete(buildingType);
     }
+  }
+
+  canUpgrade(playerId: number, buildingType: string): boolean {
+    const def = this.rules.buildings.get(buildingType);
+    if (!def || !def.upgradable) return false;
+    // Already upgraded?
+    if (this.upgradedBuildings.get(playerId)?.has(buildingType)) return false;
+    // Can afford?
+    if (this.harvestSystem.getSolaris(playerId) < def.upgradeCost) return false;
+    // Must own the building
+    const owned = this.playerBuildings.get(playerId);
+    if (!owned || !owned.has(buildingType)) return false;
+    return true;
+  }
+
+  startUpgrade(playerId: number, buildingType: string): boolean {
+    if (!this.canUpgrade(playerId, buildingType)) return false;
+    const def = this.rules.buildings.get(buildingType)!;
+    if (!this.harvestSystem.spendSolaris(playerId, def.upgradeCost)) return false;
+
+    const queue = this.upgradeQueues.get(playerId) ?? [];
+    queue.push({
+      typeName: buildingType,
+      isBuilding: true,
+      totalTime: def.buildTime, // Same time as building
+      elapsed: 0,
+      cost: def.upgradeCost,
+    });
+    this.upgradeQueues.set(playerId, queue);
+    EventBus.emit('production:started', { unitType: `${buildingType} Upgrade`, owner: playerId });
+    return true;
+  }
+
+  isUpgraded(playerId: number, buildingType: string): boolean {
+    return this.upgradedBuildings.get(playerId)?.has(buildingType) ?? false;
+  }
+
+  getPlayerTechLevel(playerId: number): number {
+    // Tech level = max upgrade tech level of all upgraded buildings
+    let maxTech = 1;
+    const upgraded = this.upgradedBuildings.get(playerId);
+    if (upgraded) {
+      for (const bType of upgraded) {
+        const def = this.rules.buildings.get(bType);
+        if (def && def.upgradeTechLevel > maxTech) maxTech = def.upgradeTechLevel;
+      }
+    }
+    return maxTech;
   }
 
   canBuild(playerId: number, typeName: string, isBuilding: boolean): boolean {
@@ -132,6 +184,22 @@ export class ProductionSystem {
       if (item.elapsed >= item.totalTime) {
         queue.shift();
         EventBus.emit('production:complete', { unitType: item.typeName, owner: playerId, buildingId: 0 });
+      }
+    }
+
+    // Process upgrade queues
+    for (const [playerId, queue] of this.upgradeQueues) {
+      if (queue.length === 0) continue;
+      const item = queue[0];
+      const mult = this.powerMultipliers.get(playerId) ?? 1.0;
+      item.elapsed += mult;
+      if (item.elapsed >= item.totalTime) {
+        queue.shift();
+        if (!this.upgradedBuildings.has(playerId)) {
+          this.upgradedBuildings.set(playerId, new Set());
+        }
+        this.upgradedBuildings.get(playerId)!.add(item.typeName);
+        EventBus.emit('production:complete', { unitType: `${item.typeName} Upgrade`, owner: playerId, buildingId: 0 });
       }
     }
   }

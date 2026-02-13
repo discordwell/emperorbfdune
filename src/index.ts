@@ -30,7 +30,7 @@ import {
   addEntity, addComponent, removeEntity, hasComponent,
   Position, Velocity, Rotation, Health, Owner, UnitType, Selectable,
   MoveTarget, AttackTarget, Combat, Armour, Speed, ViewRange, Renderable,
-  Harvester, BuildingType, PowerSource,
+  Harvester, BuildingType, PowerSource, Veterancy,
   unitQuery, buildingQuery,
   type World,
 } from './core/ECS';
@@ -105,6 +105,7 @@ async function main() {
   const pathfinder = new PathfindingSystem(terrain);
   const movement = new MovementSystem(pathfinder);
   const combatSystem = new CombatSystem(gameRules);
+  commandManager.setCombatSystem(combatSystem);
   const harvestSystem = new HarvestSystem(terrain);
   const productionSystem = new ProductionSystem(gameRules, harvestSystem);
   const minimapRenderer = new MinimapRenderer(terrain, scene);
@@ -219,6 +220,10 @@ async function main() {
 
     addComponent(world, Armour, eid);
     Armour.type[eid] = armourIdMap.get(def.armour) ?? 0;
+
+    addComponent(world, Veterancy, eid);
+    Veterancy.xp[eid] = 0;
+    Veterancy.rank[eid] = 0;
 
     combatSystem.registerUnit(eid, typeName);
 
@@ -356,7 +361,13 @@ async function main() {
   const buildingPlacement = new BuildingPlacement(scene, terrain, audioManager, (typeName, x, z) => {
     const world = game.getWorld();
     // Cost already paid by ProductionSystem.startProduction() — just spawn
-    spawnBuilding(world, typeName, 0, x, z);
+    const eid = spawnBuilding(world, typeName, 0, x, z);
+    // Animate construction over ~3 seconds (75 ticks at 25 TPS)
+    if (eid >= 0) {
+      const def = gameRules.buildings.get(typeName);
+      const duration = def ? Math.max(25, Math.floor(def.buildTime * 0.5)) : 75;
+      unitRenderer.startConstruction(eid, duration);
+    }
   });
 
   // --- SELECTION PANEL ---
@@ -365,6 +376,13 @@ async function main() {
     gameRules, audioManager, unitTypeNames, buildingTypeNames,
     sellBuilding, repairBuilding
   );
+  selectionPanel.setProductionSystem(productionSystem, (_eid, buildingType) => {
+    if (productionSystem.startUpgrade(0, buildingType)) {
+      selectionPanel.addMessage(`Upgrading ${buildingType.replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, '')}`, '#88f');
+    } else {
+      selectionPanel.addMessage('Cannot upgrade', '#ff4444');
+    }
+  });
 
   // --- AI SPAWN CALLBACK ---
 
@@ -410,6 +428,14 @@ async function main() {
     setTimeout(() => {
       try { removeEntity(world, entityId); } catch {}
     }, 500);
+  });
+
+  // Veterancy promotion
+  EventBus.on('unit:promoted', ({ entityId, rank }) => {
+    if (Owner.playerId[entityId] === 0) {
+      const rankNames = ['', 'Veteran', 'Elite', 'Heroic'];
+      selectionPanel.addMessage(`Unit promoted to ${rankNames[rank]}!`, '#ffd700');
+    }
   });
 
   // Sandworm events
@@ -474,12 +500,14 @@ async function main() {
   // UI elements for resource bar
   const powerEl = document.getElementById('power-status');
   const unitCountEl = document.getElementById('unit-count');
+  const commandModeEl = document.getElementById('command-mode');
 
   EventBus.on('game:tick', () => {
     const world = game.getWorld();
 
     productionSystem.update();
     unitRenderer.update(world);
+    unitRenderer.tickConstruction();
     minimapRenderer.update(world);
     effectsManager.update(40); // ~40ms per tick at 25 TPS
     effectsManager.updateWormVisuals(sandwormSystem.getWorms(), 40);
@@ -490,6 +518,20 @@ async function main() {
     buildingPlacement.updateOccupiedTiles(world);
     pathfinder.updateBlockedTiles(buildingPlacement.getOccupiedTiles());
     selectionPanel.setWorld(world);
+
+    // Command mode indicator
+    const mode = commandManager.getCommandMode();
+    if (commandModeEl) {
+      if (mode === 'attack-move') {
+        commandModeEl.style.display = 'block';
+        commandModeEl.textContent = 'ATTACK-MOVE — Right-click destination';
+      } else if (mode === 'patrol') {
+        commandModeEl.style.display = 'block';
+        commandModeEl.textContent = 'PATROL — Right-click destination';
+      } else {
+        commandModeEl.style.display = 'none';
+      }
+    }
 
     // Update power and unit count every 25 ticks (~1 second)
     if (game.getTickCount() % 25 === 0) {

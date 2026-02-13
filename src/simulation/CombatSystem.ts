@@ -2,7 +2,7 @@ import type { GameSystem } from '../core/Game';
 import type { World } from '../core/ECS';
 import {
   Position, Health, Combat, Owner, AttackTarget, MoveTarget,
-  Armour, BuildingType, combatQuery, hasComponent,
+  Armour, BuildingType, Veterancy, combatQuery, hasComponent,
 } from '../core/ECS';
 import type { GameRules } from '../config/RulesParser';
 import { distance2D, worldToTile } from '../utils/MathUtils';
@@ -17,6 +17,11 @@ export class CombatSystem implements GameSystem {
   private powerMultipliers = new Map<number, number>();
   private fogOfWar: FogOfWar | null = null;
   private localPlayerId = 0;
+  private world: World | null = null;
+  // Attack-move entities: auto-acquire targets while moving, resume move after
+  private attackMoveEntities = new Set<number>();
+  // Stored move destinations for attack-move units that pause to fight
+  private attackMoveDestinations = new Map<number, { x: number; z: number }>();
 
   constructor(rules: GameRules) {
     this.rules = rules;
@@ -41,9 +46,29 @@ export class CombatSystem implements GameSystem {
 
   unregisterUnit(eid: number): void {
     this.unitTypeMap.delete(eid);
+    this.attackMoveEntities.delete(eid);
+    this.attackMoveDestinations.delete(eid);
+  }
+
+  setAttackMove(eids: number[]): void {
+    for (const eid of eids) {
+      this.attackMoveEntities.add(eid);
+      // Store current move destination so we can resume after fighting
+      if (MoveTarget.active[eid] === 1) {
+        this.attackMoveDestinations.set(eid, { x: MoveTarget.x[eid], z: MoveTarget.z[eid] });
+      }
+    }
+  }
+
+  clearAttackMove(eids: number[]): void {
+    for (const eid of eids) {
+      this.attackMoveEntities.delete(eid);
+      this.attackMoveDestinations.delete(eid);
+    }
   }
 
   update(world: World, _dt: number): void {
+    this.world = world;
     const entities = combatQuery(world);
 
     for (const eid of entities) {
@@ -60,15 +85,49 @@ export class CombatSystem implements GameSystem {
         if (!hasComponent(world, Health, targetEid) || Health.current[targetEid] <= 0) {
           AttackTarget.active[eid] = 0;
           targetEid = -1;
+          // If attack-move unit killed its target, resume moving to destination
+          if (this.attackMoveEntities.has(eid)) {
+            const dest = this.attackMoveDestinations.get(eid);
+            if (dest && hasComponent(world, MoveTarget, eid)) {
+              MoveTarget.x[eid] = dest.x;
+              MoveTarget.z[eid] = dest.z;
+              MoveTarget.active[eid] = 1;
+            }
+          }
         }
       }
 
       // Auto-acquire target if none
       if (targetEid < 0) {
+        const isMoving = hasComponent(world, MoveTarget, eid) && MoveTarget.active[eid] === 1;
+        const isBuilding = hasComponent(world, BuildingType, eid);
+        // Only auto-acquire if: idle, building, attack-moving, or AI unit
+        if (isMoving && !isBuilding && !this.attackMoveEntities.has(eid) && Owner.playerId[eid] === this.localPlayerId) {
+          // Normal move — don't auto-acquire
+          continue;
+        }
         targetEid = this.findNearestEnemy(world, eid, entities);
       }
 
-      if (targetEid < 0) continue;
+      if (targetEid < 0) {
+        // If attack-move unit has no targets and isn't moving, resume destination
+        if (this.attackMoveEntities.has(eid) && hasComponent(world, MoveTarget, eid) && MoveTarget.active[eid] === 0) {
+          const dest = this.attackMoveDestinations.get(eid);
+          if (dest) {
+            const distToDest = distance2D(Position.x[eid], Position.z[eid], dest.x, dest.z);
+            if (distToDest > 2.0) {
+              MoveTarget.x[eid] = dest.x;
+              MoveTarget.z[eid] = dest.z;
+              MoveTarget.active[eid] = 1;
+            } else {
+              // Arrived at destination, clear attack-move
+              this.attackMoveEntities.delete(eid);
+              this.attackMoveDestinations.delete(eid);
+            }
+          }
+        }
+        continue;
+      }
 
       const dist = distance2D(
         Position.x[eid], Position.z[eid],
@@ -85,8 +144,18 @@ export class CombatSystem implements GameSystem {
             MoveTarget.z[eid] = Position.z[targetEid];
             MoveTarget.active[eid] = 1;
           }
+        } else if (this.attackMoveEntities.has(eid)) {
+          // Attack-move: pause movement and chase the enemy
+          MoveTarget.x[eid] = Position.x[targetEid];
+          MoveTarget.z[eid] = Position.z[targetEid];
+          MoveTarget.active[eid] = 1;
         }
         continue;
+      }
+
+      // In range — stop to fire if attack-moving
+      if (this.attackMoveEntities.has(eid) && hasComponent(world, MoveTarget, eid)) {
+        MoveTarget.active[eid] = 0;
       }
 
       // Only fire when cooldown is done
@@ -135,6 +204,20 @@ export class CombatSystem implements GameSystem {
       }
     }
 
+    // Veterancy damage bonus: +15%/+30%/+50% per rank
+    if (hasComponent(world, Veterancy, attackerEid)) {
+      const rank = Veterancy.rank[attackerEid];
+      const vetBonus = [1.0, 1.15, 1.30, 1.50][rank] ?? 1.0;
+      baseDamage = Math.round(baseDamage * vetBonus);
+    }
+
+    // Veterancy defense bonus on target: -10%/-20%/-30% damage taken
+    if (hasComponent(world, Veterancy, targetEid)) {
+      const defRank = Veterancy.rank[targetEid];
+      const defBonus = [1.0, 0.9, 0.8, 0.7][defRank] ?? 1.0;
+      baseDamage = Math.round(baseDamage * defBonus);
+    }
+
     // Emit fire event for visual projectile
     EventBus.emit('combat:fire', {
       attackerX: Position.x[attackerEid],
@@ -148,6 +231,20 @@ export class CombatSystem implements GameSystem {
 
     if (Health.current[targetEid] <= 0) {
       Health.current[targetEid] = 0;
+
+      // Grant XP to killer and check rank promotion
+      if (hasComponent(world, Veterancy, attackerEid)) {
+        Veterancy.xp[attackerEid]++;
+        const xp = Veterancy.xp[attackerEid];
+        const oldRank = Veterancy.rank[attackerEid];
+        // Promote: rank 1=1 kill, rank 2=3 kills, rank 3=5 kills
+        const newRank = xp >= 5 ? 3 : xp >= 3 ? 2 : xp >= 1 ? 1 : 0;
+        if (newRank > oldRank) {
+          Veterancy.rank[attackerEid] = newRank;
+          EventBus.emit('unit:promoted', { entityId: attackerEid, rank: newRank });
+        }
+      }
+
       EventBus.emit('unit:died', { entityId: targetEid, killerEntity: attackerEid });
     }
   }

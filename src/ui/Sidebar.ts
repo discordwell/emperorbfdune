@@ -165,7 +165,18 @@ export class Sidebar {
     }
 
     if (def.primaryBuilding) {
-      html += `<div style="color:#888;margin-top:4px;font-size:10px;">Requires: ${def.primaryBuilding.replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, '')}</div>`;
+      const reqName = def.primaryBuilding.replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, '');
+      const canBuild = this.production.canBuild(this.playerId, name, isBuilding);
+      const reqColor = canBuild ? '#4f4' : '#f44';
+      html += `<div style="color:${reqColor};margin-top:4px;font-size:10px;">Requires: ${reqName}${canBuild ? ' \u2713' : ' (not built)'}</div>`;
+    }
+
+    // Show if unaffordable
+    if (!this.production.canBuild(this.playerId, name, isBuilding)) {
+      if (!def.primaryBuilding || this.production.canBuild(this.playerId, name, isBuilding)) {
+        // Must be a cost issue
+      }
+      html += `<div style="color:#f44;font-size:10px;margin-top:2px;">Cannot build</div>`;
     }
 
     this.tooltip.innerHTML = html;

@@ -7,6 +7,7 @@ interface EventMap {
   'unit:attack': { attackerIds: number[]; targetId: number };
   'unit:spawned': { entityId: number; unitType: string; owner: number };
   'unit:died': { entityId: number; killerEntity: number };
+  'unit:promoted': { entityId: number; rank: number };
   'building:placed': { entityId: number; buildingType: string; owner: number };
   'building:destroyed': { entityId: number };
   'building:started': { buildingType: string; owner: number };
