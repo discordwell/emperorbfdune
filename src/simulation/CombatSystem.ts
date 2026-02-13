@@ -2,7 +2,7 @@ import type { GameSystem } from '../core/Game';
 import type { World } from '../core/ECS';
 import {
   Position, Health, Combat, Owner, AttackTarget, MoveTarget,
-  Armour, combatQuery, hasComponent,
+  Armour, BuildingType, combatQuery, hasComponent,
 } from '../core/ECS';
 import type { GameRules } from '../config/RulesParser';
 import { distance2D } from '../utils/MathUtils';
@@ -12,9 +12,15 @@ export class CombatSystem implements GameSystem {
   private rules: GameRules;
   private armourTypes: string[] = [];
   private unitTypeMap = new Map<number, string>(); // eid -> unit type name
+  // Power multiplier per player: affects building turret fire rate
+  private powerMultipliers = new Map<number, number>();
 
   constructor(rules: GameRules) {
     this.rules = rules;
+  }
+
+  setPowerMultiplier(playerId: number, multiplier: number): void {
+    this.powerMultipliers.set(playerId, multiplier);
   }
 
   init(_world: World): void {
@@ -79,7 +85,13 @@ export class CombatSystem implements GameSystem {
       if (Combat.fireTimer[eid] > 0) continue;
 
       this.fire(world, eid, targetEid);
-      Combat.fireTimer[eid] = Combat.rof[eid];
+      // Buildings fire slower when low on power
+      let rof = Combat.rof[eid];
+      if (hasComponent(world, BuildingType, eid)) {
+        const mult = this.powerMultipliers.get(Owner.playerId[eid]) ?? 1.0;
+        if (mult < 1.0) rof = Math.ceil(rof / mult); // Lower mult = slower fire
+      }
+      Combat.fireTimer[eid] = rof;
     }
   }
 
@@ -114,6 +126,14 @@ export class CombatSystem implements GameSystem {
         }
       }
     }
+
+    // Emit fire event for visual projectile
+    EventBus.emit('combat:fire', {
+      attackerX: Position.x[attackerEid],
+      attackerZ: Position.z[attackerEid],
+      targetX: Position.x[targetEid],
+      targetZ: Position.z[targetEid],
+    });
 
     // Apply damage
     Health.current[targetEid] -= baseDamage;

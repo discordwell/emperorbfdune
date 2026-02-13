@@ -1,0 +1,245 @@
+import type { GameSystem } from '../core/Game';
+import type { World } from '../core/ECS';
+import {
+  Position, Health, Owner, UnitType, Harvester,
+  unitQuery, hasComponent,
+} from '../core/ECS';
+import type { TerrainRenderer } from '../rendering/TerrainRenderer';
+import { TerrainType } from '../rendering/TerrainRenderer';
+import { worldToTile, distance2D, randomFloat } from '../utils/MathUtils';
+import { GameConstants } from '../utils/Constants';
+import { EventBus } from '../core/EventBus';
+import type { EffectsManager } from '../rendering/EffectsManager';
+
+interface Worm {
+  x: number;
+  z: number;
+  targetX: number;
+  targetZ: number;
+  speed: number;
+  life: number; // Ticks remaining before burrowing
+  huntingEid: number | null; // Entity being hunted
+  state: 'roaming' | 'hunting' | 'emerging' | 'submerging';
+  emergeTicks: number;
+}
+
+export class SandwormSystem implements GameSystem {
+  private terrain: TerrainRenderer;
+  private effects: EffectsManager;
+  private worms: Worm[] = [];
+  private tickCounter = 0;
+  private maxWorms: number;
+  private spawnChance: number;
+
+  constructor(terrain: TerrainRenderer, effects: EffectsManager) {
+    this.terrain = terrain;
+    this.effects = effects;
+    this.maxWorms = GameConstants.MAX_SURFACE_WORMS;
+    this.spawnChance = GameConstants.CHANCE_OF_SURFACE_WORM;
+  }
+
+  init(_world: World): void {}
+
+  update(world: World, _dt: number): void {
+    this.tickCounter++;
+
+    // Try to spawn new worm
+    if (this.worms.length < this.maxWorms && this.tickCounter % 100 === 0) {
+      if (Math.random() * this.spawnChance < 1) {
+        this.spawnWorm();
+      }
+    }
+
+    // Update existing worms
+    for (let i = this.worms.length - 1; i >= 0; i--) {
+      const worm = this.worms[i];
+      worm.life--;
+
+      if (worm.life <= 0) {
+        // Submerge and remove
+        this.effects.spawnExplosion(worm.x, 0, worm.z, 'medium');
+        EventBus.emit('worm:submerge', { x: worm.x, z: worm.z });
+        this.worms.splice(i, 1);
+        continue;
+      }
+
+      switch (worm.state) {
+        case 'emerging':
+          worm.emergeTicks--;
+          if (worm.emergeTicks <= 0) {
+            worm.state = 'roaming';
+          }
+          break;
+
+        case 'roaming':
+          this.updateRoaming(world, worm);
+          break;
+
+        case 'hunting':
+          this.updateHunting(world, worm);
+          break;
+
+        case 'submerging':
+          // Remove on next tick
+          break;
+      }
+    }
+  }
+
+  private spawnWorm(): void {
+    // Spawn on sand tile away from any buildings
+    const x = randomFloat(20, 480);
+    const z = randomFloat(20, 480);
+    const tile = worldToTile(x, z);
+    const terrainType = this.terrain.getTerrainType(tile.tx, tile.tz);
+
+    // Only spawn on sand/dunes/spice
+    if (terrainType !== TerrainType.Sand && terrainType !== TerrainType.Dunes &&
+        terrainType !== TerrainType.SpiceLow && terrainType !== TerrainType.SpiceHigh) {
+      return;
+    }
+
+    const minLife = GameConstants.SURFACE_WORM_MIN_LIFE;
+    const maxLife = GameConstants.SURFACE_WORM_MAX_LIFE;
+
+    const worm: Worm = {
+      x, z,
+      targetX: x + randomFloat(-50, 50),
+      targetZ: z + randomFloat(-50, 50),
+      speed: 0.3,
+      life: minLife + Math.floor(Math.random() * (maxLife - minLife)),
+      huntingEid: null,
+      state: 'emerging',
+      emergeTicks: 25, // 1 second emerge animation
+    };
+
+    this.worms.push(worm);
+    this.effects.spawnExplosion(x, 0, z, 'large');
+    EventBus.emit('worm:emerge', { x, z });
+  }
+
+  private updateRoaming(world: World, worm: Worm): void {
+    // Move toward target
+    const dx = worm.targetX - worm.x;
+    const dz = worm.targetZ - worm.z;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+
+    if (dist < 2) {
+      // Pick new random target on sand
+      worm.targetX = worm.x + randomFloat(-60, 60);
+      worm.targetZ = worm.z + randomFloat(-60, 60);
+      worm.targetX = Math.max(10, Math.min(500, worm.targetX));
+      worm.targetZ = Math.max(10, Math.min(500, worm.targetZ));
+    } else if (dist > 0.1) {
+      worm.x += (dx / dist) * worm.speed;
+      worm.z += (dz / dist) * worm.speed;
+    }
+
+    // Look for prey every 25 ticks
+    if (this.tickCounter % 25 === 0) {
+      const prey = this.findPrey(world, worm);
+      if (prey !== null) {
+        worm.huntingEid = prey;
+        worm.state = 'hunting';
+        worm.speed = 0.6; // Faster when hunting
+      }
+    }
+  }
+
+  private updateHunting(world: World, worm: Worm): void {
+    if (worm.huntingEid === null) {
+      worm.state = 'roaming';
+      worm.speed = 0.3;
+      return;
+    }
+
+    // Check if prey is still alive and get position
+    let targetX: number, targetZ: number;
+    try {
+      if (Health.current[worm.huntingEid] <= 0) {
+        worm.huntingEid = null;
+        worm.state = 'roaming';
+        worm.speed = 0.3;
+        return;
+      }
+      targetX = Position.x[worm.huntingEid];
+      targetZ = Position.z[worm.huntingEid];
+      if (isNaN(targetX) || isNaN(targetZ)) throw new Error();
+    } catch {
+      worm.huntingEid = null;
+      worm.state = 'roaming';
+      worm.speed = 0.3;
+      return;
+    }
+
+    // Check terrain — worm won't go on rock
+    const tile = worldToTile(targetX, targetZ);
+    const terrainType = this.terrain.getTerrainType(tile.tx, tile.tz);
+    if (terrainType === TerrainType.Rock || terrainType === TerrainType.Cliff || terrainType === TerrainType.InfantryRock) {
+      // Prey is on rock — can't reach, give up
+      worm.huntingEid = null;
+      worm.state = 'roaming';
+      worm.speed = 0.3;
+      return;
+    }
+
+    const dx = targetX - worm.x;
+    const dz = targetZ - worm.z;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+
+    if (dist < 2) {
+      // EAT THE UNIT
+      this.eatUnit(world, worm.huntingEid, worm);
+      worm.huntingEid = null;
+      worm.state = 'roaming';
+      worm.speed = 0.3;
+    } else if (dist > 0.1) {
+      worm.x += (dx / dist) * worm.speed;
+      worm.z += (dz / dist) * worm.speed;
+    }
+  }
+
+  private eatUnit(_world: World, eid: number, worm: Worm): void {
+    // Capture owner before killing (entity data may be invalid after death event)
+    const ownerId = Owner.playerId[eid];
+    // Kill the unit
+    Health.current[eid] = 0;
+    this.effects.spawnExplosion(worm.x, 0, worm.z, 'large');
+    EventBus.emit('unit:died', { entityId: eid, killerEntity: -1 });
+    EventBus.emit('worm:eat', { entityId: eid, x: worm.x, z: worm.z, ownerId });
+  }
+
+  private findPrey(world: World, worm: Worm): number | null {
+    const units = unitQuery(world);
+    const wormRange = GameConstants.WORM_ATTRACTION_RADIUS;
+    let bestDist = wormRange;
+    let bestEid: number | null = null;
+
+    for (const eid of units) {
+      if (Health.current[eid] <= 0) continue;
+
+      // Check if unit is on sand (worm can't eat units on rock)
+      const tile = worldToTile(Position.x[eid], Position.z[eid]);
+      const terrainType = this.terrain.getTerrainType(tile.tx, tile.tz);
+      if (terrainType === TerrainType.Rock || terrainType === TerrainType.Cliff || terrainType === TerrainType.InfantryRock) {
+        continue;
+      }
+
+      // Harvesters are extra tasty
+      const isHarvester = hasComponent(world, Harvester, eid);
+      const dist = distance2D(worm.x, worm.z, Position.x[eid], Position.z[eid]);
+      const effectiveDist = isHarvester ? dist * 0.5 : dist; // Harvesters attract from further away
+
+      if (effectiveDist < bestDist) {
+        bestDist = effectiveDist;
+        bestEid = eid;
+      }
+    }
+
+    return bestEid;
+  }
+
+  getWorms(): ReadonlyArray<Worm> {
+    return this.worms;
+  }
+}

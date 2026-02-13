@@ -23,9 +23,16 @@ export class ProductionSystem {
   // Built buildings per player (for tech tree checking)
   private playerBuildings = new Map<number, Set<string>>();
 
+  // Power multiplier per player: 1.0 = full power, 0.5 = low power
+  private powerMultipliers = new Map<number, number>();
+
   constructor(rules: GameRules, harvestSystem: HarvestSystem) {
     this.rules = rules;
     this.harvestSystem = harvestSystem;
+  }
+
+  setPowerMultiplier(playerId: number, multiplier: number): void {
+    this.powerMultipliers.set(playerId, multiplier);
   }
 
   addPlayerBuilding(playerId: number, buildingType: string): void {
@@ -96,7 +103,8 @@ export class ProductionSystem {
     for (const [playerId, queue] of this.buildingQueues) {
       if (queue.length === 0) continue;
       const item = queue[0];
-      item.elapsed++;
+      const mult = this.powerMultipliers.get(playerId) ?? 1.0;
+      item.elapsed += mult;
       if (item.elapsed >= item.totalTime) {
         queue.shift();
         EventBus.emit('production:complete', { unitType: item.typeName, owner: playerId, buildingId: 0 });
@@ -107,7 +115,8 @@ export class ProductionSystem {
     for (const [playerId, queue] of this.unitQueues) {
       if (queue.length === 0) continue;
       const item = queue[0];
-      item.elapsed++;
+      const mult = this.powerMultipliers.get(playerId) ?? 1.0;
+      item.elapsed += mult;
       if (item.elapsed >= item.totalTime) {
         queue.shift();
         EventBus.emit('production:complete', { unitType: item.typeName, owner: playerId, buildingId: 0 });

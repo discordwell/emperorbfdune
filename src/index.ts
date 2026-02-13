@@ -24,6 +24,8 @@ import { BuildingPlacement } from './input/BuildingPlacement';
 import { VictorySystem } from './ui/VictoryScreen';
 import { HouseSelect, type HouseChoice } from './ui/HouseSelect';
 import { SelectionPanel } from './ui/SelectionPanel';
+import { EffectsManager } from './rendering/EffectsManager';
+import { SandwormSystem } from './simulation/SandwormSystem';
 import {
   addEntity, addComponent, removeEntity, hasComponent,
   Position, Velocity, Rotation, Health, Owner, UnitType, Selectable,
@@ -107,12 +109,17 @@ async function main() {
   const productionSystem = new ProductionSystem(gameRules, harvestSystem);
   const minimapRenderer = new MinimapRenderer(terrain, scene);
   const fogOfWar = new FogOfWar(scene, 0);
+  const effectsManager = new EffectsManager(scene);
   const victorySystem = new VictorySystem(audioManager, 0);
+
+  const sandwormSystem = new SandwormSystem(terrain, effectsManager);
 
   // AI setup based on enemy faction
   const aiPlayer = new AIPlayer(gameRules, combatSystem, 1, 200, 200, 60, 60);
   // Override AI unit pool for the enemy faction
   aiPlayer.setUnitPool(house.enemyPrefix);
+  // Connect AI to production/economy systems
+  aiPlayer.setProductionSystem(productionSystem, harvestSystem);
 
   // Register systems
   game.addSystem(input);
@@ -120,6 +127,7 @@ async function main() {
   game.addSystem(combatSystem);
   game.addSystem(harvestSystem);
   game.addSystem(aiPlayer);
+  game.addSystem(sandwormSystem);
   game.addRenderSystem(scene);
 
   // Initialize
@@ -290,6 +298,9 @@ async function main() {
     harvestSystem.addSolaris(0, refund);
     selectionPanel.addMessage(`Sold for ${refund} Solaris`, '#f0c040');
 
+    // Sell visual effect
+    effectsManager.spawnExplosion(Position.x[eid], Position.y[eid], Position.z[eid], 'small');
+
     // Clean up from production prerequisites and combat
     if (typeName) {
       productionSystem.removePlayerBuilding(0, typeName);
@@ -360,10 +371,19 @@ async function main() {
 
   EventBus.on('unit:died', ({ entityId }) => {
     const world = game.getWorld();
+    const isBuilding = hasComponent(world, BuildingType, entityId);
+    const x = Position.x[entityId];
+    const y = Position.y[entityId];
+    const z = Position.z[entityId];
+
     combatSystem.unregisterUnit(entityId);
 
-    // Clean up building from production prerequisites if it was a building
-    if (hasComponent(world, BuildingType, entityId)) {
+    // Visual effects
+    effectsManager.spawnExplosion(x, y, z, isBuilding ? 'large' : 'medium');
+    effectsManager.spawnWreckage(x, y, z, isBuilding);
+
+    // Clean up building from production prerequisites
+    if (isBuilding) {
       const typeId = BuildingType.id[entityId];
       const typeName = buildingTypeNames[typeId];
       if (typeName) {
@@ -374,6 +394,21 @@ async function main() {
     setTimeout(() => {
       try { removeEntity(world, entityId); } catch {}
     }, 500);
+  });
+
+  // Sandworm events
+  EventBus.on('worm:emerge', () => {
+    selectionPanel.addMessage('Worm sign detected!', '#ff8800');
+  });
+  EventBus.on('worm:eat', ({ ownerId }) => {
+    if (ownerId === 0) {
+      selectionPanel.addMessage('Unit lost to sandworm!', '#ff4444');
+    }
+  });
+
+  // Projectile visuals
+  EventBus.on('combat:fire', ({ attackerX, attackerZ, targetX, targetZ }) => {
+    effectsManager.spawnProjectile(attackerX, 0, attackerZ, targetX, 0, targetZ);
   });
 
   EventBus.on('unit:move', ({ entityIds }) => {
@@ -404,7 +439,17 @@ async function main() {
       const baseZ = owner === 0 ? 55 : 200;
       const x = baseX + (Math.random() - 0.5) * 10;
       const z = baseZ + (Math.random() - 0.5) * 10;
-      spawnUnit(world, unitType, owner, x, z);
+      const eid = spawnUnit(world, unitType, owner, x, z);
+
+      // Send to rally point if player has one set
+      if (owner === 0 && eid >= 0) {
+        const rally = commandManager.getRallyPoint(0);
+        if (rally) {
+          MoveTarget.x[eid] = rally.x;
+          MoveTarget.z[eid] = rally.z;
+          MoveTarget.active[eid] = 1;
+        }
+      }
     }
   });
 
@@ -420,8 +465,11 @@ async function main() {
     productionSystem.update();
     unitRenderer.update(world);
     minimapRenderer.update(world);
+    effectsManager.update(40); // ~40ms per tick at 25 TPS
+    effectsManager.updateWormVisuals(sandwormSystem.getWorms(), 40);
     fogOfWar.update(world);
     victorySystem.update(world);
+    commandManager.setWorld(world);
     commandManager.updateWaypoints();
     buildingPlacement.updateOccupiedTiles(world);
     pathfinder.updateBlockedTiles(buildingPlacement.getOccupiedTiles());
@@ -451,8 +499,16 @@ async function main() {
         unitCount++;
       }
 
-      if (powerEl) powerEl.textContent = `${powerGen}/${powerUsed}`;
+      if (powerEl) {
+        powerEl.textContent = `${powerGen}/${powerUsed}`;
+        powerEl.style.color = powerGen >= powerUsed ? '#4f4' : '#f44';
+      }
       if (unitCountEl) unitCountEl.textContent = `${unitCount}`;
+
+      // Power affects gameplay: slow production and turrets when in deficit
+      const powerMult = powerGen >= powerUsed ? 1.0 : 0.5;
+      productionSystem.setPowerMultiplier(0, powerMult);
+      combatSystem.setPowerMultiplier(0, powerMult);
     }
 
     // Pause game on victory/defeat
@@ -485,6 +541,18 @@ async function main() {
   }, house.prefix);
 
   setInterval(() => sidebar.updateProgress(), 200);
+
+  // Help overlay toggle
+  const helpOverlay = document.getElementById('help-overlay');
+  window.addEventListener('keydown', (e) => {
+    if (e.key === '?' || (e.key === '/' && e.shiftKey)) {
+      if (helpOverlay) {
+        helpOverlay.style.display = helpOverlay.style.display === 'none' ? 'block' : 'none';
+      }
+    } else if (e.key === 'Escape' && helpOverlay?.style.display === 'block') {
+      helpOverlay.style.display = 'none';
+    }
+  });
 
   // --- SPAWN INITIAL ENTITIES ---
   const world = game.getWorld();
@@ -558,6 +626,7 @@ async function main() {
   (window as any).fogOfWar = fogOfWar;
   (window as any).spawnUnit = (name: string, owner: number, x: number, z: number) => spawnUnit(game.getWorld(), name, owner, x, z);
   (window as any).spawnBuilding = (name: string, owner: number, x: number, z: number) => spawnBuilding(game.getWorld(), name, owner, x, z);
+  (window as any).sandworm = sandwormSystem;
 }
 
 main().catch(console.error);

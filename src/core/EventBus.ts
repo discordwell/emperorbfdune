@@ -21,6 +21,10 @@ interface EventMap {
   'game:started': {};
   'game:paused': {};
   'placement:cancelled': { typeName: string };
+  'combat:fire': { attackerX: number; attackerZ: number; targetX: number; targetZ: number };
+  'worm:emerge': { x: number; z: number };
+  'worm:submerge': { x: number; z: number };
+  'worm:eat': { entityId: number; x: number; z: number; ownerId: number };
 }
 
 type EventName = keyof EventMap;

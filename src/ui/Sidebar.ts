@@ -1,6 +1,8 @@
 import type { GameRules } from '../config/RulesParser';
 import type { ProductionSystem } from '../simulation/ProductionSystem';
 import type { ArtEntry } from '../config/ArtIniParser';
+import type { UnitDef } from '../config/UnitDefs';
+import type { BuildingDef } from '../config/BuildingDefs';
 
 type BuildCallback = (typeName: string, isBuilding: boolean) => void;
 
@@ -15,6 +17,7 @@ export class Sidebar {
   private progressBar: HTMLDivElement | null = null;
 
   private factionPrefix: string;
+  private tooltip: HTMLElement | null;
 
   constructor(rules: GameRules, production: ProductionSystem, artMap: Map<string, ArtEntry>, onBuild: BuildCallback, factionPrefix = 'AT') {
     this.container = document.getElementById('sidebar')!;
@@ -23,6 +26,7 @@ export class Sidebar {
     this.artMap = artMap;
     this.onBuild = onBuild;
     this.factionPrefix = factionPrefix;
+    this.tooltip = document.getElementById('tooltip');
     this.render();
   }
 
@@ -104,13 +108,69 @@ export class Sidebar {
     const displayName = name.replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, '');
     item.innerHTML = `<div style="font-size:11px;font-weight:bold">${displayName}</div><div style="color:#f0c040;font-size:10px">$${cost}</div>`;
 
+    // Tooltip on hover
+    item.onmouseenter = (e) => {
+      if (enabled) item.style.borderColor = '#0f0';
+      this.showTooltip(name, isBuilding, e.clientX, e.clientY);
+    };
+    item.onmouseleave = () => {
+      if (enabled) item.style.borderColor = '#444';
+      this.hideTooltip();
+    };
+    item.onmousemove = (e) => {
+      if (this.tooltip && this.tooltip.style.display !== 'none') {
+        this.tooltip.style.left = (e.clientX - 260) + 'px';
+        this.tooltip.style.top = e.clientY + 'px';
+      }
+    };
+
     if (enabled) {
-      item.onmouseenter = () => { item.style.borderColor = '#0f0'; };
-      item.onmouseleave = () => { item.style.borderColor = '#444'; };
       item.onclick = () => this.onBuild(name, isBuilding);
     }
 
     return item;
+  }
+
+  private showTooltip(name: string, isBuilding: boolean, x: number, y: number): void {
+    if (!this.tooltip) return;
+
+    const def = isBuilding
+      ? this.rules.buildings.get(name)
+      : this.rules.units.get(name);
+    if (!def) return;
+
+    const displayName = name.replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, '');
+    let html = `<div style="font-weight:bold;color:#fff;margin-bottom:4px;">${displayName}</div>`;
+    html += `<div style="color:#f0c040;">Cost: $${def.cost}</div>`;
+    html += `<div>HP: ${def.health}</div>`;
+    html += `<div>Build Time: ${def.buildTime} ticks</div>`;
+
+    if (!isBuilding) {
+      const unitDef = def as UnitDef;
+      html += `<div>Speed: ${unitDef.speed.toFixed(1)}</div>`;
+      if (unitDef.turretAttach) html += `<div style="color:#f88;">Armed</div>`;
+      if (unitDef.infantry) html += `<div style="color:#8cf;">Infantry</div>`;
+      if (unitDef.canFly) html += `<div style="color:#aaf;">Aircraft</div>`;
+    } else {
+      const bDef = def as BuildingDef;
+      if (bDef.powerGenerated > 0) html += `<div style="color:#4f4;">Power: +${bDef.powerGenerated}</div>`;
+      if (bDef.powerUsed > 0) html += `<div style="color:#f44;">Power: -${bDef.powerUsed}</div>`;
+    }
+
+    if (def.primaryBuilding) {
+      html += `<div style="color:#888;margin-top:4px;font-size:10px;">Requires: ${def.primaryBuilding.replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, '')}</div>`;
+    }
+
+    this.tooltip.innerHTML = html;
+    this.tooltip.style.display = 'block';
+    this.tooltip.style.left = (x - 260) + 'px';
+    this.tooltip.style.top = y + 'px';
+  }
+
+  private hideTooltip(): void {
+    if (this.tooltip) {
+      this.tooltip.style.display = 'none';
+    }
   }
 
   updateProgress(): void {

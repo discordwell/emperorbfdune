@@ -151,6 +151,7 @@
           <span class="resource-label">Units:</span>
           <span class="resource-value" id="unit-count">0/50</span>
         </div>
+        <span style="color:#666;font-size:11px;margin-left:auto;margin-right:12px;">Press ? for help</span>
         <span id="fps-counter">0 FPS | 0 TPS</span>
       </div>
       <div id="sidebar"></div>
@@ -159,6 +160,32 @@
       </div>
       <div id="selection-info"></div>
       <div id="tooltip"></div>
+      <div id="help-overlay" style="
+        display:none;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+        background:rgba(10,10,30,0.95);border:1px solid #555;padding:24px 32px;
+        font-family:'Segoe UI',Tahoma,sans-serif;color:#ddd;z-index:200;
+        pointer-events:auto;min-width:340px;border-radius:4px;
+      ">
+        <h2 style="color:#f0c040;margin-bottom:12px;font-size:16px;">Keyboard Controls</h2>
+        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">WASD / Arrows</td><td>Scroll camera</td></tr>
+          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">Left Click</td><td>Select unit/building</td></tr>
+          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">Drag Select</td><td>Box select units</td></tr>
+          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">Double Click</td><td>Select all same type</td></tr>
+          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">Right Click</td><td>Move / Attack target</td></tr>
+          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">Shift + RClick</td><td>Add waypoint</td></tr>
+          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">A</td><td>Attack-move</td></tr>
+          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">S</td><td>Stop</td></tr>
+          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">G</td><td>Guard position</td></tr>
+          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">P</td><td>Patrol</td></tr>
+          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">Ctrl + 1-9</td><td>Assign control group</td></tr>
+          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">1-9</td><td>Recall control group</td></tr>
+          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">M</td><td>Toggle music</td></tr>
+          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">Escape</td><td>Cancel placement</td></tr>
+          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">?</td><td>Toggle this help</td></tr>
+        </table>
+        <p style="color:#888;font-size:11px;margin-top:12px;">Press ? to close</p>
+      </div>
     </div>
   </div>
   <script type="module" src="/dist/game.js"></script>

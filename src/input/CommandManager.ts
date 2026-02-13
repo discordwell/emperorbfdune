@@ -1,23 +1,28 @@
 import type { World } from '../core/ECS';
-import { MoveTarget, Position, AttackTarget, Combat, Owner, Health, hasComponent } from '../core/ECS';
+import { MoveTarget, Position, AttackTarget, Combat, Owner, Health, BuildingType, hasComponent } from '../core/ECS';
 import type { SceneManager } from '../rendering/SceneManager';
 import type { SelectionManager } from './SelectionManager';
 import type { UnitRenderer } from '../rendering/UnitRenderer';
 import { EventBus } from '../core/EventBus';
 import type { AudioManager } from '../audio/AudioManager';
 
-export type CommandMode = 'normal' | 'attack-move';
+export type CommandMode = 'normal' | 'attack-move' | 'patrol';
 
 export class CommandManager {
   private sceneManager: SceneManager;
   private selectionManager: SelectionManager;
   private unitRenderer: UnitRenderer;
   private audioManager: AudioManager | null = null;
+  private world: any = null;
 
   private commandMode: CommandMode = 'normal';
 
   // Waypoint queue per entity
   private waypointQueues = new Map<number, Array<{ x: number; z: number }>>();
+  // Patrol entities loop between start and target
+  private patrolEntities = new Map<number, { startX: number; startZ: number; endX: number; endZ: number }>();
+  // Rally point per player
+  private rallyPoints = new Map<number, { x: number; z: number }>();
 
   constructor(sceneManager: SceneManager, selectionManager: SelectionManager, unitRenderer: UnitRenderer) {
     this.sceneManager = sceneManager;
@@ -30,6 +35,14 @@ export class CommandManager {
 
   setAudioManager(audio: AudioManager): void {
     this.audioManager = audio;
+  }
+
+  setWorld(world: any): void {
+    this.world = world;
+  }
+
+  getRallyPoint(playerId: number): { x: number; z: number } | null {
+    return this.rallyPoints.get(playerId) ?? null;
   }
 
   getCommandMode(): CommandMode {
@@ -47,6 +60,18 @@ export class CommandManager {
         const next = queue.shift()!;
         MoveTarget.x[eid] = next.x;
         MoveTarget.z[eid] = next.z;
+        MoveTarget.active[eid] = 1;
+      }
+    }
+
+    // Handle patrol: when unit reaches patrol endpoint, swap direction
+    for (const [eid, patrol] of this.patrolEntities) {
+      if (MoveTarget.active[eid] === 0) {
+        // At destination — swap start and end
+        const temp = { startX: patrol.endX, startZ: patrol.endZ, endX: patrol.startX, endZ: patrol.startZ };
+        this.patrolEntities.set(eid, temp);
+        MoveTarget.x[eid] = temp.endX;
+        MoveTarget.z[eid] = temp.endZ;
         MoveTarget.active[eid] = 1;
       }
     }
@@ -72,8 +97,21 @@ export class CommandManager {
     const worldPos = this.sceneManager.screenToWorld(e.clientX, e.clientY);
     if (!worldPos) return;
 
+    // Check if a building is selected — set rally point instead of move
+    const hasBuildingSel = this.world && selected.some(eid => hasComponent(this.world, BuildingType, eid));
+    if (hasBuildingSel && this.commandMode === 'normal' && !shiftHeld) {
+      this.rallyPoints.set(0, { x: worldPos.x, z: worldPos.z });
+      this.audioManager?.playSfx('move');
+      return;
+    }
+
     if (this.commandMode === 'attack-move') {
       this.issueAttackMoveCommand(selected, worldPos.x, worldPos.z);
+      this.audioManager?.playSfx('move');
+      this.commandMode = 'normal';
+      document.body.style.cursor = 'default';
+    } else if (this.commandMode === 'patrol') {
+      this.issuePatrolCommand(selected, worldPos.x, worldPos.z);
       this.audioManager?.playSfx('move');
       this.commandMode = 'normal';
       document.body.style.cursor = 'default';
@@ -108,6 +146,14 @@ export class CommandManager {
         this.issueGuardCommand(selected);
         break;
 
+      case 'p':
+        // Patrol mode
+        if (selected.length > 0) {
+          this.commandMode = 'patrol';
+          document.body.style.cursor = 'crosshair';
+        }
+        break;
+
       case 'escape':
         if (this.commandMode !== 'normal') {
           this.commandMode = 'normal';
@@ -118,9 +164,10 @@ export class CommandManager {
   };
 
   issueMoveCommand(entityIds: number[], x: number, z: number): void {
-    // Clear waypoints
+    // Clear waypoints and patrols
     for (const eid of entityIds) {
       this.waypointQueues.delete(eid);
+      this.patrolEntities.delete(eid);
     }
 
     // Formation spreading
@@ -195,11 +242,25 @@ export class CommandManager {
     }
   }
 
+  private issuePatrolCommand(entityIds: number[], targetX: number, targetZ: number): void {
+    for (const eid of entityIds) {
+      this.waypointQueues.delete(eid);
+      const startX = Position.x[eid];
+      const startZ = Position.z[eid];
+      this.patrolEntities.set(eid, { startX, startZ, endX: targetX, endZ: targetZ });
+      MoveTarget.x[eid] = targetX;
+      MoveTarget.z[eid] = targetZ;
+      MoveTarget.active[eid] = 1;
+      AttackTarget.active[eid] = 0; // Auto-acquire handles combat
+    }
+  }
+
   private issueStopCommand(entityIds: number[]): void {
     for (const eid of entityIds) {
       MoveTarget.active[eid] = 0;
       AttackTarget.active[eid] = 0;
       this.waypointQueues.delete(eid);
+      this.patrolEntities.delete(eid);
     }
   }
 
