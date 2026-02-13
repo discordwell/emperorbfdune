@@ -7,7 +7,7 @@ import { EventBus } from '../core/EventBus';
 import type { AudioManager, UnitCategory } from '../audio/AudioManager';
 import type { CombatSystem } from '../simulation/CombatSystem';
 
-export type CommandMode = 'normal' | 'attack-move' | 'patrol';
+export type CommandMode = 'normal' | 'attack-move' | 'patrol' | 'teleport';
 
 export class CommandManager {
   private sceneManager: SceneManager;
@@ -63,6 +63,18 @@ export class CommandManager {
 
   getCommandMode(): CommandMode {
     return this.commandMode;
+  }
+
+  enterCommandMode(mode: CommandMode, label?: string): void {
+    this.commandMode = mode;
+    document.body.style.cursor = 'crosshair';
+    if (label) {
+      const modeEl = document.getElementById('command-mode');
+      if (modeEl) {
+        modeEl.style.display = 'block';
+        modeEl.textContent = label;
+      }
+    }
   }
 
   // Check and advance waypoints for entities that have stopped
@@ -123,7 +135,14 @@ export class CommandManager {
     }
 
     const cat = this.getSelectedCategory(selected);
-    if (this.commandMode === 'attack-move') {
+    if (this.commandMode === 'teleport') {
+      EventBus.emit('teleport:target', { x: worldPos.x, z: worldPos.z });
+      this.commandMode = 'normal';
+      document.body.style.cursor = 'default';
+      const modeEl = document.getElementById('command-mode');
+      if (modeEl) modeEl.style.display = 'none';
+      return;
+    } else if (this.commandMode === 'attack-move') {
       this.issueAttackMoveCommand(selected, worldPos.x, worldPos.z);
       this.audioManager?.playUnitSfx('move', cat);
       this.commandMode = 'normal';

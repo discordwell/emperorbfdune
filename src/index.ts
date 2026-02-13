@@ -694,6 +694,30 @@ async function main() {
     // Clean up aircraft ammo tracking
     aircraftAmmo.delete(entityId);
     rearmingAircraft.delete(entityId);
+    // Clean up special ability tracking
+    leechTargets.delete(entityId);
+    projectorHolograms.delete(entityId);
+    infiltratorRevealed.delete(entityId);
+    // Kobra: restore base range on death (for ECS entity recycling safety)
+    if (kobraDeployed.has(entityId)) {
+      kobraDeployed.delete(entityId);
+      kobraBaseRange.delete(entityId);
+    }
+    // NIAB: clear suppression on death
+    if (niabCooldowns.has(entityId)) {
+      niabCooldowns.delete(entityId);
+      combatSystem.setSuppressed(entityId, false);
+    }
+    // If this entity was being leeched, detach the leech(es)
+    const leechesToDetach: number[] = [];
+    for (const [leechEid, targetEid] of leechTargets) {
+      if (targetEid === entityId) leechesToDetach.push(leechEid);
+    }
+    for (const leechEid of leechesToDetach) {
+      leechTargets.delete(leechEid);
+      combatSystem.setSuppressed(leechEid, false);
+      Position.y[leechEid] = 0.1;
+    }
 
     // Visual effects — infantry get small, vehicles medium, buildings large
     const isUnit = hasComponent(world, UnitType, entityId);
@@ -942,6 +966,34 @@ async function main() {
     }
   });
 
+  // NIAB Tank teleport: handle target selection
+  EventBus.on('teleport:target', ({ x, z }: { x: number; z: number }) => {
+    const selected = selectionManager.getSelectedEntities();
+    const w = game.getWorld();
+    for (const eid of selected) {
+      if (Owner.playerId[eid] !== 0 || Health.current[eid] <= 0) continue;
+      const typeName = unitTypeNames[UnitType.id[eid]];
+      const def = typeName ? gameRules.units.get(typeName) : null;
+      if (!def?.niabTank) continue;
+      if (niabCooldowns.has(eid)) continue;
+
+      // Teleport!
+      effectsManager.spawnExplosion(Position.x[eid], 0, Position.z[eid], 'small');
+      Position.x[eid] = x;
+      Position.z[eid] = z;
+      Position.y[eid] = 0.1;
+      MoveTarget.active[eid] = 0;
+      effectsManager.spawnExplosion(x, 0, z, 'small');
+      audioManager.playSfx('explosion');
+      // Cooldown (suppress combat during sleep time)
+      const sleepTime = def.teleportSleepTime || 93;
+      niabCooldowns.set(eid, sleepTime);
+      combatSystem.setSuppressed(eid, true);
+      selectionPanel.addMessage('NIAB teleported!', '#88aaff');
+      break; // Only teleport first selected NIAB
+    }
+  });
+
   // Track credits spent on production
   EventBus.on('production:started', ({ unitType, owner }: { unitType: string; owner: number }) => {
     const def = gameRules.units.get(unitType) ?? gameRules.buildings.get(unitType);
@@ -1173,6 +1225,18 @@ async function main() {
   const MAX_AMMO = 6;
   const aircraftAmmo = new Map<number, number>(); // eid -> shots remaining
   const rearmingAircraft = new Set<number>(); // aircraft currently at a pad rearming
+
+  // Leech parasitization: leechEid -> targetVehicleEid
+  const leechTargets = new Map<number, number>();
+  // Projector holograms: hologramEid -> ticksRemaining
+  const projectorHolograms = new Map<number, number>();
+  // Kobra deployed units (immobilized, doubled range)
+  const kobraDeployed = new Set<number>();
+  const kobraBaseRange = new Map<number, number>(); // eid -> original combat range
+  // NIAB Tank teleport cooldowns: eid -> ticksRemaining
+  const niabCooldowns = new Map<number, number>();
+  // Infiltrator reveal persistence: eid -> tick when reveal expires
+  const infiltratorRevealed = new Map<number, number>();
 
   function findNearestLandingPad(world: World, owner: number, fromX: number, fromZ: number): { eid: number; x: number; z: number } | null {
     const blds = buildingQuery(world);
@@ -1637,17 +1701,27 @@ async function main() {
       }
 
       // Stealth visuals: stealthed units become transparent when idle
+      // Clean up expired infiltrator reveals
+      const currentTick = game.getTickCount();
+      for (const [revEid, expireTick] of infiltratorRevealed) {
+        if (currentTick >= expireTick || Health.current[revEid] <= 0) {
+          infiltratorRevealed.delete(revEid);
+        }
+      }
       for (const eid of units) {
         if (Health.current[eid] <= 0) continue;
         const typeId = UnitType.id[eid];
         const typeName = unitTypeNames[typeId];
         const def = typeName ? gameRules.units.get(typeName) : null;
         if (!def?.stealth) continue;
+        // Don't re-stealth if revealed by infiltrator
+        const isRevealed = infiltratorRevealed.has(eid);
         const isIdle = MoveTarget.active[eid] === 0;
-        combatSystem.setStealthed(eid, isIdle);
+        const shouldStealth = isIdle && !isRevealed;
+        combatSystem.setStealthed(eid, shouldStealth);
         const obj = unitRenderer.getEntityObject(eid);
         if (obj) {
-          const targetAlpha = isIdle ? (Owner.playerId[eid] === 0 ? 0.3 : 0.0) : 1.0;
+          const targetAlpha = shouldStealth ? (Owner.playerId[eid] === 0 ? 0.3 : 0.0) : 1.0;
           obj.traverse(child => {
             const mat = (child as any).material;
             if (mat) {
@@ -1776,6 +1850,191 @@ async function main() {
       }
     }
 
+    // Infiltrator: reveals stealthed enemies within blast radius, then suicide-attacks building
+    if (game.getTickCount() % 10 === 5) {
+      const infUnits = unitQuery(world);
+      const infBlds = buildingQuery(world);
+      for (const eid of infUnits) {
+        if (Health.current[eid] <= 0) continue;
+        const typeId = UnitType.id[eid];
+        const typeName = unitTypeNames[typeId];
+        const def = typeName ? gameRules.units.get(typeName) : null;
+        if (!def?.infiltrator) continue;
+        const infOwner = Owner.playerId[eid];
+
+        // Passive: reveal stealthed enemies within 10 tiles (persistent for 200 ticks)
+        for (const other of infUnits) {
+          if (Health.current[other] <= 0 || Owner.playerId[other] === infOwner) continue;
+          const dx = Position.x[eid] - Position.x[other];
+          const dz = Position.z[eid] - Position.z[other];
+          if (dx * dx + dz * dz < 100) { // ~10 unit radius
+            combatSystem.setStealthed(other, false);
+            infiltratorRevealed.set(other, game.getTickCount() + 200);
+          }
+        }
+
+        // Active: suicide on enemy building contact (like saboteur but full HP damage + destealths area)
+        if (MoveTarget.active[eid] !== 1) continue;
+        for (const bid of infBlds) {
+          if (Health.current[bid] <= 0) continue;
+          if (Owner.playerId[bid] === infOwner) continue;
+          const dx = Position.x[eid] - Position.x[bid];
+          const dz = Position.z[eid] - Position.z[bid];
+          if (dx * dx + dz * dz < 9.0) {
+            // Full HP damage to building
+            const dmg = Health.max[bid];
+            Health.current[bid] = Math.max(0, Health.current[bid] - dmg);
+            effectsManager.spawnExplosion(Position.x[bid], 0, Position.z[bid], 'large');
+            audioManager.playSfx('explosion');
+            scene.shake(0.5);
+            if (Health.current[bid] <= 0) {
+              EventBus.emit('unit:died', { entityId: bid, killerEntity: eid });
+            }
+            // Destealth all enemies in radius
+            for (const other of infUnits) {
+              if (Owner.playerId[other] === infOwner || Health.current[other] <= 0) continue;
+              const ox = Position.x[other] - Position.x[eid];
+              const oz = Position.z[other] - Position.z[eid];
+              if (ox * ox + oz * oz < 100) {
+                combatSystem.setStealthed(other, false);
+              }
+            }
+            Health.current[eid] = 0;
+            EventBus.emit('unit:died', { entityId: eid, killerEntity: -1 });
+            if (infOwner === 0) selectionPanel.addMessage('Infiltrator deployed!', '#88aaff');
+            else if (Owner.playerId[bid] === 0) selectionPanel.addMessage('Infiltrator attack on base!', '#ff4444');
+            break;
+          }
+        }
+      }
+    }
+
+    // Leech: parasitizes enemy vehicles, drains HP over time, spawns new Leech when vehicle dies
+    if (game.getTickCount() % 15 === 0) {
+      const leechUnits = unitQuery(world);
+      for (const eid of leechUnits) {
+        if (Health.current[eid] <= 0) continue;
+        const typeId = UnitType.id[eid];
+        const typeName = unitTypeNames[typeId];
+        const def = typeName ? gameRules.units.get(typeName) : null;
+        if (!def?.leech) continue;
+
+        const leechOwner = Owner.playerId[eid];
+
+        // Check if actively parasitizing (stored in leechTargets map)
+        const parasiteTarget = leechTargets.get(eid);
+        if (parasiteTarget !== undefined) {
+          // Drain target vehicle
+          if (Health.current[parasiteTarget] <= 0 || Position.x[parasiteTarget] < -900) {
+            // Target died or gone - spawn a new Leech at target's position
+            const tx = Position.x[parasiteTarget];
+            const tz = Position.z[parasiteTarget];
+            if (tx > -900) {
+              spawnUnit(game.getWorld(), typeName, leechOwner, tx + 2, tz + 2);
+              if (leechOwner === 0) selectionPanel.addMessage('Leech replicated!', '#88ff44');
+            }
+            leechTargets.delete(eid);
+            // Leech detaches and becomes active again
+            Position.y[eid] = 0.1;
+            continue;
+          }
+          // Drain 2% of target's max HP per tick
+          const drainDmg = Health.max[parasiteTarget] * 0.02;
+          Health.current[parasiteTarget] = Math.max(0, Health.current[parasiteTarget] - drainDmg);
+          // Follow target position
+          Position.x[eid] = Position.x[parasiteTarget];
+          Position.z[eid] = Position.z[parasiteTarget];
+          Position.y[eid] = 1.5; // Sit on top of vehicle
+          if (Health.current[parasiteTarget] <= 0) {
+            EventBus.emit('unit:died', { entityId: parasiteTarget, killerEntity: eid });
+            // Spawn new Leech
+            spawnUnit(game.getWorld(), typeName, leechOwner,
+              Position.x[parasiteTarget] + 2, Position.z[parasiteTarget] + 2);
+            leechTargets.delete(eid);
+            Position.y[eid] = 0.1;
+            if (leechOwner === 0) selectionPanel.addMessage('Leech replicated!', '#88ff44');
+            else if (Owner.playerId[parasiteTarget] === 0) selectionPanel.addMessage('Vehicle destroyed by Leech!', '#ff4444');
+          }
+          continue;
+        }
+
+        // Not parasitizing: look for nearby enemy vehicles to latch onto
+        if (MoveTarget.active[eid] !== 1) continue; // Only while moving toward target
+        for (const other of leechUnits) {
+          if (other === eid || Health.current[other] <= 0) continue;
+          if (Owner.playerId[other] === leechOwner) continue;
+          // Must be a vehicle (not infantry, not flying)
+          const otherTypeId = UnitType.id[other];
+          const otherTypeName = unitTypeNames[otherTypeId];
+          const otherDef = otherTypeName ? gameRules.units.get(otherTypeName) : null;
+          if (!otherDef || otherDef.infantry || otherDef.canFly) continue;
+          if (otherDef.cantBeLeeched || otherDef.leech) continue;
+          const dx = Position.x[eid] - Position.x[other];
+          const dz = Position.z[eid] - Position.z[other];
+          if (dx * dx + dz * dz < 6.0) {
+            // Latch on!
+            leechTargets.set(eid, other);
+            MoveTarget.active[eid] = 0;
+            combatSystem.setSuppressed(eid, true);
+            if (leechOwner === 0) selectionPanel.addMessage('Leech attached!', '#88ff44');
+            else if (Owner.playerId[other] === 0) selectionPanel.addMessage('Leech on your vehicle!', '#ff4444');
+            break;
+          }
+        }
+      }
+    }
+
+    // Projector: creates holographic copies that decay over time
+    if (game.getTickCount() % 25 === 12) {
+      // Decay existing holograms
+      for (const [hEid, ticksLeft] of projectorHolograms) {
+        if (Health.current[hEid] <= 0) { projectorHolograms.delete(hEid); continue; }
+        const remaining = ticksLeft - 25;
+        if (remaining <= 0) {
+          // Hologram expires
+          Health.current[hEid] = 0;
+          EventBus.emit('unit:died', { entityId: hEid, killerEntity: -1 });
+          projectorHolograms.delete(hEid);
+        } else {
+          projectorHolograms.set(hEid, remaining);
+          // Holograms flicker at low life
+          if (remaining < 500) {
+            const obj = unitRenderer.getEntityObject(hEid);
+            if (obj) {
+              const alpha = 0.3 + 0.4 * Math.sin(game.getTickCount() * 0.2);
+              obj.traverse(child => {
+                const mat = (child as any).material;
+                if (mat) { mat.transparent = true; mat.opacity = alpha; }
+              });
+            }
+          }
+        }
+      }
+    }
+
+    // Kobra deployed state: immobilized but doubled range
+    if (game.getTickCount() % 25 === 0) {
+      for (const eid of kobraDeployed) {
+        if (Health.current[eid] <= 0) { kobraDeployed.delete(eid); continue; }
+        // Prevent movement while deployed
+        MoveTarget.active[eid] = 0;
+      }
+    }
+
+    // NIAB Tank teleport cooldowns
+    if (game.getTickCount() % 25 === 0 && niabCooldowns.size > 0) {
+      for (const [eid, ticks] of niabCooldowns) {
+        if (Health.current[eid] <= 0) { niabCooldowns.delete(eid); continue; }
+        const remaining = ticks - 25;
+        if (remaining <= 0) {
+          niabCooldowns.delete(eid);
+          combatSystem.setSuppressed(eid, false);
+        } else {
+          niabCooldowns.set(eid, remaining);
+        }
+      }
+    }
+
     // Passive repair: idle units near friendly buildings heal slowly every 2 seconds
     if (game.getTickCount() % 50 === 0) {
       const allUnits = unitQuery(world);
@@ -1806,14 +2065,15 @@ async function main() {
       }
     }
 
-    // Repair vehicles: units with canBeRepaired tag that have "Repair" in name heal nearby friendlies
+    // Repair vehicles: units with repair flag heal nearby friendly units and buildings
     if (game.getTickCount() % 25 === 0) {
       const allUnits = unitQuery(world);
       for (const eid of allUnits) {
         if (Health.current[eid] <= 0) continue;
         const typeId = UnitType.id[eid];
         const typeName = unitTypeNames[typeId];
-        if (!typeName || !typeName.toLowerCase().includes('repair')) continue;
+        const repDef = typeName ? gameRules.units.get(typeName) : null;
+        if (!repDef?.repair) continue;
 
         const owner = Owner.playerId[eid];
         const rx = Position.x[eid];
@@ -2143,7 +2403,60 @@ async function main() {
         EventBus.emit('unit:died', { entityId: eid, killerEntity: -1 });
       }
     } else if (e.key === 'd' && !e.ctrlKey && !e.altKey) {
-      // MCV deployment: D key deploys selected MCV into Construction Yard
+      // D key: MCV deploy OR Kobra deploy/undeploy
+      const selected = selectionManager.getSelectedEntities();
+      const w = game.getWorld();
+      let handled = false;
+      for (const eid of selected) {
+        if (Owner.playerId[eid] !== 0) continue;
+        if (Health.current[eid] <= 0) continue;
+        const typeId = UnitType.id[eid];
+        const typeName = unitTypeNames[typeId];
+        const def = typeName ? gameRules.units.get(typeName) : null;
+
+        // MCV deployment
+        if (typeName === 'MCV') {
+          const conYardName = `${house.prefix}ConYard`;
+          const bDef = gameRules.buildings.get(conYardName);
+          if (!bDef) continue;
+          const dx = Position.x[eid], dz = Position.z[eid];
+          Health.current[eid] = 0;
+          EventBus.emit('unit:died', { entityId: eid, killerEntity: -1 });
+          spawnBuilding(w, conYardName, 0, dx, dz);
+          selectionPanel.addMessage('MCV deployed!', '#44ff44');
+          audioManager.playSfx('build');
+          handled = true;
+          break;
+        }
+
+        // Kobra deploy/undeploy toggle
+        if (def?.kobra) {
+          if (kobraDeployed.has(eid)) {
+            // Undeploy: restore original range
+            kobraDeployed.delete(eid);
+            if (hasComponent(w, Combat, eid)) {
+              const base = kobraBaseRange.get(eid) ?? Combat.range[eid];
+              Combat.range[eid] = base;
+            }
+            kobraBaseRange.delete(eid);
+            selectionPanel.addMessage('Kobra undeployed', '#aaa');
+            audioManager.playSfx('build');
+          } else {
+            // Deploy: immobilize, double range (store base)
+            if (hasComponent(w, Combat, eid)) {
+              kobraBaseRange.set(eid, Combat.range[eid]);
+              Combat.range[eid] = Combat.range[eid] * 2;
+            }
+            kobraDeployed.add(eid);
+            MoveTarget.active[eid] = 0;
+            selectionPanel.addMessage('Kobra deployed - range doubled!', '#44ff44');
+            audioManager.playSfx('build');
+          }
+          handled = true;
+        }
+      }
+    } else if (e.key === 't' && !e.ctrlKey && !e.altKey) {
+      // T key: NIAB Tank teleport OR Projector create hologram
       const selected = selectionManager.getSelectedEntities();
       const w = game.getWorld();
       for (const eid of selected) {
@@ -2151,21 +2464,71 @@ async function main() {
         if (Health.current[eid] <= 0) continue;
         const typeId = UnitType.id[eid];
         const typeName = unitTypeNames[typeId];
-        if (typeName !== 'MCV') continue;
-        // Determine which ConYard to deploy based on faction
-        const conYardName = `${house.prefix}ConYard`;
-        const bDef = gameRules.buildings.get(conYardName);
-        if (!bDef) continue;
-        // Deploy at current position
-        const dx = Position.x[eid], dz = Position.z[eid];
-        // Kill the MCV
-        Health.current[eid] = 0;
-        EventBus.emit('unit:died', { entityId: eid, killerEntity: -1 });
-        // Spawn ConYard at that location
-        spawnBuilding(w, conYardName, 0, dx, dz);
-        selectionPanel.addMessage('MCV deployed!', '#44ff44');
-        audioManager.playSfx('build');
-        break; // Only deploy first MCV
+        const def = typeName ? gameRules.units.get(typeName) : null;
+
+        // NIAB Tank teleport: enter targeting mode
+        if (def?.niabTank) {
+          if (niabCooldowns.has(eid)) {
+            selectionPanel.addMessage('Teleport on cooldown', '#ff8800');
+            break;
+          }
+          // Enter teleport targeting mode
+          commandManager.enterCommandMode('teleport', 'Click to teleport');
+          break;
+        }
+
+        // Projector: create holographic copy of nearest friendly unit
+        if (def?.projector) {
+          // Find nearest friendly non-projector unit to copy
+          const allUnits = unitQuery(w);
+          let bestOther = -1;
+          let bestDist = Infinity;
+          for (const other of allUnits) {
+            if (other === eid || Owner.playerId[other] !== 0) continue;
+            if (Health.current[other] <= 0) continue;
+            const otherTypeName = unitTypeNames[UnitType.id[other]];
+            const otherDef = otherTypeName ? gameRules.units.get(otherTypeName) : null;
+            if (otherDef?.projector) continue; // Can't copy another projector
+            const dx = Position.x[other] - Position.x[eid];
+            const dz = Position.z[other] - Position.z[eid];
+            const dist = dx * dx + dz * dz;
+            if (dist < 225 && dist < bestDist) { // Within 15 units
+              bestDist = dist;
+              bestOther = other;
+            }
+          }
+          if (bestOther >= 0) {
+            // Create holographic copy
+            const copyTypeName = unitTypeNames[UnitType.id[bestOther]];
+            if (copyTypeName) {
+              const hx = Position.x[eid] + (Math.random() - 0.5) * 4;
+              const hz = Position.z[eid] + (Math.random() - 0.5) * 4;
+              const holoEid = spawnUnit(w, copyTypeName, 0, hx, hz);
+              if (holoEid >= 0) {
+                // Hologram: 1 HP, no damage, lasts 6000 ticks (~4 minutes)
+                Health.max[holoEid] = 1;
+                Health.current[holoEid] = 1;
+                if (hasComponent(w, Combat, holoEid)) {
+                  Combat.damage[holoEid] = 0; // Holograms can't deal damage
+                }
+                projectorHolograms.set(holoEid, 6000);
+                // Make hologram slightly transparent
+                const obj = unitRenderer.getEntityObject(holoEid);
+                if (obj) {
+                  obj.traverse(child => {
+                    const mat = (child as any).material;
+                    if (mat) { mat.transparent = true; mat.opacity = 0.7; }
+                  });
+                }
+                selectionPanel.addMessage('Hologram created!', '#88aaff');
+                audioManager.playSfx('select');
+              }
+            }
+          } else {
+            selectionPanel.addMessage('No unit nearby to copy', '#888');
+          }
+          break;
+        }
       }
     } else if (e.key === 'l' && !e.ctrlKey && !e.altKey) {
       // Load infantry into selected APC

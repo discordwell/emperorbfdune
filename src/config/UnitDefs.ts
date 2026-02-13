@@ -52,6 +52,14 @@ export interface UnitDef {
   passengerCapacity: number;
   ornithopter: boolean; // needs rearming at landing pad
   saboteur: boolean; // auto-suicide on building contact
+  infiltrator: boolean; // reveals stealthed enemies + suicide-attacks buildings
+  leech: boolean; // parasitizes enemy vehicles, drains into new Leeches
+  cantBeLeeched: boolean; // immune to Leech
+  projector: boolean; // creates holographic copies of units
+  niabTank: boolean; // can teleport
+  teleportSleepTime: number; // ticks before teleported unit can act
+  kobra: boolean; // deploys to extend range
+  repair: boolean; // repair vehicle - heals nearby friendly vehicles
 
   // AI
   aiSpecial: boolean;
@@ -111,6 +119,14 @@ export function createDefaultUnitDef(name: string): UnitDef {
     passengerCapacity: 0,
     ornithopter: false,
     saboteur: false,
+    infiltrator: false,
+    leech: false,
+    cantBeLeeched: false,
+    projector: false,
+    niabTank: false,
+    teleportSleepTime: 93,
+    kobra: false,
+    repair: false,
     aiSpecial: false,
     aiThreat: 0,
     veterancy: [],
