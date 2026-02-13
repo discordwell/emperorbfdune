@@ -231,7 +231,9 @@ export class Sidebar {
     // Short display name (strip house prefix)
     const displayName = name.replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, '');
     const hotkeyBadge = hotkey ? `<span style="position:absolute;top:1px;right:3px;font-size:9px;color:${enabled ? '#8cf' : '#335'};font-weight:bold;">${hotkey.toUpperCase()}</span>` : '';
-    item.innerHTML = `${hotkeyBadge}<div style="font-size:11px;font-weight:bold">${displayName}</div><div style="color:#f0c040;font-size:10px">$${cost}</div>`;
+    const repeatBadge = !isBuilding && this.production.isOnRepeat(this.playerId, name)
+      ? '<span style="position:absolute;bottom:1px;right:3px;font-size:9px;color:#4f4;">&#x21bb;</span>' : '';
+    item.innerHTML = `${hotkeyBadge}${repeatBadge}<div style="font-size:11px;font-weight:bold">${displayName}</div><div style="color:#f0c040;font-size:10px">$${cost}</div>`;
 
     // Tooltip on hover
     item.onmouseenter = (e) => {
@@ -251,6 +253,13 @@ export class Sidebar {
 
     if (enabled) {
       item.onclick = (e: MouseEvent) => {
+        // Ctrl+click: toggle repeat mode (units only)
+        if ((e.ctrlKey || e.metaKey) && !isBuilding) {
+          this.production.toggleRepeat(this.playerId, name);
+          this.onBuild(name, isBuilding); // Queue at least one
+          this.render(); // Refresh to show repeat indicator
+          return;
+        }
         // Shift-click: queue 5 at once
         const count = e.shiftKey ? 5 : 1;
         for (let i = 0; i < count; i++) {
@@ -343,7 +352,7 @@ export class Sidebar {
       html += `<div style="color:${techMet ? '#4f4' : '#f66'};font-size:10px;">Tech Level: ${def.techLevel}${techMet ? '' : ` (have ${playerTech})`}</div>`;
     }
 
-    html += `<div style="color:#555;font-size:9px;margin-top:3px;">Shift+click: build 5</div>`;
+    html += `<div style="color:#555;font-size:9px;margin-top:3px;">Shift+click: build 5${!isBuilding ? ' | Ctrl+click: toggle repeat' : ''}</div>`;
 
     this.tooltip.innerHTML = html;
     this.tooltip.style.display = 'block';

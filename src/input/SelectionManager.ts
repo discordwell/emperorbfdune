@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { World } from '../core/ECS';
-import { Position, Selectable, Owner, UnitType, Health, selectableQuery, hasComponent } from '../core/ECS';
+import { Position, Selectable, Owner, UnitType, Health, Combat, MoveTarget, Harvester, selectableQuery, unitQuery, hasComponent } from '../core/ECS';
 import type { SceneManager } from '../rendering/SceneManager';
 import type { UnitRenderer } from '../rendering/UnitRenderer';
 import { EventBus } from '../core/EventBus';
@@ -9,6 +9,7 @@ export class SelectionManager {
   private sceneManager: SceneManager;
   private unitRenderer: UnitRenderer;
   private selectedEntities: number[] = [];
+  private lastIdleIndex = 0; // For Tab cycling
 
   // Drag selection box
   private isDragging = false;
@@ -193,6 +194,48 @@ export class SelectionManager {
 
   private onKeyDown = (e: KeyboardEvent): void => {
     const key = e.key;
+
+    // Ctrl+A: Select all combat units on screen
+    if (key === 'a' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      const world = (window as any).game?.getWorld();
+      if (!world) return;
+      const allUnits = unitQuery(world);
+      const combat: number[] = [];
+      for (const eid of allUnits) {
+        if (Owner.playerId[eid] !== 0) continue;
+        if (Health.current[eid] <= 0) continue;
+        if (hasComponent(world, Harvester, eid)) continue; // Skip harvesters
+        combat.push(eid);
+      }
+      if (combat.length > 0) this.selectEntities(world, combat);
+      return;
+    }
+
+    // Tab: Cycle to next idle military unit
+    if (key === 'Tab') {
+      e.preventDefault();
+      const world = (window as any).game?.getWorld();
+      if (!world) return;
+      const allUnits = unitQuery(world);
+      const idle: number[] = [];
+      for (const eid of allUnits) {
+        if (Owner.playerId[eid] !== 0) continue;
+        if (Health.current[eid] <= 0) continue;
+        if (hasComponent(world, Harvester, eid)) continue;
+        if (MoveTarget.active[eid] === 1) continue; // Moving
+        idle.push(eid);
+      }
+      if (idle.length > 0) {
+        this.lastIdleIndex = (this.lastIdleIndex + 1) % idle.length;
+        const eid = idle[this.lastIdleIndex];
+        this.selectEntities(world, [eid]);
+        // Pan camera to the unit
+        this.sceneManager.panTo(Position.x[eid], Position.z[eid]);
+      }
+      return;
+    }
+
     // Control groups: Ctrl+1-9 to assign, 1-9 to recall
     if (key >= '1' && key <= '9') {
       const groupNum = parseInt(key);

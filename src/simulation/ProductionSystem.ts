@@ -32,6 +32,8 @@ export class ProductionSystem {
   private upgradedBuildings = new Map<number, Set<string>>();
   // Upgrade queues (same structure as building queues but for upgrades)
   private upgradeQueues = new Map<number, QueueItem[]>();
+  // Repeat mode: auto-requeue completed unit types
+  private repeatUnits = new Map<number, Set<string>>(); // playerId -> Set of type names
 
   constructor(rules: GameRules, harvestSystem: HarvestSystem) {
     this.rules = rules;
@@ -48,6 +50,23 @@ export class ProductionSystem {
 
   setMaxUnits(max: number): void {
     this.maxUnits = max;
+  }
+
+  toggleRepeat(playerId: number, typeName: string): boolean {
+    if (!this.repeatUnits.has(playerId)) {
+      this.repeatUnits.set(playerId, new Set());
+    }
+    const set = this.repeatUnits.get(playerId)!;
+    if (set.has(typeName)) {
+      set.delete(typeName);
+      return false;
+    }
+    set.add(typeName);
+    return true;
+  }
+
+  isOnRepeat(playerId: number, typeName: string): boolean {
+    return this.repeatUnits.get(playerId)?.has(typeName) ?? false;
   }
 
   addPlayerBuilding(playerId: number, buildingType: string): void {
@@ -228,8 +247,13 @@ export class ProductionSystem {
       const mult = this.powerMultipliers.get(playerId) ?? 1.0;
       item.elapsed += mult;
       if (item.elapsed >= item.totalTime) {
+        const completedName = item.typeName;
         queue.shift();
-        EventBus.emit('production:complete', { unitType: item.typeName, owner: playerId, buildingId: 0 });
+        EventBus.emit('production:complete', { unitType: completedName, owner: playerId, buildingId: 0 });
+        // Auto-requeue if on repeat and can afford it
+        if (this.repeatUnits.get(playerId)?.has(completedName)) {
+          this.queueUnit(playerId, completedName);
+        }
       }
     }
 
