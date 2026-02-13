@@ -35,6 +35,13 @@ export class ProductionSystem {
     this.playerBuildings.get(playerId)!.add(buildingType);
   }
 
+  removePlayerBuilding(playerId: number, buildingType: string): void {
+    const owned = this.playerBuildings.get(playerId);
+    if (owned) {
+      owned.delete(buildingType);
+    }
+  }
+
   canBuild(playerId: number, typeName: string, isBuilding: boolean): boolean {
     const def = isBuilding
       ? this.rules.buildings.get(typeName)

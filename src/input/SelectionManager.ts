@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { World } from '../core/ECS';
-import { Position, Selectable, Owner, selectableQuery } from '../core/ECS';
+import { Position, Selectable, Owner, UnitType, Health, selectableQuery, hasComponent } from '../core/ECS';
 import type { SceneManager } from '../rendering/SceneManager';
 import type { UnitRenderer } from '../rendering/UnitRenderer';
 import { EventBus } from '../core/EventBus';
@@ -19,6 +19,13 @@ export class SelectionManager {
   // Player ID (local player)
   private localPlayerId = 0;
 
+  // Control groups (Ctrl+1-9 to assign, 1-9 to recall)
+  private controlGroups = new Map<number, number[]>(); // key 1-9 -> entity IDs
+
+  // Double-click tracking
+  private lastClickTime = 0;
+  private lastClickEid: number | null = null;
+
   constructor(sceneManager: SceneManager, unitRenderer: UnitRenderer) {
     this.sceneManager = sceneManager;
     this.unitRenderer = unitRenderer;
@@ -31,6 +38,7 @@ export class SelectionManager {
     window.addEventListener('mousedown', this.onMouseDown);
     window.addEventListener('mousemove', this.onMouseMove);
     window.addEventListener('mouseup', this.onMouseUp);
+    window.addEventListener('keydown', this.onKeyDown);
   }
 
   getSelectedEntities(): number[] {
@@ -108,16 +116,52 @@ export class SelectionManager {
 
   private clickSelect(e: MouseEvent): void {
     const eid = this.unitRenderer.getEntityAtScreen(e.clientX, e.clientY);
+    const now = performance.now();
+
     if (eid !== null) {
-      // Get the world from the global game reference
       const world = (window as any).game?.getWorld();
-      if (world) {
-        this.selectEntities(world, [eid]);
+      if (!world) return;
+
+      // Double-click: select all same-type units on screen
+      if (this.lastClickEid === eid && (now - this.lastClickTime) < 400) {
+        this.selectAllSameType(world, eid);
+        this.lastClickEid = null;
+        return;
       }
+
+      this.lastClickTime = now;
+      this.lastClickEid = eid;
+      this.selectEntities(world, [eid]);
     } else {
       const world = (window as any).game?.getWorld();
       if (world) this.clearSelection(world);
+      this.lastClickEid = null;
     }
+  }
+
+  private selectAllSameType(world: World, referenceEid: number): void {
+    if (!hasComponent(world, UnitType, referenceEid)) return;
+    const typeId = UnitType.id[referenceEid];
+    const entities = selectableQuery(world);
+    const matches: number[] = [];
+
+    for (const eid of entities) {
+      if (Owner.playerId[eid] !== this.localPlayerId) continue;
+      if (!hasComponent(world, UnitType, eid)) continue;
+      if (UnitType.id[eid] !== typeId) continue;
+      if (Health.current[eid] <= 0) continue;
+
+      // Check if on screen
+      const worldPos = new THREE.Vector3(Position.x[eid], Position.y[eid], Position.z[eid]);
+      const screenPos = worldPos.project(this.sceneManager.camera);
+      const sx = (screenPos.x + 1) / 2 * window.innerWidth;
+      const sy = (-screenPos.y + 1) / 2 * window.innerHeight;
+      if (sx >= 0 && sx <= window.innerWidth && sy >= 0 && sy <= window.innerHeight) {
+        matches.push(eid);
+      }
+    }
+
+    this.selectEntities(world, matches);
   }
 
   private boxSelect(_e: MouseEvent): void {
@@ -146,6 +190,37 @@ export class SelectionManager {
 
     this.selectEntities(world, selected);
   }
+
+  private onKeyDown = (e: KeyboardEvent): void => {
+    const key = e.key;
+    // Control groups: Ctrl+1-9 to assign, 1-9 to recall
+    if (key >= '1' && key <= '9') {
+      const groupNum = parseInt(key);
+      if (e.ctrlKey || e.metaKey) {
+        // Assign current selection to group
+        if (this.selectedEntities.length > 0) {
+          this.controlGroups.set(groupNum, [...this.selectedEntities]);
+        }
+        e.preventDefault();
+      } else {
+        // Recall group
+        const group = this.controlGroups.get(groupNum);
+        if (group && group.length > 0) {
+          const world = (window as any).game?.getWorld();
+          if (world) {
+            // Filter out dead entities
+            const alive = group.filter(eid => {
+              try { return hasComponent(world, Health, eid) && Health.current[eid] > 0; } catch { return false; }
+            });
+            this.controlGroups.set(groupNum, alive);
+            if (alive.length > 0) {
+              this.selectEntities(world, alive);
+            }
+          }
+        }
+      }
+    }
+  };
 
   private isOverUI(x: number, y: number): boolean {
     // Check if click is on sidebar (right 200px), minimap (bottom-left 200x200), or resource bar (top 32px)

@@ -50,6 +50,18 @@ export class AIPlayer implements GameSystem {
     this.spawnCallback = cb;
   }
 
+  setUnitPool(prefix: string): void {
+    this.unitPool = [];
+    for (const [name, def] of this.rules.units) {
+      if (name.startsWith(prefix) && def.cost > 0 && def.cost <= 1200 && !def.canFly) {
+        this.unitPool.push(name);
+      }
+    }
+    if (this.unitPool.length === 0) {
+      this.unitPool = [`${prefix}LightInf`, `${prefix}Trooper`];
+    }
+  }
+
   init(_world: World): void {}
 
   update(world: World, _dt: number): void {

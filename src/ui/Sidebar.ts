@@ -14,12 +14,15 @@ export class Sidebar {
   private currentTab: 'Buildings' | 'Units' | 'Infantry' = 'Buildings';
   private progressBar: HTMLDivElement | null = null;
 
-  constructor(rules: GameRules, production: ProductionSystem, artMap: Map<string, ArtEntry>, onBuild: BuildCallback) {
+  private factionPrefix: string;
+
+  constructor(rules: GameRules, production: ProductionSystem, artMap: Map<string, ArtEntry>, onBuild: BuildCallback, factionPrefix = 'AT') {
     this.container = document.getElementById('sidebar')!;
     this.rules = rules;
     this.production = production;
     this.artMap = artMap;
     this.onBuild = onBuild;
+    this.factionPrefix = factionPrefix;
     this.render();
   }
 
@@ -61,17 +64,13 @@ export class Sidebar {
   }
 
   private renderBuildingItems(grid: HTMLElement): void {
-    // Filter buildings for current player's house
-    const house = 'Atreides'; // TODO: dynamic
-    const prefix = 'AT';
+    const prefix = this.factionPrefix;
 
     for (const [name, def] of this.rules.buildings) {
-      // Only show buildings for this house + sub-houses, skip scenery/incidental
       const validPrefix = name.startsWith(prefix) || name.startsWith('GU') || name.startsWith('IX') || name.startsWith('FR') || name.startsWith('IM') || name.startsWith('TL');
       if (!validPrefix) continue;
-      if (name.startsWith('IN')) continue; // Skip incidental/scenery
+      if (name.startsWith('IN')) continue;
       if (def.cost <= 0) continue;
-      if (def.house && def.house !== 'Atreides' && def.house !== 'Ix' && def.house !== 'Tleilaxu' && def.house !== 'Fremen' && def.house !== 'Imperial' && def.house !== 'Guild') continue;
 
       const canBuild = this.production.canBuild(this.playerId, name, true);
       const item = this.createBuildItem(name, def.cost, canBuild, true);
@@ -80,7 +79,7 @@ export class Sidebar {
   }
 
   private renderUnitItems(grid: HTMLElement, infantryOnly: boolean): void {
-    const prefix = 'AT';
+    const prefix = this.factionPrefix;
 
     for (const [name, def] of this.rules.units) {
       if (!name.startsWith(prefix)) continue;

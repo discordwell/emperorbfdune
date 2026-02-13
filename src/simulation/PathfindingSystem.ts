@@ -12,9 +12,18 @@ interface PathNode {
 
 export class PathfindingSystem {
   private terrain: TerrainRenderer;
+  private blockedTiles = new Set<number>(); // key = tz * MAP_SIZE + tx
 
   constructor(terrain: TerrainRenderer) {
     this.terrain = terrain;
+  }
+
+  updateBlockedTiles(occupied: Set<string>): void {
+    this.blockedTiles.clear();
+    for (const key of occupied) {
+      const [tx, tz] = key.split(',').map(Number);
+      this.blockedTiles.add(tz * MAP_SIZE + tx);
+    }
   }
 
   findPath(
@@ -25,8 +34,8 @@ export class PathfindingSystem {
   ): { x: number; z: number }[] | null {
     // A* pathfinding on terrain grid
     const passable = isVehicle
-      ? (tx: number, tz: number) => this.terrain.isPassableVehicle(tx, tz)
-      : (tx: number, tz: number) => this.terrain.isPassable(tx, tz);
+      ? (tx: number, tz: number) => this.terrain.isPassableVehicle(tx, tz) && !this.blockedTiles.has(tz * MAP_SIZE + tx)
+      : (tx: number, tz: number) => this.terrain.isPassable(tx, tz) && !this.blockedTiles.has(tz * MAP_SIZE + tx);
 
     if (!passable(endTx, endTz)) {
       // Find nearest passable tile to target

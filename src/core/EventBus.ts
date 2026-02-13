@@ -20,6 +20,7 @@ interface EventMap {
   'game:tick': { tick: number };
   'game:started': {};
   'game:paused': {};
+  'placement:cancelled': { typeName: string };
 }
 
 type EventName = keyof EventMap;
