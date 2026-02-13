@@ -1,0 +1,135 @@
+import type { GameSystem } from '../core/Game';
+import type { World } from '../core/ECS';
+import {
+  Position, Velocity, Speed, MoveTarget, Rotation,
+  movableQuery,
+} from '../core/ECS';
+import { PathfindingSystem } from './PathfindingSystem';
+import { worldToTile, angleBetween, lerpAngle, distance2D } from '../utils/MathUtils';
+
+const ARRIVAL_THRESHOLD = 1.0;
+const SEPARATION_RADIUS = 2.0;
+const SEPARATION_FORCE = 0.5;
+
+export class MovementSystem implements GameSystem {
+  private pathfinder: PathfindingSystem;
+  // Path cache per entity
+  private paths = new Map<number, { x: number; z: number }[]>();
+  private pathIndex = new Map<number, number>();
+
+  constructor(pathfinder: PathfindingSystem) {
+    this.pathfinder = pathfinder;
+  }
+
+  init(_world: World): void {}
+
+  update(world: World, _dt: number): void {
+    const entities = movableQuery(world);
+
+    for (const eid of entities) {
+      if (MoveTarget.active[eid] !== 1) {
+        Velocity.x[eid] = 0;
+        Velocity.z[eid] = 0;
+        continue;
+      }
+
+      const px = Position.x[eid];
+      const pz = Position.z[eid];
+      const targetX = MoveTarget.x[eid];
+      const targetZ = MoveTarget.z[eid];
+
+      // Get or compute path
+      let path = this.paths.get(eid);
+      let idx = this.pathIndex.get(eid) ?? 0;
+
+      if (!path) {
+        const startTile = worldToTile(px, pz);
+        const endTile = worldToTile(targetX, targetZ);
+        path = this.pathfinder.findPath(startTile.tx, startTile.tz, endTile.tx, endTile.tz) ?? [{ x: targetX, z: targetZ }];
+        this.paths.set(eid, path);
+        idx = 0;
+        this.pathIndex.set(eid, 0);
+      }
+
+      // Current waypoint
+      if (idx >= path.length) {
+        // Arrived
+        MoveTarget.active[eid] = 0;
+        Velocity.x[eid] = 0;
+        Velocity.z[eid] = 0;
+        this.paths.delete(eid);
+        this.pathIndex.delete(eid);
+        continue;
+      }
+
+      const waypoint = path[idx];
+      const dist = distance2D(px, pz, waypoint.x, waypoint.z);
+
+      if (dist < ARRIVAL_THRESHOLD) {
+        // Move to next waypoint
+        idx++;
+        this.pathIndex.set(eid, idx);
+
+        if (idx >= path.length) {
+          MoveTarget.active[eid] = 0;
+          Velocity.x[eid] = 0;
+          Velocity.z[eid] = 0;
+          this.paths.delete(eid);
+          this.pathIndex.delete(eid);
+          continue;
+        }
+      }
+
+      const wp = path[Math.min(idx, path.length - 1)];
+
+      // Desired direction
+      const dx = wp.x - px;
+      const dz = wp.z - pz;
+      const len = Math.sqrt(dx * dx + dz * dz);
+
+      if (len < 0.01) continue;
+
+      const dirX = dx / len;
+      const dirZ = dz / len;
+
+      // Turn toward target
+      const desiredAngle = angleBetween(px, pz, wp.x, wp.z);
+      const currentAngle = Rotation.y[eid];
+      const turnRate = Speed.turnRate[eid];
+      Rotation.y[eid] = lerpAngle(currentAngle, desiredAngle, Math.min(1, turnRate * 2));
+
+      // Move at speed
+      const speed = Speed.max[eid];
+
+      // Separation from nearby units
+      let sepX = 0;
+      let sepZ = 0;
+      for (const other of entities) {
+        if (other === eid) continue;
+        const ox = Position.x[other];
+        const oz = Position.z[other];
+        const d = distance2D(px, pz, ox, oz);
+        if (d < SEPARATION_RADIUS && d > 0.01) {
+          sepX += (px - ox) / d;
+          sepZ += (pz - oz) / d;
+        }
+      }
+
+      const vx = dirX * speed + sepX * SEPARATION_FORCE;
+      const vz = dirZ * speed + sepZ * SEPARATION_FORCE;
+
+      Velocity.x[eid] = vx;
+      Velocity.z[eid] = vz;
+
+      // Apply velocity (scaled by tick interval)
+      Position.x[eid] = px + vx * 0.04; // 40ms = 0.04s per tick
+      Position.z[eid] = pz + vz * 0.04;
+    }
+  }
+
+  // Clear cached path when a new move command is issued
+  clearPath(eid: number): void {
+    this.paths.delete(eid);
+    this.pathIndex.delete(eid);
+  }
+}

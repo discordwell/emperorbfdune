@@ -1,0 +1,31 @@
+node_modules/
+dist/
+*.js.map
+
+# Raw game data and converted assets (too large for git)
+extracted/
+gamedata/
+isos/
+assets/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Editor
+.vscode/
+*.swp
+*.swo
+
+# Embedded git repos (cloned tools)
+tools/ebfd-re/
+tools/xanlib/
+
+# Claude local state
+.claude/.ralph-loop.local.md
+claudepad.md
+oldpad.md

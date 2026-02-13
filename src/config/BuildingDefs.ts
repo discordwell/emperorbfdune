@@ -1,0 +1,81 @@
+export interface BuildingDef {
+  name: string;
+  house: string;
+  group: string;
+  cost: number;
+  buildTime: number;
+  health: number;
+  armour: string;
+  score: number;
+  techLevel: number;
+  viewRange: number;
+  powerUsed: number;
+  powerGenerated: number;
+  primaryBuilding: string;
+  secondaryBuildings: string[];
+  terrain: string[];
+  turretAttach: string;
+  explosionType: string;
+  stormDamage: number;
+
+  // Footprint
+  occupy: string[][];
+  deployTiles: { x: number; y: number; angle: number }[];
+
+  // Flags
+  refinery: boolean;
+  canBeEngineered: boolean;
+  disableWithLowPower: boolean;
+  upgradable: boolean;
+  upgradeCost: number;
+  upgradeTechLevel: number;
+
+  // Special
+  getUnitWhenBuilt: string;
+  numInfantryWhenGone: number;
+  roofHeight: number;
+  unstealthRange: number;
+
+  // AI
+  aiResource: boolean;
+  aiDefence: boolean;
+  aiCritical: boolean;
+}
+
+export function createDefaultBuildingDef(name: string): BuildingDef {
+  return {
+    name,
+    house: '',
+    group: '',
+    cost: 0,
+    buildTime: 0,
+    health: 1000,
+    armour: 'Building',
+    score: 1,
+    techLevel: 0,
+    viewRange: 5,
+    powerUsed: 0,
+    powerGenerated: 0,
+    primaryBuilding: '',
+    secondaryBuildings: [],
+    terrain: ['Rock'],
+    turretAttach: '',
+    explosionType: 'BigExplosion',
+    stormDamage: 0,
+    occupy: [],
+    deployTiles: [],
+    refinery: false,
+    canBeEngineered: true,
+    disableWithLowPower: false,
+    upgradable: false,
+    upgradeCost: 0,
+    upgradeTechLevel: 0,
+    getUnitWhenBuilt: '',
+    numInfantryWhenGone: 0,
+    roofHeight: 80,
+    unstealthRange: 0,
+    aiResource: false,
+    aiDefence: false,
+    aiCritical: false,
+  };
+}

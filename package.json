@@ -1,0 +1,20 @@
+{
+  "name": "emperor-battle-for-dune",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node esbuild.config.js",
+    "build": "node esbuild.config.js --production",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "bitecs": "^0.3.40",
+    "three": "^0.170.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.170.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.7.0"
+  }
+}

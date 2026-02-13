@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Emperor: Battle for Dune</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+
+    #game-container {
+      position: relative;
+      width: 100%;
+      height: 100%;
+    }
+
+    #game-canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* UI Overlay Layer */
+    #ui-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+
+    /* Resource Bar - Top */
+    #resource-bar {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 32px;
+      background: linear-gradient(180deg, #1a1a2e 0%, #0d0d1a 100%);
+      border-bottom: 1px solid #333;
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      font-family: 'Segoe UI', Tahoma, sans-serif;
+      font-size: 13px;
+      color: #ccc;
+      pointer-events: auto;
+      z-index: 10;
+    }
+
+    .resource-item {
+      display: flex;
+      align-items: center;
+      margin-right: 24px;
+    }
+
+    .resource-label {
+      color: #888;
+      margin-right: 6px;
+    }
+
+    .resource-value {
+      color: #f0c040;
+      font-weight: bold;
+    }
+
+    #fps-counter {
+      margin-left: auto;
+      color: #0f0;
+      font-family: monospace;
+      font-size: 12px;
+    }
+
+    /* Sidebar - Right */
+    #sidebar {
+      position: absolute;
+      top: 32px;
+      right: 0;
+      width: 200px;
+      bottom: 0;
+      background: linear-gradient(90deg, #0d0d1a 0%, #1a1a2e 100%);
+      border-left: 1px solid #333;
+      pointer-events: auto;
+      z-index: 10;
+      overflow-y: auto;
+    }
+
+    /* Minimap - Bottom Left */
+    #minimap-container {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      width: 200px;
+      height: 200px;
+      background: #0a0a0a;
+      border-top: 1px solid #333;
+      border-right: 1px solid #333;
+      pointer-events: auto;
+      z-index: 10;
+    }
+
+    #minimap-canvas {
+      width: 100%;
+      height: 100%;
+    }
+
+    /* Selection info - Bottom center */
+    #selection-info {
+      position: absolute;
+      bottom: 0;
+      left: 200px;
+      right: 200px;
+      height: 120px;
+      background: linear-gradient(0deg, #1a1a2e 0%, transparent 100%);
+      pointer-events: auto;
+      z-index: 10;
+      display: none;
+    }
+
+    /* Tooltip */
+    #tooltip {
+      position: absolute;
+      background: rgba(10, 10, 20, 0.9);
+      border: 1px solid #555;
+      padding: 6px 10px;
+      font-family: 'Segoe UI', Tahoma, sans-serif;
+      font-size: 12px;
+      color: #ddd;
+      pointer-events: none;
+      z-index: 100;
+      display: none;
+      max-width: 250px;
+    }
+  </style>
+</head>
+<body>
+  <div id="game-container">
+    <canvas id="game-canvas"></canvas>
+    <div id="ui-overlay">
+      <div id="resource-bar">
+        <div class="resource-item">
+          <span class="resource-label">Solaris:</span>
+          <span class="resource-value" id="solaris-count">5000</span>
+        </div>
+        <div class="resource-item">
+          <span class="resource-label">Power:</span>
+          <span class="resource-value" id="power-status">0/0</span>
+        </div>
+        <div class="resource-item">
+          <span class="resource-label">Units:</span>
+          <span class="resource-value" id="unit-count">0/50</span>
+        </div>
+        <span id="fps-counter">0 FPS | 0 TPS</span>
+      </div>
+      <div id="sidebar"></div>
+      <div id="minimap-container">
+        <canvas id="minimap-canvas"></canvas>
+      </div>
+      <div id="selection-info"></div>
+      <div id="tooltip"></div>
+    </div>
+  </div>
+  <script type="module" src="/dist/game.js"></script>
+</body>
+</html>

@@ -1,0 +1,51 @@
+type EventCallback<T = unknown> = (data: T) => void;
+
+interface EventMap {
+  'unit:selected': { entityIds: number[] };
+  'unit:deselected': {};
+  'unit:move': { entityIds: number[]; x: number; z: number };
+  'unit:attack': { attackerIds: number[]; targetId: number };
+  'unit:spawned': { entityId: number; unitType: string; owner: number };
+  'unit:died': { entityId: number; killerEntity: number };
+  'building:placed': { entityId: number; buildingType: string; owner: number };
+  'building:destroyed': { entityId: number };
+  'building:started': { buildingType: string; owner: number };
+  'production:complete': { unitType: string; owner: number; buildingId: number };
+  'production:started': { unitType: string; owner: number };
+  'harvest:delivered': { amount: number; owner: number };
+  'harvest:started': { entityId: number };
+  'economy:update': { owner: number; solaris: number };
+  'power:update': { owner: number; generated: number; used: number };
+  'camera:moved': { x: number; z: number };
+  'game:tick': { tick: number };
+  'game:started': {};
+  'game:paused': {};
+}
+
+type EventName = keyof EventMap;
+
+class EventBusImpl {
+  private listeners = new Map<string, Set<EventCallback<any>>>();
+
+  on<K extends EventName>(event: K, callback: EventCallback<EventMap[K]>): void {
+    if (!this.listeners.has(event)) {
+      this.listeners.set(event, new Set());
+    }
+    this.listeners.get(event)!.add(callback);
+  }
+
+  off<K extends EventName>(event: K, callback: EventCallback<EventMap[K]>): void {
+    this.listeners.get(event)?.delete(callback);
+  }
+
+  emit<K extends EventName>(event: K, data: EventMap[K]): void {
+    this.listeners.get(event)?.forEach(cb => cb(data));
+  }
+
+  clear(): void {
+    this.listeners.clear();
+  }
+}
+
+export const EventBus = new EventBusImpl();
+export type { EventMap, EventName };
