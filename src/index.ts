@@ -51,6 +51,8 @@ interface SavedEntity {
   moveTarget?: { x: number; z: number; active: number };
   speed?: { max: number; turn: number };
   vet?: { xp: number; rank: number };
+  ammo?: number; // aircraft ammo
+  passengerTypeIds?: number[]; // transport passenger unit type IDs
 }
 
 interface SaveData {
@@ -387,18 +389,27 @@ async function main() {
 
   // --- SPAWN HELPERS ---
 
-  function findRefinery(world: World, owner: number): number | null {
+  function findRefinery(world: World, owner: number, nearX?: number, nearZ?: number): number | null {
     const buildings = buildingQuery(world);
+    let best: number | null = null;
+    let bestDist = Infinity;
     for (const eid of buildings) {
       if (Owner.playerId[eid] !== owner) continue;
       if (Health.current[eid] <= 0) continue;
       const typeId = BuildingType.id[eid];
       const name = buildingTypeNames[typeId] ?? '';
-      if (name.includes('Refinery') || name.includes('Ref')) {
-        return eid;
+      if (name.includes('Refinery') || name.includes('RefineryDock')) {
+        if (nearX !== undefined && nearZ !== undefined) {
+          const dx = Position.x[eid] - nearX;
+          const dz = Position.z[eid] - nearZ;
+          const dist = dx * dx + dz * dz;
+          if (dist < bestDist) { bestDist = dist; best = eid; }
+        } else {
+          return eid;
+        }
       }
     }
-    return null;
+    return best;
   }
 
   function spawnUnit(world: World, typeName: string, owner: number, x: number, z: number): number {
@@ -466,6 +477,11 @@ async function main() {
       Position.y[eid] = 5.0; // Flight altitude
     }
 
+    // Ornithopters/gunships need rearming - track ammo
+    if (def.ornithopter) {
+      aircraftAmmo.set(eid, MAX_AMMO);
+    }
+
     // Auto-add harvester component for harvester units
     if (typeName.includes('Harvester') || typeName.includes('Harv')) {
       addComponent(world, Harvester, eid);
@@ -473,7 +489,7 @@ async function main() {
       Harvester.spiceCarried[eid] = 0;
       Harvester.state[eid] = 0;
       // Link to nearest refinery owned by same player
-      Harvester.refineryEntity[eid] = findRefinery(world, owner) ?? 0;
+      Harvester.refineryEntity[eid] = findRefinery(world, owner, x, z) ?? 0;
     }
 
     return eid;
@@ -626,6 +642,7 @@ async function main() {
     }
   });
   selectionPanel.setCombatSystem(combatSystem);
+  selectionPanel.setPassengerCountFn(getTransportPassengerCount);
 
   // --- AI SPAWN CALLBACK ---
 
@@ -666,6 +683,17 @@ async function main() {
     combatSystem.unregisterUnit(entityId);
     movement.unregisterFlyer(entityId);
     effectsManager.clearBuildingDamage(entityId);
+
+    // Kill passengers if this was a transport
+    killPassengers(entityId);
+    // If this entity was a passenger, remove from its transport
+    for (const [tid, passengers] of transportPassengers) {
+      const idx = passengers.indexOf(entityId);
+      if (idx >= 0) { passengers.splice(idx, 1); break; }
+    }
+    // Clean up aircraft ammo tracking
+    aircraftAmmo.delete(entityId);
+    rearmingAircraft.delete(entityId);
 
     // Visual effects — infantry get small, vehicles medium, buildings large
     const isUnit = hasComponent(world, UnitType, entityId);
@@ -840,6 +868,26 @@ async function main() {
       color = 0x88ff44; speed = 15; style = 'mortar';
     }
     effectsManager.spawnProjectile(attackerX, 0, attackerZ, targetX, 0, targetZ, color, speed, undefined, style);
+
+    // Decrement ammo for ornithopters/gunships
+    if (attackerEntity !== undefined && aircraftAmmo.has(attackerEntity)) {
+      const ammo = aircraftAmmo.get(attackerEntity)! - 1;
+      aircraftAmmo.set(attackerEntity, Math.max(0, ammo));
+      if (ammo <= 0 && !rearmingAircraft.has(attackerEntity)) {
+        // Out of ammo — send to nearest landing pad
+        const owner = Owner.playerId[attackerEntity];
+        const pad = findNearestLandingPad(game.getWorld(), owner, attackerX, attackerZ);
+        if (pad) {
+          MoveTarget.x[attackerEntity] = pad.x;
+          MoveTarget.z[attackerEntity] = pad.z;
+          MoveTarget.active[attackerEntity] = 1;
+          AttackTarget.active[attackerEntity] = 0;
+          rearmingAircraft.add(attackerEntity);
+          combatSystem.setSuppressed(attackerEntity, true);
+          if (owner === 0) selectionPanel.addMessage('Aircraft returning to rearm', '#88aaff');
+        }
+      }
+    }
 
     // Deviator conversion: if attacker is a deviator, convert target temporarily
     if (attackerEntity !== undefined && targetEntity !== undefined) {
@@ -1032,6 +1080,96 @@ async function main() {
   // Crate/power-up state
   let nextCrateId = 0;
   const activeCrates = new Map<number, { x: number; z: number; type: string }>();
+
+  // --- APC TRANSPORT SYSTEM ---
+  // Maps transport entity -> array of passenger entity IDs
+  const transportPassengers = new Map<number, number[]>();
+
+  function loadIntoTransport(transportEid: number, infantryEid: number): boolean {
+    const typeName = unitTypeNames[UnitType.id[transportEid]];
+    const def = typeName ? gameRules.units.get(typeName) : null;
+    if (!def?.apc) return false;
+    const passengers = transportPassengers.get(transportEid) ?? [];
+    if (passengers.length >= def.passengerCapacity) return false;
+    // Only infantry can board
+    const infTypeName = unitTypeNames[UnitType.id[infantryEid]];
+    const infDef = infTypeName ? gameRules.units.get(infTypeName) : null;
+    if (!infDef?.infantry) return false;
+    // Must be same owner
+    if (Owner.playerId[infantryEid] !== Owner.playerId[transportEid]) return false;
+
+    passengers.push(infantryEid);
+    transportPassengers.set(transportEid, passengers);
+    // Hide the passenger: move off-map, stop movement
+    Position.x[infantryEid] = -999;
+    Position.z[infantryEid] = -999;
+    Position.y[infantryEid] = -999;
+    MoveTarget.active[infantryEid] = 0;
+    AttackTarget.active[infantryEid] = 0;
+    return true;
+  }
+
+  function unloadTransport(transportEid: number): number {
+    const passengers = transportPassengers.get(transportEid);
+    if (!passengers || passengers.length === 0) return 0;
+    const tx = Position.x[transportEid];
+    const tz = Position.z[transportEid];
+    let unloaded = 0;
+    for (let i = 0; i < passengers.length; i++) {
+      const pEid = passengers[i];
+      if (Health.current[pEid] <= 0) continue;
+      // Place in a circle around the transport
+      const angle = (i / passengers.length) * Math.PI * 2;
+      Position.x[pEid] = tx + Math.cos(angle) * 3;
+      Position.z[pEid] = tz + Math.sin(angle) * 3;
+      Position.y[pEid] = 0.1;
+      MoveTarget.active[pEid] = 0;
+      unloaded++;
+    }
+    transportPassengers.delete(transportEid);
+    return unloaded;
+  }
+
+  function killPassengers(transportEid: number): void {
+    const passengers = transportPassengers.get(transportEid);
+    if (!passengers) return;
+    const world = game.getWorld();
+    for (const pEid of passengers) {
+      if (Health.current[pEid] <= 0) continue;
+      Health.current[pEid] = 0;
+      EventBus.emit('unit:died', { entityId: pEid, killerEntity: -1 });
+    }
+    transportPassengers.delete(transportEid);
+  }
+
+  function getTransportPassengerCount(transportEid: number): number {
+    return transportPassengers.get(transportEid)?.length ?? 0;
+  }
+
+  // --- AIRCRAFT AMMO/REARMING SYSTEM ---
+  const MAX_AMMO = 6;
+  const aircraftAmmo = new Map<number, number>(); // eid -> shots remaining
+  const rearmingAircraft = new Set<number>(); // aircraft currently at a pad rearming
+
+  function findNearestLandingPad(world: World, owner: number, fromX: number, fromZ: number): { eid: number; x: number; z: number } | null {
+    const blds = buildingQuery(world);
+    let best: { eid: number; x: number; z: number } | null = null;
+    let bestDist = Infinity;
+    for (const bid of blds) {
+      if (Owner.playerId[bid] !== owner || Health.current[bid] <= 0) continue;
+      const bTypeId = BuildingType.id[bid];
+      const bName = buildingTypeNames[bTypeId] ?? '';
+      if (!bName.includes('Helipad') && !bName.includes('LandPad') && !bName.includes('Hanger')) continue;
+      const dx = Position.x[bid] - fromX;
+      const dz = Position.z[bid] - fromZ;
+      const dist = dx * dx + dz * dz;
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = { eid: bid, x: Position.x[bid], z: Position.z[bid] };
+      }
+    }
+    return best;
+  }
 
   // --- SUPERWEAPON SYSTEM ---
   // Palace type -> superweapon config
@@ -1650,6 +1788,34 @@ async function main() {
 
     // Spice bloom visuals are now handled via HarvestSystem events (bloom:warning/tremor/eruption)
 
+    // --- AIRCRAFT REARMING ---
+    if (game.getTickCount() % 10 === 5 && rearmingAircraft.size > 0) {
+      for (const eid of rearmingAircraft) {
+        if (Health.current[eid] <= 0) { rearmingAircraft.delete(eid); aircraftAmmo.delete(eid); continue; }
+        // Check if near any landing pad
+        const owner = Owner.playerId[eid];
+        const blds = buildingQuery(world);
+        let nearPad = false;
+        for (const bid of blds) {
+          if (Owner.playerId[bid] !== owner || Health.current[bid] <= 0) continue;
+          const bName = buildingTypeNames[BuildingType.id[bid]] ?? '';
+          if (!bName.includes('Helipad') && !bName.includes('LandPad') && !bName.includes('Hanger')) continue;
+          const dx = Position.x[eid] - Position.x[bid];
+          const dz = Position.z[eid] - Position.z[bid];
+          if (dx * dx + dz * dz < 25) { nearPad = true; break; } // Within 5 units
+        }
+        if (nearPad) {
+          const ammo = (aircraftAmmo.get(eid) ?? 0) + 1;
+          aircraftAmmo.set(eid, ammo);
+          if (ammo >= MAX_AMMO) {
+            rearmingAircraft.delete(eid);
+            combatSystem.setSuppressed(eid, false);
+            if (owner === 0) selectionPanel.addMessage('Aircraft rearmed', '#44ff44');
+          }
+        }
+      }
+    }
+
     // --- FACTION-SPECIFIC BONUSES (every 2 seconds) ---
     if (game.getTickCount() % 50 === 25) {
       const allUnits = unitQuery(world);
@@ -1939,6 +2105,49 @@ async function main() {
         audioManager.playSfx('build');
         break; // Only deploy first MCV
       }
+    } else if (e.key === 'l' && !e.ctrlKey && !e.altKey) {
+      // Load infantry into selected APC
+      const selected = selectionManager.getSelectedEntities();
+      const w = game.getWorld();
+      let apcEid = -1;
+      // Find the first selected APC
+      for (const eid of selected) {
+        if (Owner.playerId[eid] !== 0 || Health.current[eid] <= 0) continue;
+        const typeName = unitTypeNames[UnitType.id[eid]];
+        const def = typeName ? gameRules.units.get(typeName) : null;
+        if (def?.apc) { apcEid = eid; break; }
+      }
+      if (apcEid >= 0) {
+        const ax = Position.x[apcEid], az = Position.z[apcEid];
+        const allUnits = unitQuery(w);
+        let loaded = 0;
+        for (const eid of allUnits) {
+          if (eid === apcEid) continue;
+          if (Owner.playerId[eid] !== 0 || Health.current[eid] <= 0) continue;
+          if (Position.x[eid] < -900) continue; // Already loaded
+          const dx = Position.x[eid] - ax;
+          const dz = Position.z[eid] - az;
+          if (dx * dx + dz * dz > 36) continue; // Within 6 units
+          if (loadIntoTransport(apcEid, eid)) loaded++;
+        }
+        if (loaded > 0) {
+          selectionPanel.addMessage(`Loaded ${loaded} infantry`, '#44ff44');
+          audioManager.playSfx('select');
+        } else {
+          selectionPanel.addMessage('No infantry nearby to load', '#888');
+        }
+      }
+    } else if (e.key === 'u' && !e.ctrlKey && !e.altKey) {
+      // Unload infantry from selected APC
+      const selected = selectionManager.getSelectedEntities();
+      for (const eid of selected) {
+        if (Owner.playerId[eid] !== 0 || Health.current[eid] <= 0) continue;
+        const count = unloadTransport(eid);
+        if (count > 0) {
+          selectionPanel.addMessage(`Unloaded ${count} infantry`, '#44ff44');
+          audioManager.playSfx('select');
+        }
+      }
     } else if (e.key === 'F1') {
       e.preventDefault();
       game.setSpeed(0.5);
@@ -2008,6 +2217,17 @@ async function main() {
           spice: Harvester.spiceCarried[eid], maxCap: Harvester.maxCapacity[eid],
           state: Harvester.state[eid], refEid: 0,
         };
+      }
+      // Save aircraft ammo
+      if (aircraftAmmo.has(eid)) {
+        se.ammo = aircraftAmmo.get(eid);
+      }
+      // Save transport passengers (as type IDs for respawn on load)
+      const passengers = transportPassengers.get(eid);
+      if (passengers && passengers.length > 0) {
+        se.passengerTypeIds = passengers
+          .filter(p => Health.current[p] > 0)
+          .map(p => UnitType.id[p]);
       }
       entities.push(se);
     }
@@ -2369,6 +2589,26 @@ async function main() {
           if (se.harvester && hasComponent(world, Harvester, eid)) {
             Harvester.spiceCarried[eid] = se.harvester.spice;
             Harvester.state[eid] = se.harvester.state;
+          }
+          // Restore aircraft ammo
+          if (se.ammo !== undefined) {
+            aircraftAmmo.set(eid, se.ammo);
+          }
+          // Restore transport passengers (spawn hidden infantry)
+          if (se.passengerTypeIds && se.passengerTypeIds.length > 0) {
+            const passengers: number[] = [];
+            for (const pTypeId of se.passengerTypeIds) {
+              const pName = unitTypeNames[pTypeId];
+              if (!pName) continue;
+              const pEid = spawnUnit(world, pName, se.owner, -999, -999);
+              if (pEid >= 0) {
+                Position.y[pEid] = -999;
+                MoveTarget.active[pEid] = 0;
+                AttackTarget.active[pEid] = 0;
+                passengers.push(pEid);
+              }
+            }
+            if (passengers.length > 0) transportPassengers.set(eid, passengers);
           }
         }
       }

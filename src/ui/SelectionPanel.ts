@@ -32,6 +32,7 @@ export class SelectionPanel {
   private messageContainer: HTMLDivElement;
   private sellConfirmEid: number | null = null;
   private sellConfirmTimer: ReturnType<typeof setTimeout> | null = null;
+  private passengerCountFn: ((eid: number) => number) | null = null;
 
   constructor(
     rules: GameRules,
@@ -93,6 +94,10 @@ export class SelectionPanel {
 
   setCombatSystem(combat: CombatSystem): void {
     this.combatSystem = combat;
+  }
+
+  setPassengerCountFn(fn: (eid: number) => number): void {
+    this.passengerCountFn = fn;
   }
 
   addMessage(text: string, color = '#ccc'): void {
@@ -162,6 +167,10 @@ export class SelectionPanel {
       if (def.stealth) tags.push('<span style="color:#8f8">Stealth</span>');
       if (def.engineer) tags.push('<span style="color:#ff0">Engineer</span>');
       if (def.crushes) tags.push('<span style="color:#fa8">Crushes</span>');
+      if (def.apc && this.passengerCountFn) {
+        const pCount = this.passengerCountFn(eid);
+        tags.push(`<span style="color:#8ff">Transport [${pCount}/${def.passengerCapacity}]</span>`);
+      }
       if (tags.length > 0) roleHtml = `<div style="font-size:10px;margin-bottom:2px;">${tags.join(' ')}</div>`;
     }
 

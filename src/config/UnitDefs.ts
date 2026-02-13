@@ -48,6 +48,9 @@ export interface UnitDef {
   stealth: boolean;
   selfDestruct: boolean;
   deviator: boolean;
+  apc: boolean;
+  passengerCapacity: number;
+  ornithopter: boolean; // needs rearming at landing pad
 
   // AI
   aiSpecial: boolean;
@@ -103,6 +106,9 @@ export function createDefaultUnitDef(name: string): UnitDef {
     stealth: false,
     selfDestruct: false,
     deviator: false,
+    apc: false,
+    passengerCapacity: 0,
+    ornithopter: false,
     aiSpecial: false,
     aiThreat: 0,
     veterancy: [],

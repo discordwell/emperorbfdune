@@ -32,6 +32,8 @@ export class CombatSystem implements GameSystem {
   private guardPositions = new Map<number, { x: number; z: number }>();
   // Faction prefix per player (for faction-specific damage bonuses)
   private playerFactions = new Map<number, string>();
+  // Suppressed entities: skip combat entirely (rearming aircraft, etc.)
+  private suppressedEntities = new Set<number>();
 
   constructor(rules: GameRules) {
     this.rules = rules;
@@ -62,6 +64,11 @@ export class CombatSystem implements GameSystem {
   setStealthed(eid: number, stealthed: boolean): void {
     if (stealthed) this.stealthedEntities.add(eid);
     else this.stealthedEntities.delete(eid);
+  }
+
+  setSuppressed(eid: number, suppressed: boolean): void {
+    if (suppressed) this.suppressedEntities.add(eid);
+    else this.suppressedEntities.delete(eid);
   }
 
   getStance(eid: number): number {
@@ -114,8 +121,9 @@ export class CombatSystem implements GameSystem {
     const entities = combatQuery(world);
 
     for (const eid of entities) {
-      // Skip disabled buildings (low power)
+      // Skip disabled buildings (low power) or suppressed units (rearming)
       if (this.disabledBuildings.has(eid)) continue;
+      if (this.suppressedEntities.has(eid)) continue;
 
       // Decrement fire timer
       if (Combat.fireTimer[eid] > 0) {
