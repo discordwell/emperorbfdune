@@ -319,17 +319,26 @@ export class TerrainRenderer {
     }
   }
 
+  private mapSeed = Math.random() * 10000;
+
+  setMapSeed(seed: number): void { this.mapSeed = seed; }
+
   private generateProceduralTerrain(): void {
+    const seed = this.mapSeed;
     const noise = (x: number, z: number, scale: number): number => {
       const s = scale;
       return (
-        Math.sin(x * 0.03 * s + z * 0.05 * s) * 0.3 +
-        Math.sin(x * 0.07 * s - z * 0.04 * s + 1.5) * 0.25 +
-        Math.sin(x * 0.13 * s + z * 0.11 * s + 3.0) * 0.2 +
-        Math.sin(x * 0.23 * s - z * 0.19 * s + 5.0) * 0.15 +
-        Math.sin(x * 0.41 * s + z * 0.37 * s + 7.0) * 0.1
+        Math.sin((x + seed) * 0.03 * s + z * 0.05 * s) * 0.3 +
+        Math.sin(x * 0.07 * s - (z + seed) * 0.04 * s + 1.5) * 0.25 +
+        Math.sin((x + seed * 0.7) * 0.13 * s + z * 0.11 * s + 3.0) * 0.2 +
+        Math.sin(x * 0.23 * s - (z + seed * 0.3) * 0.19 * s + 5.0) * 0.15 +
+        Math.sin((x + seed * 0.5) * 0.41 * s + z * 0.37 * s + 7.0) * 0.1
       );
     };
+
+    // Map layout variations based on seed
+    const layout = Math.floor(seed) % 4;
+    // 0 = Open Desert (default), 1 = Canyon, 2 = Rocky Plateau, 3 = Coastal
 
     for (let tz = 0; tz < MAP_SIZE; tz++) {
       for (let tx = 0; tx < MAP_SIZE; tx++) {
@@ -339,14 +348,38 @@ export class TerrainRenderer {
         const spiceNoise = noise(tx + 1000, tz + 1000, 0.8);
 
         let terrain = TerrainType.Sand;
+        let rockThreshold = 0.35;
+        let cliffThreshold = 0.55;
+        let spiceThreshold = 0.2;
 
-        if (rockNoise > 0.35) {
+        if (layout === 1) {
+          // Canyon: more cliffs, narrow passages
+          rockThreshold = 0.25;
+          cliffThreshold = 0.40;
+          // Central canyon
+          const cx = Math.abs(tx - MAP_SIZE / 2) / (MAP_SIZE / 2);
+          const cz = Math.abs(tz - MAP_SIZE / 2) / (MAP_SIZE / 2);
+          const canyonVal = Math.min(cx, cz);
+          if (canyonVal < 0.15) { rockThreshold = 0.6; cliffThreshold = 0.8; } // Clear canyon path
+        } else if (layout === 2) {
+          // Rocky Plateau: large rock areas, less sand
+          rockThreshold = 0.15;
+          cliffThreshold = 0.50;
+          spiceThreshold = 0.25;
+        } else if (layout === 3) {
+          // Coastal: rock ridge down middle, sand on sides
+          const midDist = Math.abs(tx + tz - MAP_SIZE) / MAP_SIZE;
+          if (midDist < 0.15) { rockThreshold = 0.1; cliffThreshold = 0.25; }
+          else { rockThreshold = 0.45; cliffThreshold = 0.65; }
+        }
+
+        if (rockNoise > rockThreshold) {
           terrain = TerrainType.Rock;
-        } else if (rockNoise > 0.25) {
+        } else if (rockNoise > rockThreshold - 0.1) {
           terrain = TerrainType.InfantryRock;
         }
 
-        if (rockNoise > 0.55 || tx <= 1 || tx >= MAP_SIZE - 2 || tz <= 1 || tz >= MAP_SIZE - 2) {
+        if (rockNoise > cliffThreshold || tx <= 1 || tx >= MAP_SIZE - 2 || tz <= 1 || tz >= MAP_SIZE - 2) {
           terrain = TerrainType.Cliff;
         }
 
@@ -357,8 +390,8 @@ export class TerrainRenderer {
         this.terrainData[idx] = terrain;
 
         if (terrain === TerrainType.Sand || terrain === TerrainType.Dunes) {
-          if (spiceNoise > 0.2) {
-            const spiceAmount = Math.min(1.0, (spiceNoise - 0.2) * 2.5);
+          if (spiceNoise > spiceThreshold) {
+            const spiceAmount = Math.min(1.0, (spiceNoise - spiceThreshold) * 2.5);
             this.spiceAmount[idx] = spiceAmount;
             this.terrainData[idx] = spiceAmount > 0.6 ? TerrainType.SpiceHigh : TerrainType.SpiceLow;
           }

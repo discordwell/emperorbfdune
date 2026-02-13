@@ -1,4 +1,5 @@
 import type { AudioManager } from '../audio/AudioManager';
+import { CampaignMap } from './CampaignMap';
 
 export interface SubhouseChoice {
   id: string;
@@ -10,6 +11,15 @@ export interface SubhouseChoice {
 
 export type Difficulty = 'easy' | 'normal' | 'hard';
 
+export interface MapChoice {
+  id: string;
+  name: string;
+  seed: number;
+  description: string;
+}
+
+export type GameMode = 'skirmish' | 'campaign';
+
 export interface HouseChoice {
   id: string;
   name: string;
@@ -20,6 +30,9 @@ export interface HouseChoice {
   enemyName: string;
   subhouse?: SubhouseChoice;
   difficulty: Difficulty;
+  mapChoice?: MapChoice;
+  gameMode: GameMode;
+  campaignTerritoryId?: number;
 }
 
 const SUBHOUSES: SubhouseChoice[] = [
@@ -30,7 +43,7 @@ const SUBHOUSES: SubhouseChoice[] = [
   { id: 'tleilaxu', name: 'Tleilaxu', prefix: 'TL', color: '#55AA55', description: 'Flesh-shapers. Contaminators and leeches.' },
 ];
 
-const HOUSES: HouseChoice[] = [
+const HOUSES: Omit<HouseChoice, 'difficulty' | 'gameMode'>[] = [
   {
     id: 'atreides',
     name: 'House Atreides',
@@ -115,12 +128,12 @@ export class HouseSelect {
     const grid = document.createElement('div');
     grid.style.cssText = 'display:flex; gap:24px;';
 
-    for (const house of HOUSES) {
-      const card = this.createCard(house.name.split(' ')[1], house.name, house.description, house.color, 220);
+    for (const houseTemplate of HOUSES) {
+      const card = this.createCard(houseTemplate.name.split(' ')[1], houseTemplate.name, houseTemplate.description, houseTemplate.color, 220);
       card.onclick = () => {
         this.audioManager.playSfx('select');
         this.overlay.remove();
-        this.showSubhouseSelect(house, resolve);
+        this.showModeSelect({ ...houseTemplate, difficulty: 'normal', gameMode: 'skirmish' }, resolve);
       };
       grid.appendChild(card);
     }
@@ -145,6 +158,52 @@ export class HouseSelect {
     hint.textContent = 'WASD: Scroll | Mouse: Select/Command | M: Mute Music';
     this.overlay.appendChild(hint);
 
+    document.body.appendChild(this.overlay);
+  }
+
+  private showModeSelect(house: HouseChoice, resolve: (house: HouseChoice) => void): void {
+    this.overlay = document.createElement('div');
+    this.overlay.style.cssText = `
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: radial-gradient(ellipse at center, #1a0f00 0%, #000 80%);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      z-index: 2000;
+      font-family: 'Segoe UI', Tahoma, sans-serif;
+    `;
+
+    const headerText = document.createElement('div');
+    headerText.style.cssText = `color:${house.color}; font-size:24px; font-weight:bold; margin-bottom:24px;`;
+    headerText.textContent = house.name;
+    this.overlay.appendChild(headerText);
+
+    const chooseText = document.createElement('div');
+    chooseText.style.cssText = 'color:#aaa; font-size:16px; margin-bottom:24px;';
+    chooseText.textContent = 'Select Game Mode';
+    this.overlay.appendChild(chooseText);
+
+    const grid = document.createElement('div');
+    grid.style.cssText = 'display:flex; gap:24px;';
+
+    const campaignCard = this.createCard('Campaign', '', 'Conquer Arrakis territory by territory. 9 missions with increasing difficulty.', '#d4a840', 220);
+    campaignCard.onclick = () => {
+      this.audioManager.playSfx('select');
+      this.overlay.remove();
+      house.gameMode = 'campaign';
+      this.showSubhouseSelect(house, resolve);
+    };
+    grid.appendChild(campaignCard);
+
+    const skirmishCard = this.createCard('Skirmish', '', 'Single battle against AI. Choose your map, difficulty, and subhouse ally.', '#88aacc', 220);
+    skirmishCard.onclick = () => {
+      this.audioManager.playSfx('select');
+      this.overlay.remove();
+      house.gameMode = 'skirmish';
+      this.showSubhouseSelect(house, resolve);
+    };
+    grid.appendChild(skirmishCard);
+
+    this.overlay.appendChild(grid);
     document.body.appendChild(this.overlay);
   }
 
@@ -192,7 +251,11 @@ export class HouseSelect {
         this.audioManager.playSfx('select');
         house.difficulty = diff.id;
         this.overlay.remove();
-        resolve(house);
+        if (house.gameMode === 'campaign') {
+          this.showCampaignMap(house, resolve);
+        } else {
+          this.showMapSelect(house, resolve);
+        }
       };
       grid.appendChild(card);
     }
@@ -249,6 +312,77 @@ export class HouseSelect {
     };
     this.overlay.appendChild(skipBtn);
 
+    document.body.appendChild(this.overlay);
+  }
+
+  private async showCampaignMap(house: HouseChoice, resolve: (house: HouseChoice) => void): Promise<void> {
+    const campaign = new CampaignMap(this.audioManager, house.prefix, house.name, house.enemyPrefix, house.enemyName);
+    const result = await campaign.show();
+    if (result) {
+      house.campaignTerritoryId = result.territory.id;
+      house.mapChoice = { id: `campaign-${result.territory.id}`, name: result.territory.name, seed: result.mapSeed, description: result.territory.description };
+      // Campaign territory difficulty overrides player selection for harder territories
+      if (result.difficulty === 'hard' && house.difficulty !== 'hard') {
+        house.difficulty = 'hard';
+      } else if (result.difficulty === 'normal' && house.difficulty === 'easy') {
+        house.difficulty = 'normal';
+      }
+      resolve(house);
+    } else {
+      // User went back - show difficulty select again
+      this.showDifficultySelect(house, resolve);
+    }
+  }
+
+  private showMapSelect(house: HouseChoice, resolve: (house: HouseChoice) => void): void {
+    this.overlay = document.createElement('div');
+    this.overlay.style.cssText = `
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: radial-gradient(ellipse at center, #1a0f00 0%, #000 80%);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      z-index: 2000;
+      font-family: 'Segoe UI', Tahoma, sans-serif;
+    `;
+
+    const headerText = document.createElement('div');
+    headerText.style.cssText = `color:${house.color}; font-size:24px; font-weight:bold; margin-bottom:16px;`;
+    headerText.textContent = house.name;
+    this.overlay.appendChild(headerText);
+
+    const chooseText = document.createElement('div');
+    chooseText.style.cssText = 'color:#aaa; font-size:16px; margin-bottom:24px;';
+    chooseText.textContent = 'Select Battlefield';
+    this.overlay.appendChild(chooseText);
+
+    const maps: MapChoice[] = [
+      { id: 'desert', name: 'Open Desert', seed: 1000, description: 'Wide open terrain with scattered rock outcrops. Classic Arrakis warfare.' },
+      { id: 'canyon', name: 'Canyon Pass', seed: 1001, description: 'Narrow canyon passages between towering cliffs. Ideal for ambushes.' },
+      { id: 'plateau', name: 'Rocky Plateau', seed: 1002, description: 'Elevated rocky terrain with limited sand. Defensible positions.' },
+      { id: 'ridge', name: 'Spice Ridge', seed: 1003, description: 'A central rock ridge divides the map. Control the high ground.' },
+      { id: 'random', name: 'Random', seed: Math.floor(Math.random() * 10000), description: 'A randomly generated battlefield. Every battle is unique.' },
+    ];
+
+    const grid = document.createElement('div');
+    grid.style.cssText = 'display:flex; gap:16px; flex-wrap:wrap; justify-content:center; max-width:900px;';
+
+    const mapColors: Record<string, string> = {
+      desert: '#D4A840', canyon: '#8B6B3E', plateau: '#6B7B5B', ridge: '#A08050', random: '#888888',
+    };
+
+    for (const map of maps) {
+      const color = mapColors[map.id] ?? '#888';
+      const card = this.createCard(map.name, '', map.description, color, 160);
+      card.onclick = () => {
+        this.audioManager.playSfx('select');
+        house.mapChoice = map;
+        this.overlay.remove();
+        resolve(house);
+      };
+      grid.appendChild(card);
+    }
+
+    this.overlay.appendChild(grid);
     document.body.appendChild(this.overlay);
   }
 

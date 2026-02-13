@@ -141,7 +141,13 @@ export class ProductionSystem {
     // Check prerequisites (primary building must exist)
     const owned = this.playerBuildings.get(playerId);
     if (def.primaryBuilding) {
-      if (!owned || !owned.has(def.primaryBuilding) || (owned.get(def.primaryBuilding) ?? 0) <= 0) return false;
+      const hasReq = (name: string) => owned && owned.has(name) && (owned.get(name) ?? 0) > 0;
+      if (!hasReq(def.primaryBuilding)) {
+        // Check alternatives (e.g. walls accept ANY faction's ConYard)
+        const bDef = isBuilding ? this.rules.buildings.get(typeName) : null;
+        const alts = bDef?.primaryBuildingAlts ?? [];
+        if (alts.length === 0 || !alts.some(alt => hasReq(alt))) return false;
+      }
     }
 
     // Check secondary building prerequisites

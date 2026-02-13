@@ -106,10 +106,23 @@ export class HarvestSystem implements GameSystem {
       this.spiceBloom();
     }
 
-    // Update UI
+    // Update UI with flash animation
     const p0Credits = this.solaris.get(0) ?? 0;
     const el = document.getElementById('solaris-count');
-    if (el) el.textContent = String(Math.floor(p0Credits));
+    if (el) {
+      const prev = parseInt(el.textContent ?? '0', 10);
+      const current = Math.floor(p0Credits);
+      el.textContent = String(current);
+      if (current > prev) {
+        el.classList.remove('flash-red');
+        el.classList.add('flash-green');
+        setTimeout(() => el.classList.remove('flash-green'), 400);
+      } else if (current < prev) {
+        el.classList.remove('flash-green');
+        el.classList.add('flash-red');
+        setTimeout(() => el.classList.remove('flash-red'), 400);
+      }
+    }
   }
 
   private spiceBloom(): void {

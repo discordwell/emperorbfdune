@@ -22,7 +22,8 @@ import { AudioManager } from './audio/AudioManager';
 import { FogOfWar } from './rendering/FogOfWar';
 import { BuildingPlacement } from './input/BuildingPlacement';
 import { VictorySystem, GameStats } from './ui/VictoryScreen';
-import { HouseSelect, type HouseChoice, type SubhouseChoice, type Difficulty } from './ui/HouseSelect';
+import { HouseSelect, type HouseChoice, type SubhouseChoice, type Difficulty, type MapChoice, type GameMode } from './ui/HouseSelect';
+import { CampaignMap } from './ui/CampaignMap';
 import { SelectionPanel } from './ui/SelectionPanel';
 import { EffectsManager } from './rendering/EffectsManager';
 import { SandwormSystem } from './simulation/SandwormSystem';
@@ -137,6 +138,7 @@ async function main() {
       enemyPrefix: savedGame.enemyPrefix,
       enemyName: savedGame.enemyName,
       difficulty: 'normal' as Difficulty,
+      gameMode: 'skirmish' as GameMode,
     };
     // Hide loading screen elements from house select
     const loadScreen = document.getElementById('loading-screen');
@@ -183,6 +185,19 @@ async function main() {
   const harvestSystem = new HarvestSystem(terrain);
   const productionSystem = new ProductionSystem(gameRules, harvestSystem);
   const minimapRenderer = new MinimapRenderer(terrain, scene);
+  minimapRenderer.setRightClickCallback((worldX, worldZ) => {
+    const selected = selectionManager.getSelectedEntities();
+    if (selected.length === 0) return;
+    for (const eid of selected) {
+      if (Owner.playerId[eid] !== 0) continue;
+      if (Health.current[eid] <= 0) continue;
+      MoveTarget.x[eid] = worldX;
+      MoveTarget.z[eid] = worldZ;
+      MoveTarget.active[eid] = 1;
+    }
+    audioManager.playSfx('move');
+    EventBus.emit('unit:move', { entityIds: selected, x: worldX, z: worldZ });
+  });
   const fogOfWar = new FogOfWar(scene, 0);
   minimapRenderer.setFogOfWar(fogOfWar);
   unitRenderer.setFogOfWar(fogOfWar, 0);
@@ -204,6 +219,14 @@ async function main() {
   const gameStats = new GameStats();
   const victorySystem = new VictorySystem(audioManager, 0);
   victorySystem.setStats(gameStats);
+
+  // Campaign progress tracking
+  if (house.gameMode === 'campaign' && house.campaignTerritoryId !== undefined) {
+    const campaign = new CampaignMap(audioManager, house.prefix, house.name, house.enemyPrefix, house.enemyName);
+    victorySystem.setVictoryCallback(() => {
+      campaign.recordVictory(house.campaignTerritoryId!);
+    });
+  }
 
   const sandwormSystem = new SandwormSystem(terrain, effectsManager);
 
@@ -232,6 +255,9 @@ async function main() {
   updateLoading(30, 'Initializing game systems...');
   game.init();
   updateLoading(40, 'Generating terrain...');
+  if (house.mapChoice) {
+    terrain.setMapSeed(house.mapChoice.seed);
+  }
   await terrain.generate();
 
   // Preload all models
@@ -611,6 +637,13 @@ async function main() {
       selectionPanel.addMessage('Units under attack!', '#ff6644');
     }
     audioManager.playSfx('error');
+    // Pulse minimap border
+    const minimapEl = document.getElementById('minimap-container');
+    if (minimapEl) {
+      minimapEl.classList.remove('under-attack');
+      void minimapEl.offsetWidth; // Force reflow to restart animation
+      minimapEl.classList.add('under-attack');
+    }
   });
 
   // Rally point visuals
@@ -620,7 +653,10 @@ async function main() {
   });
 
   // Projectile visuals — color and speed vary by weapon type
-  EventBus.on('combat:fire', ({ attackerX, attackerZ, targetX, targetZ, weaponType }) => {
+  // Deviator conversion tracking: entityId -> { originalOwner, revertTick }
+  const deviatedUnits = new Map<number, { originalOwner: number; revertTick: number }>();
+
+  EventBus.on('combat:fire', ({ attackerX, attackerZ, targetX, targetZ, weaponType, attackerEntity, targetEntity }) => {
     let color = 0xffaa00; // Default orange
     let speed = 40;
     const wt = (weaponType ?? '').toLowerCase();
@@ -636,6 +672,29 @@ async function main() {
       color = 0x88ff44; speed = 15; // Green, arcing
     }
     effectsManager.spawnProjectile(attackerX, 0, attackerZ, targetX, 0, targetZ, color, speed);
+
+    // Deviator conversion: if attacker is a deviator, convert target temporarily
+    if (attackerEntity !== undefined && targetEntity !== undefined) {
+      const atTypeId = UnitType.id[attackerEntity];
+      const atName = unitTypeNames[atTypeId];
+      const atDef = atName ? gameRules.units.get(atName) : null;
+      if (atDef?.deviator && Health.current[targetEntity] > 0) {
+        const tgtDef = unitTypeNames[UnitType.id[targetEntity]] ? gameRules.units.get(unitTypeNames[UnitType.id[targetEntity]]) : null;
+        if (tgtDef?.canBeDeviated !== false) {
+          const attackerOwner = Owner.playerId[attackerEntity];
+          const originalOwner = Owner.playerId[targetEntity];
+          if (originalOwner !== attackerOwner) {
+            // Store original owner for revert
+            if (!deviatedUnits.has(targetEntity)) {
+              deviatedUnits.set(targetEntity, { originalOwner, revertTick: game.getTickCount() + 400 });
+            }
+            Owner.playerId[targetEntity] = attackerOwner;
+            if (attackerOwner === 0) selectionPanel.addMessage('Unit deviated!', '#cc44ff');
+            else if (originalOwner === 0) selectionPanel.addMessage('Unit mind-controlled!', '#ff4444');
+          }
+        }
+      }
+    }
   });
 
   EventBus.on('unit:move', ({ entityIds }) => {
@@ -652,6 +711,13 @@ async function main() {
     // Track stats
     if (isBuilding) gameStats.recordBuildingBuilt(owner);
     else gameStats.recordUnitBuilt(owner);
+
+    // Notify player when their production completes
+    if (owner === 0) {
+      const displayName = unitType.replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, '');
+      selectionPanel.addMessage(`${displayName} ready`, '#44ff44');
+      audioManager.playSfx('select');
+    }
 
     if (isBuilding) {
       // Start building placement mode for player buildings
@@ -700,6 +766,20 @@ async function main() {
 
     productionSystem.update();
     productionSystem.updateStarportPrices();
+
+    // Revert deviated units when timer expires
+    if (game.getTickCount() % 25 === 0 && deviatedUnits.size > 0) {
+      const tick = game.getTickCount();
+      for (const [eid, info] of deviatedUnits) {
+        if (tick >= info.revertTick || Health.current[eid] <= 0) {
+          if (Health.current[eid] > 0) {
+            Owner.playerId[eid] = info.originalOwner;
+          }
+          deviatedUnits.delete(eid);
+        }
+      }
+    }
+
     unitRenderer.update(world);
     unitRenderer.tickConstruction();
     unitRenderer.tickDeconstruction();
@@ -825,6 +905,28 @@ async function main() {
         effectsManager.updateBuildingDamage(
           eid, Position.x[eid], Position.y[eid], Position.z[eid], ratio
         );
+      }
+
+      // Stealth visuals: stealthed units become transparent when idle
+      for (const eid of units) {
+        if (Health.current[eid] <= 0) continue;
+        const typeId = UnitType.id[eid];
+        const typeName = unitTypeNames[typeId];
+        const def = typeName ? gameRules.units.get(typeName) : null;
+        if (!def?.stealth) continue;
+        const isIdle = MoveTarget.active[eid] === 0;
+        combatSystem.setStealthed(eid, isIdle);
+        const obj = unitRenderer.getEntityObject(eid);
+        if (obj) {
+          const targetAlpha = isIdle ? (Owner.playerId[eid] === 0 ? 0.3 : 0.0) : 1.0;
+          obj.traverse(child => {
+            const mat = (child as any).material;
+            if (mat) {
+              mat.transparent = true;
+              mat.opacity = targetAlpha;
+            }
+          });
+        }
       }
     }
 
@@ -1121,6 +1223,46 @@ async function main() {
       e.preventDefault();
       scene.cameraTarget.set(lastEventX, 0, lastEventZ);
       scene.updateCameraPosition();
+    } else if (e.key === 'x' && !e.ctrlKey && !e.altKey) {
+      // Self-destruct for Devastator units
+      const selected = selectionManager.getSelectedEntities();
+      const w = game.getWorld();
+      for (const eid of selected) {
+        if (Owner.playerId[eid] !== 0) continue;
+        if (Health.current[eid] <= 0) continue;
+        const typeId = UnitType.id[eid];
+        const typeName = unitTypeNames[typeId];
+        const def = typeName ? gameRules.units.get(typeName) : null;
+        if (!def?.selfDestruct) continue;
+        // Massive explosion
+        const ex = Position.x[eid], ez = Position.z[eid];
+        effectsManager.spawnExplosion(ex, 0, ez, 'large');
+        effectsManager.spawnExplosion(ex + 2, 0, ez + 2, 'large');
+        effectsManager.spawnExplosion(ex - 2, 0, ez - 2, 'large');
+        audioManager.playSfx('explosion');
+        selectionPanel.addMessage('SELF-DESTRUCT!', '#ff4444');
+        // Damage all nearby units (friend and foe) in 12 unit radius
+        const allUnits = unitQuery(w);
+        const allBuildings = buildingQuery(w);
+        const targets = [...allUnits, ...allBuildings];
+        for (const tid of targets) {
+          if (tid === eid) continue;
+          if (Health.current[tid] <= 0) continue;
+          const dx = Position.x[tid] - ex;
+          const dz = Position.z[tid] - ez;
+          const dist2 = dx * dx + dz * dz;
+          if (dist2 < 144) { // 12 unit radius
+            const dmg = Math.floor(1000 * (1 - Math.sqrt(dist2) / 12));
+            Health.current[tid] = Math.max(0, Health.current[tid] - dmg);
+            if (Health.current[tid] <= 0) {
+              EventBus.emit('unit:died', { entityId: tid, killerEntity: eid });
+            }
+          }
+        }
+        // Kill the Devastator
+        Health.current[eid] = 0;
+        EventBus.emit('unit:died', { entityId: eid, killerEntity: -1 });
+      }
     } else if (e.key === 'F1') {
       e.preventDefault();
       game.setSpeed(0.5);

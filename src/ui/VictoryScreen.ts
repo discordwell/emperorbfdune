@@ -34,6 +34,7 @@ export class VictorySystem {
   private graceperiodTicks = 250; // 10 seconds before checking (let game load)
   private stats: GameStats | null = null;
   private startTime = Date.now();
+  private onVictoryCallback: (() => void) | null = null;
 
   constructor(audioManager: AudioManager, localPlayerId: number, onRestart?: () => void) {
     this.audioManager = audioManager;
@@ -42,6 +43,7 @@ export class VictorySystem {
   }
 
   setStats(stats: GameStats): void { this.stats = stats; }
+  setVictoryCallback(cb: () => void): void { this.onVictoryCallback = cb; }
 
   getOutcome(): GameOutcome {
     return this.outcome;
@@ -79,6 +81,7 @@ export class VictorySystem {
     this.outcome = 'victory';
     this.audioManager.playSfx('victory');
     this.audioManager.playVictoryMusic();
+    if (this.onVictoryCallback) this.onVictoryCallback();
     this.showScreen('VICTORY', 'You have conquered the enemy!', '#00ff44');
   }
 

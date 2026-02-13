@@ -26,6 +26,8 @@ export class CombatSystem implements GameSystem {
   private disabledBuildings = new Set<number>();
   // Unit stances: 0=aggressive (chase), 1=defensive (fight in range, don't chase), 2=hold (fire only)
   private stances = new Map<number, number>();
+  // Stealthed entities (idle stealth units, can't be auto-targeted)
+  private stealthedEntities = new Set<number>();
 
   constructor(rules: GameRules) {
     this.rules = rules;
@@ -47,6 +49,11 @@ export class CombatSystem implements GameSystem {
 
   setStance(eid: number, stance: number): void {
     this.stances.set(eid, stance);
+  }
+
+  setStealthed(eid: number, stealthed: boolean): void {
+    if (stealthed) this.stealthedEntities.add(eid);
+    else this.stealthedEntities.delete(eid);
   }
 
   getStance(eid: number): number {
@@ -262,6 +269,8 @@ export class CombatSystem implements GameSystem {
       targetX: Position.x[targetEid],
       targetZ: Position.z[targetEid],
       weaponType: bulletName,
+      attackerEntity: attackerEid,
+      targetEntity: targetEid,
     });
 
     // Apply damage
@@ -312,6 +321,13 @@ export class CombatSystem implements GameSystem {
       if (Owner.playerId[other] === myOwner) continue;
       if (!hasComponent(world, Health, other)) continue;
       if (Health.current[other] <= 0) continue;
+      // Skip stealthed enemies (unless very close - within 4 units)
+      if (this.stealthedEntities.has(other)) {
+        const closeRange = 4;
+        const cdx = px - Position.x[other];
+        const cdz = pz - Position.z[other];
+        if (cdx * cdx + cdz * cdz > closeRange * closeRange) continue;
+      }
 
       // Player units can only auto-target enemies in visible fog tiles
       if (myOwner === this.localPlayerId && this.fogOfWar && this.fogOfWar.isEnabled()) {

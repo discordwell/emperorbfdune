@@ -44,6 +44,11 @@ export interface UnitDef {
   wormAttraction: number;
   canMoveAnyDirection: boolean;
 
+  // Abilities
+  stealth: boolean;
+  selfDestruct: boolean;
+  deviator: boolean;
+
   // AI
   aiSpecial: boolean;
   aiThreat: number;
@@ -95,6 +100,9 @@ export function createDefaultUnitDef(name: string): UnitDef {
     tastyToWorms: false,
     wormAttraction: 0,
     canMoveAnyDirection: false,
+    stealth: false,
+    selfDestruct: false,
+    deviator: false,
     aiSpecial: false,
     aiThreat: 0,
     veterancy: [],

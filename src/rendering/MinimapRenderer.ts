@@ -29,6 +29,7 @@ export class MinimapRenderer {
   private sceneManager: SceneManager;
   private fogOfWar: FogOfWar | null = null;
   private terrainImageData: ImageData | null = null;
+  private onRightClick: ((worldX: number, worldZ: number) => void) | null = null;
 
   constructor(terrain: TerrainRenderer, sceneManager: SceneManager) {
     this.canvas = document.getElementById('minimap-canvas') as HTMLCanvasElement;
@@ -41,8 +42,13 @@ export class MinimapRenderer {
     // Click to navigate
     this.canvas.addEventListener('mousedown', this.onClick);
     this.canvas.addEventListener('mousemove', this.onDrag);
+    this.canvas.addEventListener('contextmenu', this.onContextMenu);
 
     this.renderTerrain();
+  }
+
+  setRightClickCallback(cb: (worldX: number, worldZ: number) => void): void {
+    this.onRightClick = cb;
   }
 
   setFogOfWar(fog: FogOfWar): void {
@@ -160,4 +166,14 @@ export class MinimapRenderer {
     this.sceneManager.cameraTarget.z = my * scale;
     this.sceneManager.updateCameraPosition();
   }
+
+  private onContextMenu = (e: MouseEvent): void => {
+    e.preventDefault();
+    if (!this.onRightClick) return;
+    const rect = this.canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const scale = (MAP_SIZE * 2) / 200;
+    this.onRightClick(mx * scale, my * scale);
+  };
 }

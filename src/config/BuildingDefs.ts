@@ -12,6 +12,7 @@ export interface BuildingDef {
   powerUsed: number;
   powerGenerated: number;
   primaryBuilding: string;
+  primaryBuildingAlts: string[]; // OR alternatives (e.g. walls require ANY faction's ConYard)
   secondaryBuildings: string[];
   terrain: string[];
   turretAttach: string;
@@ -57,6 +58,7 @@ export function createDefaultBuildingDef(name: string): BuildingDef {
     powerUsed: 0,
     powerGenerated: 0,
     primaryBuilding: '',
+    primaryBuildingAlts: [],
     secondaryBuildings: [],
     terrain: ['Rock'],
     turretAttach: '',

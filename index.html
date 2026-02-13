@@ -63,6 +63,26 @@
     .resource-value {
       color: #f0c040;
       font-weight: bold;
+      transition: color 0.3s, text-shadow 0.3s;
+    }
+
+    .resource-value.flash-green {
+      color: #44ff44 !important;
+      text-shadow: 0 0 8px #44ff4488;
+    }
+
+    .resource-value.flash-red {
+      color: #ff4444 !important;
+      text-shadow: 0 0 8px #ff444488;
+    }
+
+    @keyframes minimap-pulse {
+      0%, 100% { border-color: #333; }
+      50% { border-color: #ff4444; }
+    }
+
+    #minimap-container.under-attack {
+      animation: minimap-pulse 0.8s ease-in-out 3;
     }
 
     #fps-counter {
@@ -205,7 +225,10 @@
           <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">M</td><td>Toggle music</td></tr>
           <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">F1/F2/F3</td><td>Speed: Slow/Normal/Fast</td></tr>
           <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">F9</td><td>Pause/Resume</td></tr>
-          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">Escape</td><td>Cancel placement</td></tr>
+          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">X</td><td>Self-destruct (Devastator)</td></tr>
+          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">F5</td><td>Quick Save</td></tr>
+          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">F8</td><td>Quick Load</td></tr>
+          <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">Escape</td><td>Pause / Cancel placement</td></tr>
           <tr><td style="padding:3px 12px 3px 0;color:#8cf;font-weight:bold;">?</td><td>Toggle this help</td></tr>
         </table>
         <p style="color:#888;font-size:11px;margin-top:12px;">Press ? to close</p>

@@ -116,7 +116,10 @@ export function parseRules(text: string): GameRules {
   for (const name of unitTypeNames) {
     const section = sectionMap.get(name);
     if (!section) continue;
-    units.set(name, parseUnitDef(name, section));
+    const def = parseUnitDef(name, section);
+    // Auto-detect deviator by name
+    if (name.toLowerCase().includes('deviator')) def.deviator = true;
+    units.set(name, def);
   }
 
   // Parse buildings
@@ -200,6 +203,8 @@ function parseUnitDef(name: string, section: Section): UnitDef {
       case 'TastyToWorms': def.tastyToWorms = parseBool(value); break;
       case 'WormAttraction': def.wormAttraction = parseNum(value); break;
       case 'CanMoveAnyDirection': def.canMoveAnyDirection = parseBool(value); break;
+      case 'StealthedWhenStill': def.stealth = parseBool(value); break;
+      case 'Devastator': def.selfDestruct = parseBool(value); break;
       case 'AiSpecial': def.aiSpecial = parseBool(value); break;
       case 'AIThreat': def.aiThreat = parseNum(value); break;
       case 'StormDamage': def.stormDamage = parseNum(value); break;
@@ -249,7 +254,12 @@ function parseBuildingDef(name: string, section: Section): BuildingDef {
       case 'ViewRange': def.viewRange = parseNum(value); break;
       case 'PowerUsed': def.powerUsed = parseNum(value); break;
       case 'PowerGenerated': def.powerGenerated = parseNum(value); break;
-      case 'PrimaryBuilding': def.primaryBuilding = value.split(',')[0].trim(); break;
+      case 'PrimaryBuilding': {
+        const parts = value.split(',').map(s => s.trim()).filter(Boolean);
+        def.primaryBuilding = parts[0] ?? '';
+        def.primaryBuildingAlts = parts.slice(1);
+        break;
+      }
       case 'SecondaryBuilding': def.secondaryBuildings = parseList(value); break;
       case 'Terrain': def.terrain = parseList(value); break;
       case 'TurretAttach': def.turretAttach = value; break;
