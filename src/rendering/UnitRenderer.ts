@@ -8,6 +8,8 @@ import {
   renderQuery, renderEnter, renderExit,
   type World,
 } from '../core/ECS';
+import type { FogOfWar } from './FogOfWar';
+import { worldToTile } from '../utils/MathUtils';
 
 // House colors for team tinting
 const HOUSE_COLORS: THREE.Color[] = [
@@ -39,11 +41,18 @@ export class UnitRenderer {
   private pendingModels = new Map<number, { xafName: string; scale: number }>();
   // Current ECS world reference (set during update)
   private currentWorld: World | null = null;
+  private fogOfWar: FogOfWar | null = null;
+  private localPlayerId = 0;
 
   constructor(sceneManager: SceneManager, modelManager: ModelManager, artMap: Map<string, ArtEntry>) {
     this.sceneManager = sceneManager;
     this.modelManager = modelManager;
     this.artMap = artMap;
+  }
+
+  setFogOfWar(fog: FogOfWar, localPlayerId = 0): void {
+    this.fogOfWar = fog;
+    this.localPlayerId = localPlayerId;
   }
 
   async preloadModels(unitTypeNames: string[]): Promise<void> {
@@ -113,10 +122,18 @@ export class UnitRenderer {
       );
       obj.rotation.y = Rotation.y[eid];
 
+      // Fog of war: hide enemy entities in non-visible tiles
+      if (this.fogOfWar && this.fogOfWar.isEnabled() && Owner.playerId[eid] !== this.localPlayerId) {
+        const tile = worldToTile(Position.x[eid], Position.z[eid]);
+        obj.visible = this.fogOfWar.isTileVisible(tile.tx, tile.tz);
+      } else {
+        obj.visible = true;
+      }
+
       // Update selection circle visibility
       const circle = this.selectionCircles.get(eid);
       if (circle) {
-        circle.visible = Selectable.selected[eid] === 1;
+        circle.visible = Selectable.selected[eid] === 1 && obj.visible;
       }
 
       // Update health bar

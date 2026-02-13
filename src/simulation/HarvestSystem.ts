@@ -5,6 +5,7 @@ import {
   harvestQuery,
 } from '../core/ECS';
 import type { TerrainRenderer } from '../rendering/TerrainRenderer';
+import { TerrainType } from '../rendering/TerrainRenderer';
 import { worldToTile, tileToWorld, distance2D } from '../utils/MathUtils';
 import { GameConstants } from '../utils/Constants';
 import { EventBus } from '../core/EventBus';
@@ -21,6 +22,8 @@ export class HarvestSystem implements GameSystem {
   // Player resources
   private solaris = new Map<number, number>(); // playerId -> credits
   private harvestTimers = new Map<number, number>(); // eid -> ticks spent harvesting
+  private tickCounter = 0;
+  private bloomInterval = 500; // ~20 seconds between bloom checks
 
   constructor(terrain: TerrainRenderer) {
     this.terrain = terrain;
@@ -72,10 +75,51 @@ export class HarvestSystem implements GameSystem {
       }
     }
 
+    // Spice bloom: periodically regenerate spice on sand tiles
+    this.tickCounter++;
+    if (this.tickCounter % this.bloomInterval === 0) {
+      this.spiceBloom();
+    }
+
     // Update UI
     const p0Credits = this.solaris.get(0) ?? 0;
     const el = document.getElementById('solaris-count');
     if (el) el.textContent = String(Math.floor(p0Credits));
+  }
+
+  private spiceBloom(): void {
+    // Count current spice tiles
+    let spiceTileCount = 0;
+    for (let tz = 0; tz < 128; tz++) {
+      for (let tx = 0; tx < 128; tx++) {
+        if (this.terrain.getSpice(tx, tz) > 0) spiceTileCount++;
+      }
+    }
+
+    // If less than 20 spice tiles, spawn a bloom
+    if (spiceTileCount < 20) {
+      // Find a random sand tile and create a spice patch
+      for (let attempt = 0; attempt < 50; attempt++) {
+        const tx = 10 + Math.floor(Math.random() * 108);
+        const tz = 10 + Math.floor(Math.random() * 108);
+        const type = this.terrain.getTerrainType(tx, tz);
+        if (type === TerrainType.Sand) {
+          // Create a small spice patch (3x3 to 5x5)
+          const radius = 1 + Math.floor(Math.random() * 2);
+          for (let dz = -radius; dz <= radius; dz++) {
+            for (let dx = -radius; dx <= radius; dx++) {
+              const stx = tx + dx;
+              const stz = tz + dz;
+              if (stx < 0 || stx >= 128 || stz < 0 || stz >= 128) continue;
+              if (this.terrain.getTerrainType(stx, stz) !== TerrainType.Sand) continue;
+              const amount = 0.3 + Math.random() * 0.7;
+              this.terrain.setSpice(stx, stz, amount);
+            }
+          }
+          break;
+        }
+      }
+    }
   }
 
   private handleIdle(eid: number): void {

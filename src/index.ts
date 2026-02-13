@@ -110,6 +110,7 @@ async function main() {
   const minimapRenderer = new MinimapRenderer(terrain, scene);
   const fogOfWar = new FogOfWar(scene, 0);
   minimapRenderer.setFogOfWar(fogOfWar);
+  unitRenderer.setFogOfWar(fogOfWar, 0);
   const effectsManager = new EffectsManager(scene);
   const victorySystem = new VictorySystem(audioManager, 0);
 
