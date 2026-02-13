@@ -46,8 +46,16 @@ const buildingTypeIdMap = new Map<string, number>();
 const buildingTypeNames: string[] = [];
 const armourIdMap = new Map<string, number>();
 
+function updateLoading(pct: number, text: string) {
+  const bar = document.getElementById('loading-bar');
+  const label = document.getElementById('loading-text');
+  if (bar) bar.style.width = `${pct}%`;
+  if (label) label.textContent = text;
+}
+
 async function main() {
   console.log('Emperor: Battle for Dune - Initializing...');
+  updateLoading(5, 'Loading game data...');
 
   // Load rules and art ini in parallel
   const [rulesResponse, artResponse] = await Promise.all([
@@ -56,6 +64,7 @@ async function main() {
   ]);
   const [rulesText, artText] = await Promise.all([rulesResponse.text(), artResponse.text()]);
 
+  updateLoading(15, 'Parsing game rules...');
   gameRules = parseRules(rulesText);
   artMap = parseArtIni(artText);
   loadConstants(gameRules.general);
@@ -148,14 +157,19 @@ async function main() {
   game.addRenderSystem(scene);
 
   // Initialize
+  updateLoading(30, 'Initializing game systems...');
   game.init();
+  updateLoading(40, 'Generating terrain...');
   await terrain.generate();
 
   // Preload all models
+  updateLoading(50, 'Loading unit models...');
   const allUnitNames = [...gameRules.units.keys()];
   await unitRenderer.preloadModels(allUnitNames);
+  updateLoading(75, 'Loading building models...');
   const allBuildingNames = [...gameRules.buildings.keys()];
   await unitRenderer.preloadBuildingModels(allBuildingNames);
+  updateLoading(90, 'Spawning bases...');
 
   // --- SPAWN HELPERS ---
 
@@ -412,9 +426,34 @@ async function main() {
 
     combatSystem.unregisterUnit(entityId);
 
-    // Visual effects
-    effectsManager.spawnExplosion(x, y, z, isBuilding ? 'large' : 'medium');
+    // Visual effects — infantry get small, vehicles medium, buildings large
+    const isUnit = hasComponent(world, UnitType, entityId);
+    let explosionSize: 'small' | 'medium' | 'large' = 'medium';
+    if (isBuilding) explosionSize = 'large';
+    else if (isUnit) {
+      const typeId = UnitType.id[entityId];
+      const typeName = unitTypeNames[typeId];
+      const def = typeName ? gameRules.units.get(typeName) : null;
+      explosionSize = def?.infantry ? 'small' : 'medium';
+    }
+    effectsManager.spawnExplosion(x, y, z, explosionSize);
     effectsManager.spawnWreckage(x, y, z, isBuilding);
+
+    // Death animation: tilt the 3D model before removal
+    const obj = unitRenderer.getEntityObject(entityId);
+    if (obj && !isBuilding) {
+      const tiltDir = Math.random() * Math.PI * 2;
+      let frame = 0;
+      const animateDeath = () => {
+        if (!obj.parent || frame >= 8) return; // Stop if removed from scene
+        frame++;
+        obj.rotation.x = Math.sin(tiltDir) * frame * 0.1;
+        obj.rotation.z = Math.cos(tiltDir) * frame * 0.1;
+        obj.position.y -= 0.05;
+        if (frame < 8) setTimeout(animateDeath, 50);
+      };
+      animateDeath();
+    }
 
     // Clean up building from production prerequisites
     if (isBuilding) {
@@ -446,6 +485,12 @@ async function main() {
     if (ownerId === 0) {
       selectionPanel.addMessage('Unit lost to sandworm!', '#ff4444');
     }
+  });
+
+  // Rally point visuals
+  EventBus.on('rally:set', ({ playerId, x, z }) => {
+    effectsManager.setRallyPoint(playerId, x, z);
+    selectionPanel.addMessage('Rally point set', '#44ff44');
   });
 
   // Projectile visuals
@@ -550,11 +595,20 @@ async function main() {
         }
       }
 
+      let idleHarvesters = 0;
       const units = unitQuery(world);
       for (const eid of units) {
         if (Owner.playerId[eid] !== 0) continue;
         if (Health.current[eid] <= 0) continue;
         unitCount++;
+        // Check for idle harvesters (state=0 idle, not moving)
+        if (hasComponent(world, Harvester, eid) && Harvester.state[eid] === 0 && MoveTarget.active[eid] === 0) {
+          idleHarvesters++;
+        }
+      }
+
+      if (idleHarvesters > 0 && game.getTickCount() % 125 === 0) {
+        selectionPanel.addMessage(`${idleHarvesters} harvester${idleHarvesters > 1 ? 's' : ''} idle`, '#ff8800');
       }
 
       if (powerEl) {
@@ -725,6 +779,17 @@ async function main() {
 
   // Start!
   game.start();
+  // Hide loading screen
+  updateLoading(100, 'Ready!');
+  setTimeout(() => {
+    const loadScreen = document.getElementById('loading-screen');
+    if (loadScreen) {
+      loadScreen.style.transition = 'opacity 0.5s';
+      loadScreen.style.opacity = '0';
+      setTimeout(() => loadScreen.remove(), 500);
+    }
+  }, 300);
+
   console.log('Game started - WASD to scroll, left-click to select, right-click to command');
   console.log('A: Attack-move | S: Stop | G: Guard | M: Mute music | Shift+click: Waypoints');
 

@@ -107,6 +107,7 @@ export class CommandManager {
     const hasBuildingSel = this.world && selected.some(eid => hasComponent(this.world, BuildingType, eid));
     if (hasBuildingSel && this.commandMode === 'normal' && !shiftHeld) {
       this.rallyPoints.set(0, { x: worldPos.x, z: worldPos.z });
+      EventBus.emit('rally:set', { playerId: 0, x: worldPos.x, z: worldPos.z });
       this.audioManager?.playSfx('move');
       return;
     }

@@ -232,11 +232,41 @@ export class SelectionPanel {
   }
 
   private renderMulti(): void {
+    if (!this.world) return;
     const count = this.selectedEntities.length;
+
+    // Build portrait grid (max 20 shown)
+    let gridHtml = '';
+    const shown = this.selectedEntities.slice(0, 20);
+    for (const eid of shown) {
+      const isUnit = hasComponent(this.world, UnitType, eid);
+      let name = 'Unit';
+      if (isUnit) {
+        const typeId = UnitType.id[eid];
+        name = this.unitTypeNames[typeId]?.replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, '') ?? 'Unit';
+      }
+      const hp = Health.current[eid];
+      const maxHp = Health.max[eid];
+      const ratio = maxHp > 0 ? hp / maxHp : 1;
+      const barColor = ratio > 0.6 ? '#0f0' : ratio > 0.3 ? '#ff0' : '#f00';
+      const initial = name.charAt(0).toUpperCase();
+
+      gridHtml += `
+        <div style="width:32px;text-align:center;font-size:9px;color:#aaa;" title="${name}">
+          <div style="width:28px;height:28px;margin:0 auto 2px;background:#1a1a3e;border:1px solid #444;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:bold;color:#fff;">${initial}</div>
+          <div style="width:28px;height:3px;margin:0 auto;background:#333;">
+            <div style="height:100%;width:${Math.round(ratio * 100)}%;background:${barColor};"></div>
+          </div>
+        </div>
+      `;
+    }
+
+    const moreText = count > 20 ? `<span style="color:#888;font-size:10px;">+${count - 20} more</span>` : '';
+
     this.container.innerHTML = `
       <div style="flex:1;">
-        <div style="font-size:14px;font-weight:bold;color:#fff;">${count} units selected</div>
-        <div style="font-size:11px;color:#888;">Right-click to move, A for attack-move</div>
+        <div style="font-size:13px;font-weight:bold;color:#fff;margin-bottom:4px;">${count} units selected</div>
+        <div style="display:flex;flex-wrap:wrap;gap:2px;">${gridHtml}${moreText}</div>
       </div>
     `;
   }

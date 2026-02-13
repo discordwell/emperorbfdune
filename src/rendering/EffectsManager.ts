@@ -39,6 +39,8 @@ export class EffectsManager {
   private projectiles: Projectile[] = [];
   private wreckages: THREE.Mesh[] = [];
   private wormVisuals = new Map<number, WormVisual>();
+  // Rally point markers per player
+  private rallyMarkers = new Map<number, THREE.Group>();
 
   // Shared geometry for particles
   private particleGeo: THREE.SphereGeometry;
@@ -362,6 +364,55 @@ export class EffectsManager {
       if (allDead && !explosion.flash) {
         this.explosions.splice(i, 1);
       }
+    }
+
+    // Animate rally flags (gentle bob)
+    for (const [, marker] of this.rallyMarkers) {
+      marker.children[0].position.y = 1.5 + Math.sin(Date.now() * 0.003) * 0.15;
+    }
+  }
+
+  setRallyPoint(playerId: number, x: number, z: number): void {
+    // Remove and dispose old marker
+    this.clearRallyPoint(playerId);
+
+    const group = new THREE.Group();
+    group.position.set(x, 0, z);
+
+    // Flag pole
+    const poleGeo = new THREE.CylinderGeometry(0.05, 0.05, 2, 4);
+    const poleMat = new THREE.MeshBasicMaterial({ color: 0x888888 });
+    const pole = new THREE.Mesh(poleGeo, poleMat);
+    pole.position.y = 1;
+    group.add(pole);
+
+    // Flag (small triangle)
+    const flagShape = new THREE.Shape();
+    flagShape.moveTo(0, 0);
+    flagShape.lineTo(0.8, 0.25);
+    flagShape.lineTo(0, 0.5);
+    const flagGeo = new THREE.ShapeGeometry(flagShape);
+    const flagMat = new THREE.MeshBasicMaterial({ color: 0x00ff44, side: THREE.DoubleSide });
+    const flag = new THREE.Mesh(flagGeo, flagMat);
+    flag.position.set(0.05, 1.5, 0);
+    flag.rotation.y = Math.PI / 4;
+    group.add(flag);
+
+    this.sceneManager.scene.add(group);
+    this.rallyMarkers.set(playerId, group);
+  }
+
+  clearRallyPoint(playerId: number): void {
+    const existing = this.rallyMarkers.get(playerId);
+    if (existing) {
+      existing.traverse(child => {
+        if (child instanceof THREE.Mesh) {
+          child.geometry.dispose();
+          (child.material as THREE.Material).dispose();
+        }
+      });
+      this.sceneManager.scene.remove(existing);
+      this.rallyMarkers.delete(playerId);
     }
   }
 }

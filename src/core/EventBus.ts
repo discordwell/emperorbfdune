@@ -25,6 +25,7 @@ interface EventMap {
   'combat:fire': { attackerX: number; attackerZ: number; targetX: number; targetZ: number };
   'worm:emerge': { x: number; z: number };
   'worm:submerge': { x: number; z: number };
+  'rally:set': { playerId: number; x: number; z: number };
   'worm:eat': { entityId: number; x: number; z: number; ownerId: number };
 }
 

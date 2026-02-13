@@ -1,15 +1,15 @@
 import type { GameSystem } from '../core/Game';
 import type { World } from '../core/ECS';
 import {
-  Position, Owner, Health, MoveTarget, UnitType,
+  Position, Owner, Health, MoveTarget, UnitType, AttackTarget,
   addComponent, addEntity, unitQuery, buildingQuery,
-  BuildingType, hasComponent,
+  BuildingType, Harvester, hasComponent,
 } from '../core/ECS';
 import type { GameRules } from '../config/RulesParser';
 import type { CombatSystem } from '../simulation/CombatSystem';
 import type { ProductionSystem } from '../simulation/ProductionSystem';
 import type { HarvestSystem } from '../simulation/HarvestSystem';
-import { randomFloat } from '../utils/MathUtils';
+import { randomFloat, distance2D } from '../utils/MathUtils';
 
 // AI: builds structures, trains units, sends attack waves
 export class AIPlayer implements GameSystem {
@@ -36,7 +36,14 @@ export class AIPlayer implements GameSystem {
   // Build order tracking
   private buildPhase = 0;
   private lastBuildTick = 0;
-  private buildCooldown = 200; // 8 seconds between build decisions
+  private buildCooldown = 200;
+
+  // Army management
+  private attackGroupSize = 4;
+  private retreatHealthPct = 0.3;
+  private lastAttackTick = 0;
+  private attackCooldown = 500; // 20 seconds between major attacks
+  private difficulty = 1.0; // Scales with game time
 
   constructor(rules: GameRules, combatSystem: CombatSystem, playerId: number, baseX: number, baseZ: number, targetX: number, targetZ: number) {
     this.rules = rules;
@@ -47,7 +54,6 @@ export class AIPlayer implements GameSystem {
     this.targetX = targetX;
     this.targetZ = targetZ;
 
-    // Build unit pool from available Harkonnen units
     for (const [name, def] of rules.units) {
       if (name.startsWith('HK') && def.cost > 0 && def.cost <= 1200 && !def.canFly) {
         this.unitPool.push(name);
@@ -99,14 +105,18 @@ export class AIPlayer implements GameSystem {
   update(world: World, _dt: number): void {
     this.tickCounter++;
 
-    // Building decisions every buildCooldown ticks
+    // Scale difficulty over time (ramps up over 5 minutes)
+    this.difficulty = 1.0 + Math.min(2.0, this.tickCounter / 7500);
+
+    // Building decisions
     if (this.tickCounter - this.lastBuildTick > this.buildCooldown && this.production && this.harvestSystem) {
       this.makeBuildDecision(world);
       this.lastBuildTick = this.tickCounter;
     }
 
-    // Train units continuously
-    if (this.tickCounter % 150 === 0 && this.production && this.harvestSystem) {
+    // Train units continuously (faster as difficulty rises)
+    const trainInterval = Math.max(75, Math.floor(150 / this.difficulty));
+    if (this.tickCounter % trainInterval === 0 && this.production && this.harvestSystem) {
       this.trainUnits();
     }
 
@@ -117,9 +127,19 @@ export class AIPlayer implements GameSystem {
       if (this.waveInterval > 375) this.waveInterval -= 25;
     }
 
-    // Send idle AI units to attack (gather first, then attack in groups)
+    // Manage army every 3 seconds
     if (this.tickCounter % 75 === 0) {
       this.manageArmy(world);
+    }
+
+    // Retreat wounded units every 2 seconds
+    if (this.tickCounter % 50 === 0) {
+      this.retreatWounded(world);
+    }
+
+    // Hunt player harvesters occasionally (every ~30 seconds)
+    if (this.tickCounter % 750 === 0 && this.difficulty > 1.5) {
+      this.huntHarvesters(world);
     }
   }
 
@@ -129,26 +149,23 @@ export class AIPlayer implements GameSystem {
     const solaris = this.harvestSystem.getSolaris(this.playerId);
     const px = this.factionPrefix;
 
-    // Count current buildings
-    const buildingCounts = new Map<string, number>();
+    let totalBuildings = 0;
     const buildings = buildingQuery(world);
     for (const eid of buildings) {
       if (Owner.playerId[eid] !== this.playerId) continue;
       if (Health.current[eid] <= 0) continue;
-      // We don't have easy access to building type names, so just count total
-      buildingCounts.set('total', (buildingCounts.get('total') ?? 0) + 1);
+      totalBuildings++;
     }
 
-    const totalBuildings = buildingCounts.get('total') ?? 0;
-
-    // Build order based on phase
+    // Phase-based build order
     const buildOrder = [
       { name: `${px}SmWindtrap`, minSolaris: 300, phase: 0 },
       { name: `${px}Refinery`, minSolaris: 1600, phase: 1 },
       { name: `${px}Barracks`, minSolaris: 300, phase: 2 },
       { name: `${px}Factory`, minSolaris: 1100, phase: 3 },
-      { name: `${px}SmWindtrap`, minSolaris: 300, phase: 4 }, // Second windtrap
-      { name: `${px}SmWindtrap`, minSolaris: 300, phase: 5 }, // Third windtrap
+      { name: `${px}SmWindtrap`, minSolaris: 300, phase: 4 },
+      { name: `${px}SmWindtrap`, minSolaris: 300, phase: 5 },
+      { name: `${px}Refinery`, minSolaris: 1600, phase: 6 }, // Second refinery
     ];
 
     if (this.buildPhase < buildOrder.length) {
@@ -160,14 +177,13 @@ export class AIPlayer implements GameSystem {
             this.buildPhase++;
           }
         } else {
-          // Can't build this yet, skip
           this.buildPhase++;
         }
       }
     } else {
-      // Late game: build more windtraps and factories if we can afford it
-      if (solaris > 2000 && totalBuildings < 10) {
-        const lateBuildings = [`${px}SmWindtrap`, `${px}Factory`, `${px}Barracks`];
+      // Late game: expand economy and military
+      if (solaris > 2000 && totalBuildings < 12) {
+        const lateBuildings = [`${px}SmWindtrap`, `${px}Factory`, `${px}Barracks`, `${px}Refinery`];
         const pick = lateBuildings[Math.floor(Math.random() * lateBuildings.length)];
         if (this.production.canBuild(this.playerId, pick, true)) {
           this.production.startProduction(this.playerId, pick, true);
@@ -182,13 +198,17 @@ export class AIPlayer implements GameSystem {
     const solaris = this.harvestSystem.getSolaris(this.playerId);
     if (solaris < 200) return;
 
-    // Mix of infantry and vehicles
-    const pool = Math.random() < 0.4 ? this.infantryPool : this.vehiclePool;
+    // Prefer vehicles when we can afford them, infantry when cheap
+    let pool: string[];
+    if (solaris > 800 && this.vehiclePool.length > 0) {
+      pool = Math.random() < 0.3 ? this.infantryPool : this.vehiclePool;
+    } else {
+      pool = Math.random() < 0.6 ? this.infantryPool : this.vehiclePool;
+    }
+    if (pool.length === 0) pool = this.unitPool;
     if (pool.length === 0) return;
 
     const typeName = pool[Math.floor(Math.random() * pool.length)];
-
-    // Train via production system if available
     this.production.startProduction(this.playerId, typeName, false);
   }
 
@@ -208,35 +228,137 @@ export class AIPlayer implements GameSystem {
   private manageArmy(world: World): void {
     const units = unitQuery(world);
     const idleUnits: number[] = [];
+    const nearBaseUnits: number[] = [];
     let totalUnits = 0;
 
     for (const eid of units) {
       if (Owner.playerId[eid] !== this.playerId) continue;
       if (Health.current[eid] <= 0) continue;
+      // Skip harvesters
+      if (hasComponent(world, Harvester, eid)) continue;
       totalUnits++;
 
       if (MoveTarget.active[eid] === 0) {
         idleUnits.push(eid);
+        // Check if near base
+        const dist = distance2D(Position.x[eid], Position.z[eid], this.baseX, this.baseZ);
+        if (dist < 40) nearBaseUnits.push(eid);
       }
     }
 
-    // Only attack in groups of 3+ or if we have many units
-    const attackThreshold = Math.min(5, Math.max(3, Math.floor(totalUnits * 0.3)));
+    // Dynamic attack group size based on difficulty
+    const attackThreshold = Math.max(3, Math.floor(this.attackGroupSize * this.difficulty));
+    const canAttack = this.tickCounter - this.lastAttackTick > this.attackCooldown;
 
-    if (idleUnits.length >= attackThreshold) {
-      // Send the group to attack
-      for (const eid of idleUnits) {
-        MoveTarget.x[eid] = this.targetX + randomFloat(-25, 25);
-        MoveTarget.z[eid] = this.targetZ + randomFloat(-25, 25);
+    if (nearBaseUnits.length >= attackThreshold && canAttack) {
+      this.lastAttackTick = this.tickCounter;
+
+      // Split into groups for multi-direction attack
+      const groupSize = Math.ceil(nearBaseUnits.length / 2);
+      const group1 = nearBaseUnits.slice(0, groupSize);
+      const group2 = nearBaseUnits.slice(groupSize);
+
+      // Main attack direction
+      const angle1 = Math.atan2(this.targetZ - this.baseZ, this.targetX - this.baseX);
+      // Flanking direction (±30-45 degrees)
+      const flankAngle = (Math.random() * 0.5 + 0.4) * (Math.random() < 0.5 ? 1 : -1);
+      const angle2 = angle1 + flankAngle;
+
+      // Group 1: direct assault
+      for (const eid of group1) {
+        const spread = randomFloat(-10, 10);
+        MoveTarget.x[eid] = this.targetX + Math.cos(angle1 + 1.57) * spread;
+        MoveTarget.z[eid] = this.targetZ + Math.sin(angle1 + 1.57) * spread;
         MoveTarget.active[eid] = 1;
+      }
+
+      // Group 2: flanking attack (offset target)
+      if (group2.length > 0) {
+        const flankDist = 30;
+        const flankTargetX = this.targetX + Math.cos(angle2) * flankDist;
+        const flankTargetZ = this.targetZ + Math.sin(angle2) * flankDist;
+        for (const eid of group2) {
+          MoveTarget.x[eid] = flankTargetX + randomFloat(-8, 8);
+          MoveTarget.z[eid] = flankTargetZ + randomFloat(-8, 8);
+          MoveTarget.active[eid] = 1;
+        }
       }
     } else if (idleUnits.length > 0 && idleUnits.length < attackThreshold) {
       // Rally idle units near base
       for (const eid of idleUnits) {
         const rallyX = this.baseX + randomFloat(-15, 15);
-        const rallyZ = this.baseZ - 15 + randomFloat(-5, 5); // In front of base
+        const rallyZ = this.baseZ - 15 + randomFloat(-5, 5);
         MoveTarget.x[eid] = rallyX;
         MoveTarget.z[eid] = rallyZ;
+        MoveTarget.active[eid] = 1;
+      }
+    }
+  }
+
+  private retreatWounded(world: World): void {
+    const units = unitQuery(world);
+    for (const eid of units) {
+      if (Owner.playerId[eid] !== this.playerId) continue;
+      if (Health.current[eid] <= 0) continue;
+      if (hasComponent(world, Harvester, eid)) continue;
+
+      const ratio = Health.current[eid] / Health.max[eid];
+      if (ratio < this.retreatHealthPct) {
+        // Retreat to base
+        const dist = distance2D(Position.x[eid], Position.z[eid], this.baseX, this.baseZ);
+        if (dist > 30) {
+          MoveTarget.x[eid] = this.baseX + randomFloat(-10, 10);
+          MoveTarget.z[eid] = this.baseZ + randomFloat(-10, 10);
+          MoveTarget.active[eid] = 1;
+          // Clear attack target so they disengage
+          if (hasComponent(world, AttackTarget, eid)) {
+            AttackTarget.active[eid] = 0;
+          }
+        }
+      }
+    }
+  }
+
+  private huntHarvesters(world: World): void {
+    // Find player harvesters
+    const units = unitQuery(world);
+    let targetHarvester = -1;
+    let bestDist = Infinity;
+
+    for (const eid of units) {
+      if (Owner.playerId[eid] === this.playerId) continue;
+      if (Health.current[eid] <= 0) continue;
+      if (!hasComponent(world, Harvester, eid)) continue;
+
+      const dist = distance2D(Position.x[eid], Position.z[eid], this.baseX, this.baseZ);
+      if (dist < bestDist) {
+        bestDist = dist;
+        targetHarvester = eid;
+      }
+    }
+
+    if (targetHarvester < 0) return;
+
+    // Send 2-3 fast units to intercept the harvester
+    const hunters: number[] = [];
+    for (const eid of units) {
+      if (Owner.playerId[eid] !== this.playerId) continue;
+      if (Health.current[eid] <= 0) continue;
+      if (hasComponent(world, Harvester, eid)) continue;
+      if (MoveTarget.active[eid] === 0) {
+        hunters.push(eid);
+        if (hunters.length >= 3) break;
+      }
+    }
+
+    for (const eid of hunters) {
+      if (hasComponent(world, AttackTarget, eid)) {
+        AttackTarget.entityId[eid] = targetHarvester;
+        AttackTarget.active[eid] = 1;
+      }
+      if (hasComponent(world, MoveTarget, eid)) {
+        MoveTarget.x[eid] = Position.x[targetHarvester];
+        MoveTarget.z[eid] = Position.z[targetHarvester];
         MoveTarget.active[eid] = 1;
       }
     }
