@@ -93,6 +93,10 @@ export class Game {
     return this.tickCount;
   }
 
+  setTickCount(count: number): void {
+    this.tickCount = count;
+  }
+
   private loop = (now: number): void => {
     if (!this.running) return;
     requestAnimationFrame(this.loop);

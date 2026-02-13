@@ -31,6 +31,7 @@ export interface UnitDef {
   reinforcementValue: number;
 
   // Flags
+  engineer: boolean;
   infantry: boolean;
   canFly: boolean;
   crushes: boolean;
@@ -82,6 +83,7 @@ export function createDefaultUnitDef(name: string): UnitDef {
     explosionType: 'Explosion',
     debris: '',
     reinforcementValue: 1,
+    engineer: false,
     infantry: false,
     canFly: false,
     crushes: false,

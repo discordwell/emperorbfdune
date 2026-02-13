@@ -248,4 +248,33 @@ export class ProductionSystem {
     const item = queue[0];
     return { typeName: item.typeName, progress: item.elapsed / item.totalTime };
   }
+
+  /** Get full queue contents for UI display */
+  getQueue(playerId: number, isBuilding: boolean): { typeName: string; progress: number }[] {
+    const queue = isBuilding
+      ? this.buildingQueues.get(playerId)
+      : this.unitQueues.get(playerId);
+    if (!queue) return [];
+    return queue.map((item, i) => ({
+      typeName: item.typeName,
+      progress: i === 0 && item.totalTime > 0 ? item.elapsed / item.totalTime : 0,
+    }));
+  }
+
+  /** Cancel a queued item by index, refunding cost (partial for in-progress) */
+  cancelQueueItem(playerId: number, isBuilding: boolean, index: number): boolean {
+    const queue = isBuilding
+      ? this.buildingQueues.get(playerId)
+      : this.unitQueues.get(playerId);
+    if (!queue || index < 0 || index >= queue.length) return false;
+
+    const item = queue[index];
+    // Full refund for queued items, partial for in-progress
+    const refundRatio = index === 0 ? (1 - item.elapsed / item.totalTime) : 1.0;
+    const refund = Math.floor(item.cost * refundRatio);
+    this.harvestSystem.addSolaris(playerId, refund);
+
+    queue.splice(index, 1);
+    return true;
+  }
 }

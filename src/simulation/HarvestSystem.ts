@@ -24,9 +24,28 @@ export class HarvestSystem implements GameSystem {
   private harvestTimers = new Map<number, number>(); // eid -> ticks spent harvesting
   private tickCounter = 0;
   private bloomInterval = 500; // ~20 seconds between bloom checks
+  // Carryall: players that have a Hanger get auto-airlift for harvesters
+  private playersWithCarryall = new Set<number>();
+  // Harvesters being airlifted: eid -> ticks remaining
+  private airlifting = new Map<number, number>();
 
   constructor(terrain: TerrainRenderer) {
     this.terrain = terrain;
+  }
+
+  /** Mark a player as having carryall support (owns a Hanger) */
+  setCarryallAvailable(playerId: number, available: boolean): void {
+    if (available) this.playersWithCarryall.add(playerId);
+    else this.playersWithCarryall.delete(playerId);
+  }
+
+  hasCarryall(playerId: number): boolean {
+    return this.playersWithCarryall.has(playerId);
+  }
+
+  /** Get airlift state for visual rendering */
+  getAirliftingEntities(): ReadonlyMap<number, number> {
+    return this.airlifting;
   }
 
   init(_world: World): void {
@@ -55,6 +74,12 @@ export class HarvestSystem implements GameSystem {
 
     for (const eid of entities) {
       const state = Harvester.state[eid];
+
+      // Clean up airlift state if harvester left RETURNING
+      if (state !== RETURNING && this.airlifting.has(eid)) {
+        this.airlifting.delete(eid);
+        Position.y[eid] = 0.1;
+      }
 
       switch (state) {
         case IDLE:
@@ -173,6 +198,35 @@ export class HarvestSystem implements GameSystem {
   }
 
   private handleReturning(eid: number): void {
+    // Carryall airlift: skip walking, teleport after short delay
+    const owner = Owner.playerId[eid];
+    if (this.playersWithCarryall.has(owner)) {
+      const airTimer = this.airlifting.get(eid);
+      if (airTimer === undefined) {
+        // Start airlift - stop ground movement
+        MoveTarget.active[eid] = 0;
+        this.airlifting.set(eid, 0);
+        return;
+      }
+      if (airTimer < 50) { // ~2 seconds airlift time
+        this.airlifting.set(eid, airTimer + 1);
+        // Lift harvester up during airlift
+        Position.y[eid] = 0.1 + (airTimer / 50) * 4;
+        return;
+      }
+      // Airlift complete - teleport to refinery
+      this.airlifting.delete(eid);
+      const refEntity = Harvester.refineryEntity[eid];
+      if (refEntity > 0) {
+        Position.x[eid] = Position.x[refEntity];
+        Position.z[eid] = Position.z[refEntity];
+      }
+      Position.y[eid] = 0.1;
+      Harvester.state[eid] = UNLOADING;
+      this.harvestTimers.set(eid, 0);
+      return;
+    }
+
     if (MoveTarget.active[eid] === 1) return; // Still moving
 
     // At refinery - unload

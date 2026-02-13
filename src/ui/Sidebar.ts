@@ -19,17 +19,19 @@ export class Sidebar {
   private progressBar: HTMLDivElement | null = null;
 
   private factionPrefix: string;
+  private subhousePrefix: string;
   private tooltip: HTMLElement | null;
   // Maps hotkey letter to { name, isBuilding } for current tab
   private hotkeyMap = new Map<string, { name: string; isBuilding: boolean }>();
 
-  constructor(rules: GameRules, production: ProductionSystem, artMap: Map<string, ArtEntry>, onBuild: BuildCallback, factionPrefix = 'AT') {
+  constructor(rules: GameRules, production: ProductionSystem, artMap: Map<string, ArtEntry>, onBuild: BuildCallback, factionPrefix = 'AT', subhousePrefix = '') {
     this.container = document.getElementById('sidebar')!;
     this.rules = rules;
     this.production = production;
     this.artMap = artMap;
     this.onBuild = onBuild;
     this.factionPrefix = factionPrefix;
+    this.subhousePrefix = subhousePrefix;
     this.tooltip = document.getElementById('tooltip');
     this.render();
     window.addEventListener('keydown', this.onKeyDown);
@@ -80,6 +82,12 @@ export class Sidebar {
     progressWrap.appendChild(this.progressBar);
     this.container.appendChild(progressWrap);
 
+    // Queue display
+    const queueWrap = document.createElement('div');
+    queueWrap.style.cssText = 'padding:2px 4px;';
+    this.renderQueue(queueWrap);
+    this.container.appendChild(queueWrap);
+
     // Items grid
     const grid = document.createElement('div');
     grid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:2px;padding:4px;';
@@ -94,12 +102,43 @@ export class Sidebar {
     this.container.appendChild(grid);
   }
 
+  private renderQueue(container: HTMLElement): void {
+    const buildingQ = this.production.getQueue(this.playerId, true);
+    const unitQ = this.production.getQueue(this.playerId, false);
+    const allItems = [
+      ...buildingQ.map((q, i) => ({ ...q, isBuilding: true, index: i })),
+      ...unitQ.map((q, i) => ({ ...q, isBuilding: false, index: i })),
+    ];
+    if (allItems.length === 0) return;
+
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:2px;flex-wrap:wrap;margin-bottom:2px;';
+
+    for (const item of allItems) {
+      const chip = document.createElement('div');
+      const displayName = item.typeName.replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, '');
+      const pct = item.progress > 0 ? ` ${Math.floor(item.progress * 100)}%` : '';
+      chip.textContent = `${displayName}${pct}`;
+      chip.title = 'Right-click to cancel';
+      chip.style.cssText = `font-size:9px;padding:2px 4px;background:${item.progress > 0 ? '#2a3a2a' : '#1a1a2e'};color:#aaa;border:1px solid #333;cursor:pointer;border-radius:2px;`;
+      chip.oncontextmenu = (e) => {
+        e.preventDefault();
+        if (this.production.cancelQueueItem(this.playerId, item.isBuilding, item.index)) {
+          this.render();
+        }
+      };
+      row.appendChild(chip);
+    }
+    container.appendChild(row);
+  }
+
   private renderBuildingItems(grid: HTMLElement): void {
     const prefix = this.factionPrefix;
+    const subPrefix = this.subhousePrefix;
     let hotkeyIdx = 0;
 
     for (const [name, def] of this.rules.buildings) {
-      const validPrefix = name.startsWith(prefix) || name.startsWith('GU') || name.startsWith('IX') || name.startsWith('FR') || name.startsWith('IM') || name.startsWith('TL');
+      const validPrefix = name.startsWith(prefix) || (subPrefix && name.startsWith(subPrefix));
       if (!validPrefix) continue;
       if (name.startsWith('IN')) continue;
       if (def.cost <= 0) continue;
@@ -117,10 +156,11 @@ export class Sidebar {
 
   private renderUnitItems(grid: HTMLElement, infantryOnly: boolean): void {
     const prefix = this.factionPrefix;
+    const subPrefix = this.subhousePrefix;
     let hotkeyIdx = 0;
 
     for (const [name, def] of this.rules.units) {
-      if (!name.startsWith(prefix)) continue;
+      if (!name.startsWith(prefix) && !(subPrefix && name.startsWith(subPrefix))) continue;
       if (def.cost <= 0) continue;
       if (infantryOnly && !def.infantry) continue;
       if (!infantryOnly && def.infantry) continue;

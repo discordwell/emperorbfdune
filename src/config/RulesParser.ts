@@ -189,6 +189,7 @@ function parseUnitDef(name: string, section: Section): UnitDef {
       case 'Debris': def.debris = value; break;
       case 'ReinforcementValue': def.reinforcementValue = parseNum(value); break;
       case 'Infantry': def.infantry = parseBool(value); break;
+      case 'Engineer': def.engineer = parseBool(value); break;
       case 'CanFly': def.canFly = parseBool(value); break;
       case 'Crushes': def.crushes = parseBool(value); break;
       case 'Crushable': def.crushable = parseBool(value); break;

@@ -21,8 +21,8 @@ import { EventBus } from './core/EventBus';
 import { AudioManager } from './audio/AudioManager';
 import { FogOfWar } from './rendering/FogOfWar';
 import { BuildingPlacement } from './input/BuildingPlacement';
-import { VictorySystem } from './ui/VictoryScreen';
-import { HouseSelect, type HouseChoice } from './ui/HouseSelect';
+import { VictorySystem, GameStats } from './ui/VictoryScreen';
+import { HouseSelect, type HouseChoice, type SubhouseChoice } from './ui/HouseSelect';
 import { SelectionPanel } from './ui/SelectionPanel';
 import { EffectsManager } from './rendering/EffectsManager';
 import { SandwormSystem } from './simulation/SandwormSystem';
@@ -38,6 +38,29 @@ import {
 // Globals
 let gameRules: GameRules;
 let artMap: Map<string, ArtEntry>;
+
+// Save/Load types
+interface SavedEntity {
+  x: number; z: number; y: number; rotY: number;
+  hp: number; maxHp: number; owner: number;
+  unitTypeId?: number; buildingTypeId?: number;
+  harvester?: { spice: number; maxCap: number; state: number; refEid: number };
+  moveTarget?: { x: number; z: number; active: number };
+  speed?: { max: number; turn: number };
+  vet?: { xp: number; rank: number };
+}
+
+interface SaveData {
+  version: number;
+  tick: number;
+  housePrefix: string;
+  enemyPrefix: string;
+  houseName: string;
+  enemyName: string;
+  solaris: [number, number];
+  entities: SavedEntity[];
+  spice: number[][]; // [row][col]
+}
 
 // ID maps
 const unitTypeIdMap = new Map<string, number>();
@@ -93,9 +116,34 @@ async function main() {
   // Audio manager (created early for menu music)
   const audioManager = new AudioManager();
 
-  // House selection screen
-  const houseSelect = new HouseSelect(audioManager);
-  const house = await houseSelect.show();
+  // Check for saved game to load
+  const shouldLoad = localStorage.getItem('ebfd_load') === '1';
+  const savedJson = shouldLoad ? localStorage.getItem('ebfd_save') : null;
+  let savedGame: SaveData | null = null;
+  if (savedJson) {
+    try { savedGame = JSON.parse(savedJson); } catch { /* corrupted save */ }
+  }
+  localStorage.removeItem('ebfd_load'); // Clear the load flag
+
+  // House selection screen (skip if loading)
+  let house: HouseChoice;
+  if (savedGame) {
+    house = {
+      id: savedGame.housePrefix.toLowerCase(),
+      name: savedGame.houseName,
+      prefix: savedGame.housePrefix,
+      color: '#ffffff',
+      description: '',
+      enemyPrefix: savedGame.enemyPrefix,
+      enemyName: savedGame.enemyName,
+    };
+    // Hide loading screen elements from house select
+    const loadScreen = document.getElementById('loading-screen');
+    if (loadScreen) loadScreen.style.display = 'flex';
+  } else {
+    const houseSelect = new HouseSelect(audioManager);
+    house = await houseSelect.show();
+  }
 
   console.log(`Playing as ${house.name} vs ${house.enemyName}`);
   audioManager.setPlayerFaction(house.prefix);
@@ -152,7 +200,9 @@ async function main() {
     return count;
   });
   const effectsManager = new EffectsManager(scene);
+  const gameStats = new GameStats();
   const victorySystem = new VictorySystem(audioManager, 0);
+  victorySystem.setStats(gameStats);
 
   const sandwormSystem = new SandwormSystem(terrain, effectsManager);
 
@@ -437,6 +487,11 @@ async function main() {
 
   // --- EVENTS ---
 
+  // Track harvest income
+  EventBus.on('harvest:delivered', ({ amount, owner }) => {
+    gameStats.recordCreditsEarned(owner, amount);
+  });
+
   // Refund when player cancels building placement
   EventBus.on('placement:cancelled', ({ typeName }) => {
     const def = gameRules.buildings.get(typeName);
@@ -452,6 +507,11 @@ async function main() {
     const x = Position.x[entityId];
     const y = Position.y[entityId];
     const z = Position.z[entityId];
+    const deadOwner = Owner.playerId[entityId];
+
+    // Track stats
+    if (isBuilding) gameStats.recordBuildingLost(deadOwner);
+    else gameStats.recordUnitLost(deadOwner);
 
     combatSystem.unregisterUnit(entityId);
     movement.unregisterFlyer(entityId);
@@ -582,6 +642,10 @@ async function main() {
   EventBus.on('production:complete', ({ unitType, owner }) => {
     const world = game.getWorld();
     const isBuilding = gameRules.buildings.has(unitType);
+
+    // Track stats
+    if (isBuilding) gameStats.recordBuildingBuilt(owner);
+    else gameStats.recordUnitBuilt(owner);
 
     if (isBuilding) {
       // Start building placement mode for player buildings
@@ -734,6 +798,19 @@ async function main() {
       productionSystem.setPowerMultiplier(1, 1.0);
       combatSystem.setPowerMultiplier(1, 1.0);
 
+      // Check for Hanger buildings (enables Carryall harvester airlift)
+      const hasHanger = [false, false];
+      for (const eid of buildings) {
+        if (Health.current[eid] <= 0) continue;
+        const typeId = BuildingType.id[eid];
+        const bName = buildingTypeNames[typeId] ?? '';
+        if (bName.includes('Hanger')) {
+          hasHanger[Owner.playerId[eid]] = true;
+        }
+      }
+      harvestSystem.setCarryallAvailable(0, hasHanger[0]);
+      harvestSystem.setCarryallAvailable(1, hasHanger[1]);
+
       // Building damage visual states: smoke and fire based on HP
       for (const eid of buildings) {
         if (Health.current[eid] <= 0) continue;
@@ -770,6 +847,52 @@ async function main() {
           if (dx * dx + dz * dz < 2.0) { // Within 1.4 units
             Health.current[other] = 0;
             EventBus.emit('unit:died', { entityId: other, killerEntity: eid });
+          }
+        }
+      }
+    }
+
+    // Engineer building capture: engineers capture enemy buildings on contact (every 10 ticks)
+    if (game.getTickCount() % 10 === 5) {
+      const allUnits = unitQuery(world);
+      const allBuildings = buildingQuery(world);
+      for (const eid of allUnits) {
+        if (Health.current[eid] <= 0) continue;
+        const typeId = UnitType.id[eid];
+        const typeName = unitTypeNames[typeId];
+        const def = typeName ? gameRules.units.get(typeName) : null;
+        if (!def || !def.engineer) continue;
+        if (MoveTarget.active[eid] !== 1) continue; // Only capture while moving (toward target)
+
+        const engOwner = Owner.playerId[eid];
+
+        for (const bid of allBuildings) {
+          if (Health.current[bid] <= 0) continue;
+          if (Owner.playerId[bid] === engOwner) continue; // Skip friendly buildings
+          const bTypeId = BuildingType.id[bid];
+          const bName = buildingTypeNames[bTypeId];
+          const bDef = bName ? gameRules.buildings.get(bName) : null;
+          if (bDef && !bDef.canBeEngineered) continue; // Building can't be captured
+
+          const dx = Position.x[eid] - Position.x[bid];
+          const dz = Position.z[eid] - Position.z[bid];
+          if (dx * dx + dz * dz < 6.0) { // Within ~2.4 units
+            // Capture: transfer ownership
+            const prevOwner = Owner.playerId[bid];
+            Owner.playerId[bid] = engOwner;
+            productionSystem.removePlayerBuilding(prevOwner, bName ?? '');
+            productionSystem.addPlayerBuilding(engOwner, bName ?? '');
+
+            // Engineer is consumed
+            Health.current[eid] = 0;
+            EventBus.emit('unit:died', { entityId: eid, killerEntity: -1 });
+
+            if (engOwner === 0) {
+              selectionPanel.addMessage(`Captured ${(bName ?? '').replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, '')}!`, '#44ff44');
+            } else if (prevOwner === 0) {
+              selectionPanel.addMessage('Building captured by enemy!', '#ff4444');
+            }
+            break; // Engineer consumed, stop checking
           }
         }
       }
@@ -953,7 +1076,7 @@ async function main() {
       }
     }
     sidebar.refresh();
-  }, house.prefix);
+  }, house.prefix, house.subhouse?.prefix ?? '');
 
   setInterval(() => {
     sidebar.updateProgress();
@@ -1003,6 +1126,18 @@ async function main() {
       e.preventDefault();
       game.setSpeed(2.0);
       selectionPanel.addMessage('Speed: Fast', '#888');
+    } else if (e.key === 'F5') {
+      e.preventDefault();
+      saveGame();
+    } else if (e.key === 'F8') {
+      e.preventDefault();
+      if (localStorage.getItem('ebfd_save')) {
+        selectionPanel.addMessage('Loading saved game...', '#88f');
+        localStorage.setItem('ebfd_load', '1');
+        setTimeout(() => window.location.reload(), 300);
+      } else {
+        selectionPanel.addMessage('No saved game found', '#f44');
+      }
     } else if (e.key === 'F9') {
       e.preventDefault();
       game.pause();
@@ -1010,73 +1145,199 @@ async function main() {
     }
   });
 
+  function saveGame(): void {
+    const w = game.getWorld();
+    const entities: SavedEntity[] = [];
+
+    // Save all units
+    const allUnits = unitQuery(w);
+    for (const eid of allUnits) {
+      if (Health.current[eid] <= 0) continue;
+      const se: SavedEntity = {
+        x: Position.x[eid], z: Position.z[eid], y: Position.y[eid],
+        rotY: Rotation.y[eid],
+        hp: Health.current[eid], maxHp: Health.max[eid],
+        owner: Owner.playerId[eid],
+        unitTypeId: UnitType.id[eid],
+        speed: { max: Speed.max[eid], turn: Speed.turnRate[eid] },
+        vet: { xp: Veterancy.xp[eid], rank: Veterancy.rank[eid] },
+      };
+      if (MoveTarget.active[eid]) {
+        se.moveTarget = { x: MoveTarget.x[eid], z: MoveTarget.z[eid], active: MoveTarget.active[eid] };
+      }
+      if (hasComponent(w, Harvester, eid)) {
+        se.harvester = {
+          spice: Harvester.spiceCarried[eid], maxCap: Harvester.maxCapacity[eid],
+          state: Harvester.state[eid], refEid: 0,
+        };
+      }
+      entities.push(se);
+    }
+
+    // Save all buildings
+    const allBuildings = buildingQuery(w);
+    for (const eid of allBuildings) {
+      if (Health.current[eid] <= 0) continue;
+      entities.push({
+        x: Position.x[eid], z: Position.z[eid], y: Position.y[eid],
+        rotY: Rotation.y[eid],
+        hp: Health.current[eid], maxHp: Health.max[eid],
+        owner: Owner.playerId[eid],
+        buildingTypeId: BuildingType.id[eid],
+      });
+    }
+
+    // Save spice map
+    const spice: number[][] = [];
+    for (let tz = 0; tz < 128; tz++) {
+      const row: number[] = [];
+      for (let tx = 0; tx < 128; tx++) {
+        const s = terrain.getSpice(tx, tz);
+        row.push(s > 0 ? Math.round(s * 100) / 100 : 0);
+      }
+      spice.push(row);
+    }
+
+    const save: SaveData = {
+      version: 1,
+      tick: game.getTickCount(),
+      housePrefix: house.prefix,
+      enemyPrefix: house.enemyPrefix,
+      houseName: house.name,
+      enemyName: house.enemyName,
+      solaris: [harvestSystem.getSolaris(0), harvestSystem.getSolaris(1)],
+      entities,
+      spice,
+    };
+
+    localStorage.setItem('ebfd_save', JSON.stringify(save));
+    selectionPanel.addMessage('Game saved! (F8 to load)', '#44ff44');
+  }
+
   // --- SPAWN INITIAL ENTITIES ---
   const world = game.getWorld();
 
-  // Player base
-  const px = house.prefix;
-  spawnBuilding(world, `${px}ConYard`, 0, 50, 50);
-  spawnBuilding(world, `${px}SmWindtrap`, 0, 56, 50);
-  spawnBuilding(world, `${px}Barracks`, 0, 44, 50);
-  spawnBuilding(world, `${px}Factory`, 0, 50, 56);
-  spawnBuilding(world, `${px}Refinery`, 0, 56, 56);
+  if (savedGame) {
+    // --- RESTORE FROM SAVE ---
+    game.setTickCount(savedGame.tick);
+    harvestSystem.addSolaris(0, savedGame.solaris[0] - harvestSystem.getSolaris(0));
+    harvestSystem.addSolaris(1, savedGame.solaris[1] - harvestSystem.getSolaris(1));
 
-  // Starting player units - find available unit types for the house
-  const playerInfantry = [...gameRules.units.keys()].filter(n => n.startsWith(px) && gameRules.units.get(n)?.infantry);
-  const playerVehicles = [...gameRules.units.keys()].filter(n => n.startsWith(px) && !gameRules.units.get(n)?.infantry && gameRules.units.get(n)!.cost > 0);
-
-  // Spawn 3 infantry
-  for (let i = 0; i < 3 && i < playerInfantry.length; i++) {
-    spawnUnit(world, playerInfantry[i], 0, 45 + i * 2, 60);
-  }
-  // Spawn 4 vehicles
-  for (let i = 0; i < 4 && i < playerVehicles.length; i++) {
-    spawnUnit(world, playerVehicles[i], 0, 53 + i * 2, 62);
-  }
-
-  // Harvester
-  const harvTypes = [...gameRules.units.keys()].filter(n => n.startsWith(px) && (n.includes('Harv') || n.includes('harvester')));
-  if (harvTypes.length > 0) {
-    spawnUnit(world, harvTypes[0], 0, 60, 58);
-  } else {
-    // Fallback: make a trike into a harvester
-    const fallbackVehicle = playerVehicles[0];
-    if (fallbackVehicle) {
-      const harvEid = spawnUnit(world, fallbackVehicle, 0, 60, 58);
-      if (harvEid >= 0) {
-        addComponent(world, Harvester, harvEid);
-        Harvester.maxCapacity[harvEid] = 1.0;
-        Harvester.spiceCarried[harvEid] = 0;
-        Harvester.state[harvEid] = 0;
-        Harvester.refineryEntity[harvEid] = 0;
+    // Restore spice
+    for (let tz = 0; tz < savedGame.spice.length && tz < 128; tz++) {
+      for (let tx = 0; tx < savedGame.spice[tz].length && tx < 128; tx++) {
+        terrain.setSpice(tx, tz, savedGame.spice[tz][tx]);
       }
     }
-  }
+    terrain.updateSpiceVisuals();
 
-  // Enemy base
-  const ex = house.enemyPrefix;
-  spawnBuilding(world, `${ex}ConYard`, 1, 200, 200);
-  spawnBuilding(world, `${ex}SmWindtrap`, 1, 206, 200);
-  spawnBuilding(world, `${ex}Barracks`, 1, 194, 200);
-  spawnBuilding(world, `${ex}Factory`, 1, 200, 206);
-  spawnBuilding(world, `${ex}SmWindtrap`, 1, 206, 206);
-  spawnBuilding(world, `${ex}Refinery`, 1, 194, 206);
+    // Restore entities - buildings first (so refineries exist for harvesters)
+    for (const se of savedGame.entities) {
+      if (se.buildingTypeId !== undefined) {
+        const bName = buildingTypeNames[se.buildingTypeId];
+        if (!bName) continue;
+        const eid = spawnBuilding(world, bName, se.owner, se.x, se.z);
+        if (eid >= 0) {
+          Health.current[eid] = se.hp;
+          Position.y[eid] = se.y;
+          Rotation.y[eid] = se.rotY;
+        }
+      }
+    }
+    // Then units
+    for (const se of savedGame.entities) {
+      if (se.unitTypeId !== undefined) {
+        const uName = unitTypeNames[se.unitTypeId];
+        if (!uName) continue;
+        const eid = spawnUnit(world, uName, se.owner, se.x, se.z);
+        if (eid >= 0) {
+          Health.current[eid] = se.hp;
+          Position.y[eid] = se.y;
+          Rotation.y[eid] = se.rotY;
+          if (se.vet) {
+            Veterancy.xp[eid] = se.vet.xp;
+            Veterancy.rank[eid] = se.vet.rank;
+          }
+          if (se.moveTarget && se.moveTarget.active) {
+            MoveTarget.x[eid] = se.moveTarget.x;
+            MoveTarget.z[eid] = se.moveTarget.z;
+            MoveTarget.active[eid] = se.moveTarget.active;
+          }
+          if (se.harvester && hasComponent(world, Harvester, eid)) {
+            Harvester.spiceCarried[eid] = se.harvester.spice;
+            Harvester.state[eid] = se.harvester.state;
+          }
+        }
+      }
+    }
+    console.log(`Restored ${savedGame.entities.length} entities from save (tick ${savedGame.tick})`);
+  } else {
+    // --- FRESH GAME ---
+    // Player base
+    const px = house.prefix;
+    spawnBuilding(world, `${px}ConYard`, 0, 50, 50);
+    spawnBuilding(world, `${px}SmWindtrap`, 0, 56, 50);
+    spawnBuilding(world, `${px}Barracks`, 0, 44, 50);
+    spawnBuilding(world, `${px}Factory`, 0, 50, 56);
+    spawnBuilding(world, `${px}Refinery`, 0, 56, 56);
 
-  // Enemy starting units
-  const enemyInfantry = [...gameRules.units.keys()].filter(n => n.startsWith(ex) && gameRules.units.get(n)?.infantry);
-  const enemyVehicles = [...gameRules.units.keys()].filter(n => n.startsWith(ex) && !gameRules.units.get(n)?.infantry && gameRules.units.get(n)!.cost > 0 && !gameRules.units.get(n)!.canFly);
+    // Starting player units - find available unit types for the house
+    const playerInfantry = [...gameRules.units.keys()].filter(n => n.startsWith(px) && gameRules.units.get(n)?.infantry);
+    const playerVehicles = [...gameRules.units.keys()].filter(n => n.startsWith(px) && !gameRules.units.get(n)?.infantry && gameRules.units.get(n)!.cost > 0);
 
-  for (let i = 0; i < 3 && i < enemyInfantry.length; i++) {
-    spawnUnit(world, enemyInfantry[i], 1, 195 + i * 2, 210);
-  }
-  for (let i = 0; i < 3 && i < enemyVehicles.length; i++) {
-    spawnUnit(world, enemyVehicles[i], 1, 201 + i * 2, 212);
-  }
+    // Spawn 3 infantry
+    for (let i = 0; i < 3 && i < playerInfantry.length; i++) {
+      spawnUnit(world, playerInfantry[i], 0, 45 + i * 2, 60);
+    }
+    // Spawn 4 vehicles
+    for (let i = 0; i < 4 && i < playerVehicles.length; i++) {
+      spawnUnit(world, playerVehicles[i], 0, 53 + i * 2, 62);
+    }
 
-  // Enemy harvester
-  const enemyHarvTypes = [...gameRules.units.keys()].filter(n => n.startsWith(ex) && (n.includes('Harv') || n.includes('harvester')));
-  if (enemyHarvTypes.length > 0) {
-    spawnUnit(world, enemyHarvTypes[0], 1, 195, 212);
+    // Harvester
+    const harvTypes = [...gameRules.units.keys()].filter(n => n.startsWith(px) && (n.includes('Harv') || n.includes('harvester')));
+    if (harvTypes.length > 0) {
+      spawnUnit(world, harvTypes[0], 0, 60, 58);
+    } else {
+      // Fallback: make a trike into a harvester
+      const fallbackVehicle = playerVehicles[0];
+      if (fallbackVehicle) {
+        const harvEid = spawnUnit(world, fallbackVehicle, 0, 60, 58);
+        if (harvEid >= 0) {
+          addComponent(world, Harvester, harvEid);
+          Harvester.maxCapacity[harvEid] = 1.0;
+          Harvester.spiceCarried[harvEid] = 0;
+          Harvester.state[harvEid] = 0;
+          Harvester.refineryEntity[harvEid] = 0;
+        }
+      }
+    }
+
+    // Enemy base
+    const ex = house.enemyPrefix;
+    spawnBuilding(world, `${ex}ConYard`, 1, 200, 200);
+    spawnBuilding(world, `${ex}SmWindtrap`, 1, 206, 200);
+    spawnBuilding(world, `${ex}Barracks`, 1, 194, 200);
+    spawnBuilding(world, `${ex}Factory`, 1, 200, 206);
+    spawnBuilding(world, `${ex}SmWindtrap`, 1, 206, 206);
+    spawnBuilding(world, `${ex}Refinery`, 1, 194, 206);
+
+    // Enemy starting units
+    const enemyInfantry = [...gameRules.units.keys()].filter(n => n.startsWith(ex) && gameRules.units.get(n)?.infantry);
+    const enemyVehicles = [...gameRules.units.keys()].filter(n => n.startsWith(ex) && !gameRules.units.get(n)?.infantry && gameRules.units.get(n)!.cost > 0 && !gameRules.units.get(n)!.canFly);
+
+    for (let i = 0; i < 3 && i < enemyInfantry.length; i++) {
+      spawnUnit(world, enemyInfantry[i], 1, 195 + i * 2, 210);
+    }
+    for (let i = 0; i < 3 && i < enemyVehicles.length; i++) {
+      spawnUnit(world, enemyVehicles[i], 1, 201 + i * 2, 212);
+    }
+
+    // Enemy harvester
+    const enemyHarvTypes = [...gameRules.units.keys()].filter(n => n.startsWith(ex) && (n.includes('Harv') || n.includes('harvester')));
+    if (enemyHarvTypes.length > 0) {
+      spawnUnit(world, enemyHarvTypes[0], 1, 195, 212);
+    }
   }
 
   // Start!
