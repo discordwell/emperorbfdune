@@ -18,9 +18,9 @@ const TERRITORY_MESH_MAP: Record<number, string> = {
 
 const MAPPED_FACE_NAMES = new Set(Object.values(TERRITORY_MESH_MAP));
 
-// Camera for viewing the campaign map
-const CAM_POS = new THREE.Vector3(100, 50, 200);
-const CAM_TARGET = new THREE.Vector3(100, 50, 550);
+// Camera for viewing the campaign map — territory faces centered at (106.5, 48.7, 544.9)
+const CAM_POS = new THREE.Vector3(106, 49, 100);
+const CAM_TARGET = new THREE.Vector3(106, 49, 545);
 
 export class CampaignMap3D {
   private menuScene: MenuSceneManager;
@@ -142,15 +142,30 @@ export class CampaignMap3D {
     this.root.traverse((child) => {
       if (child instanceof THREE.Mesh) {
         const name = child.name.toLowerCase();
-        if (name.includes('glow') || name.includes('nebula') || name.includes('flash') || name.includes('zipzap') || name.includes('jump')) {
-          const mat = child.material;
-          const mats = Array.isArray(mat) ? mat : [mat];
+
+        // Hide container meshes
+        if (name.startsWith('~~')) {
+          child.visible = false;
+          return;
+        }
+
+        // Glow/effect materials: additive blending
+        if (name.includes('glow') || name.includes('nebula') || name.includes('flash') || name.includes('zipzap') || name.includes('jump') || name.includes('boom') || name.includes('bang')) {
+          const mats = Array.isArray(child.material) ? child.material : [child.material];
           for (const m of mats) {
             if (m instanceof THREE.MeshStandardMaterial || m instanceof THREE.MeshBasicMaterial) {
               m.blending = THREE.AdditiveBlending;
               m.depthWrite = false;
               m.transparent = true;
             }
+          }
+        }
+
+        // Double-sided rendering
+        const mats = Array.isArray(child.material) ? child.material : [child.material];
+        for (const m of mats) {
+          if (m && 'side' in m) {
+            m.side = THREE.DoubleSide;
           }
         }
       }

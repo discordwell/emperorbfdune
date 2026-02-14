@@ -47,10 +47,14 @@ export class MenuSceneManager {
     manager.setURLModifier((url: string) => {
       if (url.includes('textures/')) {
         const filename = url.replace(/.*textures\//, '');
-        return '/assets/textures/' + encodeURIComponent(filename);
+        const encoded = '/assets/textures/' + encodeURIComponent(filename);
+        return encoded;
       }
       return url;
     });
+    manager.onError = (url: string) => {
+      console.warn('MenuSceneManager: Failed to load resource:', url);
+    };
     this.loader = new GLTFLoader(manager);
 
     // Event listeners
@@ -60,15 +64,27 @@ export class MenuSceneManager {
   }
 
   async loadScene(path: string): Promise<THREE.Group> {
+    console.log('MenuSceneManager: Loading scene:', path);
     return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        console.error('MenuSceneManager: Scene load timed out after 15s:', path);
+        reject(new Error(`Scene load timed out: ${path}`));
+      }, 15000);
+
       this.loader.load(
         path,
         (gltf: GLTF) => {
+          clearTimeout(timeout);
+          console.log('MenuSceneManager: Scene loaded successfully:', path);
           this.scene.add(gltf.scene);
           resolve(gltf.scene);
         },
         undefined,
-        reject
+        (err) => {
+          clearTimeout(timeout);
+          console.error('MenuSceneManager: Scene load error:', path, err);
+          reject(err);
+        }
       );
     });
   }

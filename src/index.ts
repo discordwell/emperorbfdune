@@ -133,13 +133,19 @@ async function main() {
 
   // Create WebGLRenderer early so it can be shared between 3D menus and game
   const gameCanvas = document.getElementById('game-canvas') as HTMLCanvasElement;
-  const sharedRenderer = new THREE.WebGLRenderer({
-    canvas: gameCanvas,
-    antialias: true,
-    powerPreference: 'high-performance',
-  });
-  sharedRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  sharedRenderer.setSize(window.innerWidth, window.innerHeight);
+  let sharedRenderer: THREE.WebGLRenderer | null = null;
+  try {
+    sharedRenderer = new THREE.WebGLRenderer({
+      canvas: gameCanvas,
+      antialias: true,
+      powerPreference: 'high-performance',
+    });
+    sharedRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    sharedRenderer.setSize(window.innerWidth, window.innerHeight);
+    console.log('WebGL renderer created');
+  } catch (e) {
+    console.warn('WebGL renderer creation failed, using DOM menus:', e);
+  }
 
   // House selection screen (skip if loading)
   let house: HouseChoice;
@@ -159,13 +165,16 @@ async function main() {
     const loadScreen = document.getElementById('loading-screen');
     if (loadScreen) loadScreen.style.display = 'flex';
   } else {
-    // Hide loading screen so house selection is visible
+    // Hide loading screen and game HUD so house selection is visible
     const loadScreenEl = document.getElementById('loading-screen');
+    const uiOverlay = document.getElementById('ui-overlay');
     if (loadScreenEl) loadScreenEl.style.display = 'none';
-    const houseSelect = new HouseSelect(audioManager, gameCanvas, sharedRenderer);
+    if (uiOverlay) uiOverlay.style.display = 'none';
+    const houseSelect = new HouseSelect(audioManager, sharedRenderer ? gameCanvas : undefined, sharedRenderer ?? undefined);
     house = await houseSelect.show();
-    // Restore loading screen for asset loading phase
+    // Restore loading screen and HUD for asset loading / game phase
     if (loadScreenEl) loadScreenEl.style.display = 'flex';
+    if (uiOverlay) uiOverlay.style.display = '';
   }
 
   console.log(`Playing as ${house.name} vs ${house.enemyName}`);
@@ -198,6 +207,16 @@ async function main() {
 
   // Create game and systems
   const game = new Game();
+  // Create renderer now if it wasn't created earlier (e.g. WebGL was temporarily unavailable)
+  if (!sharedRenderer) {
+    sharedRenderer = new THREE.WebGLRenderer({
+      canvas: gameCanvas,
+      antialias: true,
+      powerPreference: 'high-performance',
+    });
+    sharedRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    sharedRenderer.setSize(window.innerWidth, window.innerHeight);
+  }
   const scene = new SceneManager(sharedRenderer);
   const terrain = new TerrainRenderer(scene);
   const input = new InputManager(scene);
