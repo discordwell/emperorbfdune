@@ -230,7 +230,7 @@ export class AbilitySystem {
     });
 
     // NIAB Tank teleport: handle target selection
-    EventBus.on('teleport:target' as any, ({ x, z }: { x: number; z: number }) => {
+    EventBus.on('teleport:target', ({ x, z }) => {
       const { selectionManager, effectsManager, audioManager, selectionPanel, combatSystem } = this.deps;
       const selected = selectionManager.getSelectedEntities();
       const w = this.deps.getWorld();

@@ -809,7 +809,7 @@ async function main() {
     effectsManager.spawnExplosion(x, y, z, explosionSize);
     effectsManager.spawnWreckage(x, y, z, isBuilding);
     if (isBuilding) {
-      EventBus.emit('building:destroyed', { entityId });
+      EventBus.emit('building:destroyed', { entityId, owner: deadOwner, x, z });
     }
 
     // Death animation: tilt the 3D model before removal
@@ -1414,7 +1414,7 @@ async function main() {
         Health.current[eid] = Math.max(0, Health.current[eid] - dmg);
         if (Health.current[eid] <= 0) {
           if (hasComponent(w, BuildingType, eid)) {
-            EventBus.emit('building:destroyed', { entityId: eid });
+            EventBus.emit('building:destroyed', { entityId: eid, owner: Owner.playerId[eid], x: Position.x[eid], z: Position.z[eid] });
           }
           EventBus.emit('unit:died', { entityId: eid, killerEntity: -1 });
         }

@@ -464,11 +464,11 @@ export class DialogManager {
       this.playDialog('buildingReady');
     });
 
-    // Building destroyed
-    EventBus.on('building:destroyed', ({ entityId }) => {
-      // We can't easily determine owner here from just entityId without world access,
-      // so we play for any building destruction. The cooldown prevents spam.
-      this.playDialog('buildingLost');
+    // Building destroyed (only play for human player's buildings)
+    EventBus.on('building:destroyed', ({ owner }) => {
+      if (owner === 0) {
+        this.playDialog('buildingLost');
+      }
     });
 
     // Unit damaged -> check if harvester/building under attack

@@ -11,6 +11,7 @@ import type { CombatSystem } from '../simulation/CombatSystem';
 import type { ProductionSystem } from '../simulation/ProductionSystem';
 import type { HarvestSystem } from '../simulation/HarvestSystem';
 import { randomFloat, distance2D, worldToTile, TILE_SIZE } from '../utils/MathUtils';
+import { EventBus } from '../core/EventBus';
 
 const MAP_SIZE = 128;
 
@@ -111,6 +112,19 @@ export class AIPlayer implements GameSystem {
     this.baseZ = baseZ;
     this.targetX = targetX;
     this.targetZ = targetZ;
+
+    // Clean up destroyed buildings from placement tracking
+    EventBus.on('building:destroyed', ({ owner, x, z }) => {
+      if (owner === this.playerId) {
+        const idx = this.placedBuildings.findIndex(b =>
+          Math.abs(b.x - x) < 2 && Math.abs(b.z - z) < 2
+        );
+        if (idx >= 0) {
+          this.placedBuildings.splice(idx, 1);
+          this.updateBaseCenterOfMass();
+        }
+      }
+    });
 
     for (const [name, def] of rules.units) {
       if (name.startsWith('HK') && def.cost > 0 && def.cost <= 1200 && !def.canFly) {
@@ -1304,8 +1318,10 @@ export class AIPlayer implements GameSystem {
 
       // Hard difficulty: split off 2-3 fast units for harvester harassment
       let harassUnits: number[] = [];
+      let mainUnits = attackableUnits;
       if (this.difficultyLevel === 'hard' && attackableUnits.length > 5) {
-        harassUnits = attackableUnits.splice(attackableUnits.length - 3, 3);
+        harassUnits = attackableUnits.slice(-3);
+        mainUnits = attackableUnits.slice(0, -3);
       }
 
       // Plan multi-front attack objectives from scout data
@@ -1314,9 +1330,9 @@ export class AIPlayer implements GameSystem {
       if (objectives.length <= 1) {
         // Single objective: original 2-group flank behavior
         const target = objectives[0] ?? { x: this.targetX, z: this.targetZ };
-        const groupSize = Math.ceil(attackableUnits.length / 2);
-        const group1 = attackableUnits.slice(0, groupSize);
-        const group2 = attackableUnits.slice(groupSize);
+        const groupSize = Math.ceil(mainUnits.length / 2);
+        const group1 = mainUnits.slice(0, groupSize);
+        const group2 = mainUnits.slice(groupSize);
 
         const angle1 = Math.atan2(target.z - this.baseZ, target.x - this.baseX);
         const flankAngle = (Math.random() * 0.5 + 0.4) * (Math.random() < 0.5 ? 1 : -1);
@@ -1339,7 +1355,7 @@ export class AIPlayer implements GameSystem {
       } else {
         // Multi-front: assign units to closest objective to minimize travel
         const groups: number[][] = objectives.map(() => []);
-        for (const eid of attackableUnits) {
+        for (const eid of mainUnits) {
           let bestIdx = 0;
           let bestDist = Infinity;
           for (let i = 0; i < objectives.length; i++) {

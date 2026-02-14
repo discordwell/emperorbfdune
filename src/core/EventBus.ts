@@ -9,7 +9,7 @@ interface EventMap {
   'unit:died': { entityId: number; killerEntity: number };
   'unit:promoted': { entityId: number; rank: number };
   'building:placed': { entityId: number; buildingType: string; owner: number };
-  'building:destroyed': { entityId: number };
+  'building:destroyed': { entityId: number; owner: number; x: number; z: number };
   'building:started': { buildingType: string; owner: number };
   'production:complete': { unitType: string; owner: number; buildingId: number };
   'production:started': { unitType: string; owner: number };
@@ -36,6 +36,7 @@ interface EventMap {
   'superweapon:ready': { owner: number; type: string };
   'superweapon:fired': { owner: number; type: string; x: number; z: number };
   'building:survivors': { x: number; z: number; count: number; owner: number };
+  'teleport:target': { x: number; z: number };
 }
 
 type EventName = keyof EventMap;
