@@ -419,13 +419,25 @@ async function main() {
   }
   await terrain.generate();
 
+  // Load model manifest for case-insensitive lookups
+  updateLoading(45, 'Loading model manifest...');
+  await modelManager.loadManifest();
+
   // Preload all models
   updateLoading(50, 'Loading unit models...');
   const allUnitNames = [...gameRules.units.keys()];
   await unitRenderer.preloadModels(allUnitNames);
   updateLoading(75, 'Loading building models...');
-  const allBuildingNames = [...gameRules.buildings.keys()];
+  // Filter out decorative/environmental buildings (birds, whales, etc.) — only preload faction buildings with cost > 0
+  const factionPrefixes = ['AT', 'HK', 'OR', 'FR', 'IM', 'IX', 'TL', 'GU', 'IN'];
+  const allBuildingNames = [...gameRules.buildings.keys()].filter(name => {
+    const def = gameRules.buildings.get(name)!;
+    const art = artMap.get(name);
+    return art?.xaf && def.cost > 0 && factionPrefixes.some(p => name.startsWith(p));
+  });
   await unitRenderer.preloadBuildingModels(allBuildingNames);
+  // Retry any pending model assignments that were deferred during preload
+  unitRenderer.resolvePendingModels();
   updateLoading(90, 'Spawning bases...');
 
   // --- SPAWN HELPERS ---
@@ -3290,6 +3302,71 @@ async function main() {
   (window as any).spawnUnit = (name: string, owner: number, x: number, z: number) => spawnUnit(game.getWorld(), name, owner, x, z);
   (window as any).spawnBuilding = (name: string, owner: number, x: number, z: number) => spawnBuilding(game.getWorld(), name, owner, x, z);
   (window as any).sandworm = sandwormSystem;
+
+  // Enhanced debug namespace
+  (window as any).debug = {
+    modelReport() {
+      const report = modelManager.getLoadReport();
+      console.log(`%cModel Load Report`, 'font-size:14px;font-weight:bold;color:#0af');
+      console.log(`  Loaded: ${report.loaded.length} | Failed: ${report.failed.length} | Total: ${report.total}`);
+      if (report.failed.length > 0) {
+        console.log('%cFailed models:', 'color:#f44;font-weight:bold');
+        for (const name of report.failed) {
+          const result = modelManager.getLoadResults().get(name);
+          console.log(`  - ${name}: ${result?.error ?? 'unknown'}`);
+        }
+      }
+      if (report.loaded.length > 0) {
+        console.log('%cLoaded models:', 'color:#4f4');
+        for (const name of report.loaded) {
+          const result = modelManager.getLoadResults().get(name);
+          console.log(`  + ${name} -> ${result?.url ?? '?'}`);
+        }
+      }
+      return report;
+    },
+
+    artReport() {
+      console.log(`%cArt Mapping Report`, 'font-size:14px;font-weight:bold;color:#fa0');
+      const missing: string[] = [];
+      const mapped: string[] = [];
+      for (const [name] of gameRules.buildings) {
+        const art = artMap.get(name);
+        if (!art?.xaf) missing.push(name);
+        else mapped.push(`${name} -> ${art.xaf}`);
+      }
+      for (const [name] of gameRules.units) {
+        const art = artMap.get(name);
+        if (!art?.xaf) missing.push(name);
+        else mapped.push(`${name} -> ${art.xaf}`);
+      }
+      console.log(`  Mapped: ${mapped.length} | Missing xaf: ${missing.length}`);
+      if (missing.length > 0) {
+        console.log('%cMissing art mappings:', 'color:#f44');
+        for (const name of missing) console.log(`  - ${name}`);
+      }
+      return { mapped: mapped.length, missing };
+    },
+
+    screenshot() {
+      const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
+      if (!canvas) { console.error('No canvas found'); return; }
+      const link = document.createElement('a');
+      link.download = `ebfd-screenshot-${Date.now()}.png`;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+      console.log('Screenshot saved');
+    },
+
+    async evaluate() {
+      try {
+        const { runEvalChecklist } = await import('./debug/EvalChecklist');
+        runEvalChecklist(modelManager, gameRules, artMap, productionSystem, unitRenderer);
+      } catch (e) {
+        console.warn('EvalChecklist module not available:', e);
+      }
+    },
+  };
 }
 
 main().catch(console.error);

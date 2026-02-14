@@ -193,6 +193,21 @@ export class UnitRenderer {
     console.log(`Preloaded ${this.modelTemplates.size} total model templates (units + buildings)`);
   }
 
+  /** Retry pending models for entities still using placeholders */
+  resolvePendingModels(): number {
+    let resolved = 0;
+    for (const [eid, { xafName, scale }] of [...this.pendingModels]) {
+      const template = this.modelTemplates.get(xafName);
+      if (template) {
+        this.pendingModels.delete(eid);
+        this.setEntityModel(eid, xafName, scale);
+        resolved++;
+      }
+    }
+    if (resolved > 0) console.log(`Resolved ${resolved} pending models`);
+    return resolved;
+  }
+
   update(world: World): void {
     this.currentWorld = world;
     this.animTime += 0.016; // ~60fps frame time

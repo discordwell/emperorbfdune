@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "node esbuild.config.js",
     "build": "node esbuild.config.js --production",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "manifest": "node tools/generate-manifest.js"
   },
   "dependencies": {
     "bitecs": "^0.3.40",

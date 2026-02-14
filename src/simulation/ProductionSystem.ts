@@ -198,6 +198,42 @@ export class ProductionSystem {
     return true;
   }
 
+  /** Returns the reason a unit/building can't be built, or null if it can */
+  getBuildBlockReason(playerId: number, typeName: string, isBuilding: boolean): { reason: 'cost' | 'prereq' | 'tech' | 'cap'; detail: string } | null {
+    const def = isBuilding ? this.rules.buildings.get(typeName) : this.rules.units.get(typeName);
+    if (!def) return { reason: 'prereq', detail: 'Unknown type' };
+    const owned = this.playerBuildings.get(playerId);
+    const hasReq = (name: string) => owned && owned.has(name) && (owned.get(name) ?? 0) > 0;
+
+    // Check prerequisites first
+    if (def.primaryBuilding && !hasReq(def.primaryBuilding)) {
+      const bDef = isBuilding ? this.rules.buildings.get(typeName) : null;
+      const alts = bDef?.primaryBuildingAlts ?? [];
+      if (alts.length === 0 || !alts.some(alt => hasReq(alt))) {
+        const reqName = def.primaryBuilding.replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, '');
+        return { reason: 'prereq', detail: reqName };
+      }
+    }
+    if (def.secondaryBuildings) {
+      for (const req of def.secondaryBuildings) {
+        if (!hasReq(req)) {
+          const reqName = req.replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, '');
+          return { reason: 'prereq', detail: reqName };
+        }
+      }
+    }
+    if (def.techLevel > 0 && def.techLevel > this.getPlayerTechLevel(playerId)) {
+      return { reason: 'tech', detail: `Tech ${def.techLevel}` };
+    }
+    if (!isBuilding && this.unitCountCallback && this.unitCountCallback(playerId) >= this.maxUnits) {
+      return { reason: 'cap', detail: `Max ${this.maxUnits} units` };
+    }
+    if (this.harvestSystem.getSolaris(playerId) < def.cost) {
+      return { reason: 'cost', detail: `Need $${def.cost}` };
+    }
+    return null;
+  }
+
   startProduction(playerId: number, typeName: string, isBuilding: boolean): boolean {
     if (!this.canBuild(playerId, typeName, isBuilding)) return false;
 

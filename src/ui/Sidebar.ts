@@ -149,6 +149,38 @@ export class Sidebar {
     container.appendChild(row);
   }
 
+  private static getBuildingRole(name: string, def: BuildingDef): string {
+    if (def.powerGenerated > 0) return 'power';
+    if (def.refinery || name.includes('Silo') || name.includes('Refinery')) return 'economy';
+    if (def.aiDefence || def.turretAttach) return 'defense';
+    if (name.includes('Barracks') || name.includes('Factory') || name.includes('HiTech') ||
+        name.includes('Starport') || name.includes('Palace') || name.includes('Hangar')) return 'production';
+    if (name.includes('Research') || name.includes('Outpost') || name.includes('Radar') ||
+        name.includes('IX') || name.includes('Upgrade')) return 'tech';
+    return 'misc';
+  }
+
+  private static readonly ROLE_COLORS: Record<string, string> = {
+    power: '#2255cc',
+    economy: '#aa8822',
+    production: '#228833',
+    tech: '#884488',
+    defense: '#aa2222',
+    misc: '#444466',
+    // Unit roles
+    infantry: '#228833',
+    vehicle: '#886633',
+    aircraft: '#5555cc',
+  };
+
+  private static readonly ROLE_ORDER: Record<string, number> = {
+    power: 0, economy: 1, production: 2, tech: 3, defense: 4, misc: 5,
+  };
+
+  private static readonly TIER_LABELS: Record<number, string> = {
+    0: 'Basic', 1: 'Basic', 2: 'Tier 2', 3: 'Tier 3', 4: 'Tier 4',
+  };
+
   private renderBuildingItems(grid: HTMLElement): void {
     const prefix = this.factionPrefix;
     const subPrefix = this.subhousePrefix;
@@ -157,23 +189,51 @@ export class Sidebar {
     // Concrete slab button (always available)
     if (this.onConcreteClick) {
       const concreteBtn = document.createElement('button');
-      concreteBtn.style.cssText = 'padding:4px;background:#1a1a3e;border:1px solid #444;color:#ddd;cursor:pointer;font-size:10px;text-align:center;';
-      concreteBtn.innerHTML = '<div style="font-size:11px;font-weight:bold">Concrete</div><div style="color:#f0c040;font-size:10px">$20</div>';
+      concreteBtn.style.cssText = 'padding:6px 4px;background:linear-gradient(135deg,#1a2a4e,#1a1a3e);border:1px solid #444;color:#ddd;cursor:pointer;font-size:10px;text-align:center;display:flex;align-items:center;gap:4px;';
+      concreteBtn.innerHTML = `<span style="display:inline-block;width:14px;height:14px;background:#666;border-radius:2px;flex-shrink:0;"></span><span style="flex:1;text-align:left;"><span style="font-size:11px;font-weight:bold">Concrete</span><br><span style="color:#f0c040;font-size:10px">$20</span></span>`;
       concreteBtn.onclick = () => this.onConcreteClick?.();
       concreteBtn.onmouseenter = () => { concreteBtn.style.borderColor = '#0f0'; };
       concreteBtn.onmouseleave = () => { concreteBtn.style.borderColor = '#444'; };
       grid.appendChild(concreteBtn);
     }
 
+    // Collect and sort buildings by tech tier, then role, then cost
+    const buildings: { name: string; def: BuildingDef }[] = [];
     for (const [name, def] of this.rules.buildings) {
       const validPrefix = name.startsWith(prefix) || (subPrefix && name.startsWith(subPrefix));
       if (!validPrefix) continue;
       if (name.startsWith('IN')) continue;
       if (def.cost <= 0) continue;
+      buildings.push({ name, def });
+    }
+
+    buildings.sort((a, b) => {
+      const tierA = Math.max(a.def.techLevel, 1);
+      const tierB = Math.max(b.def.techLevel, 1);
+      if (tierA !== tierB) return tierA - tierB;
+      const roleA = Sidebar.ROLE_ORDER[Sidebar.getBuildingRole(a.name, a.def)] ?? 5;
+      const roleB = Sidebar.ROLE_ORDER[Sidebar.getBuildingRole(b.name, b.def)] ?? 5;
+      if (roleA !== roleB) return roleA - roleB;
+      return a.def.cost - b.def.cost;
+    });
+
+    // Render with tier separators
+    let lastTier = -1;
+    for (const { name, def } of buildings) {
+      const tier = Math.max(def.techLevel, 1);
+      if (tier !== lastTier) {
+        lastTier = tier;
+        const sep = document.createElement('div');
+        const label = Sidebar.TIER_LABELS[tier] ?? `Tier ${tier}`;
+        sep.style.cssText = 'grid-column:1/-1;padding:3px 4px;font-size:9px;color:#888;border-bottom:1px solid #333;text-transform:uppercase;letter-spacing:1px;margin-top:2px;';
+        sep.textContent = label;
+        grid.appendChild(sep);
+      }
 
       const canBuild = this.production.canBuild(this.playerId, name, true);
       const hotkey = hotkeyIdx < HOTKEYS.length ? HOTKEYS[hotkeyIdx] : undefined;
-      const item = this.createBuildItem(name, def.cost, canBuild, true, hotkey);
+      const role = Sidebar.getBuildingRole(name, def);
+      const item = this.createBuildItem(name, def.cost, canBuild, true, hotkey, role);
       grid.appendChild(item);
       if (hotkey && canBuild) {
         this.hotkeyMap.set(hotkey, { name, isBuilding: true });
@@ -182,20 +242,35 @@ export class Sidebar {
     }
   }
 
+  private static getUnitRole(name: string, def: UnitDef): string {
+    if (name.includes('Harv') || name.includes('harvester')) return 'economy';
+    if (def.infantry) return 'infantry';
+    if (def.canFly) return 'aircraft';
+    if (def.engineer) return 'tech';
+    return 'vehicle';
+  }
+
   private renderUnitItems(grid: HTMLElement, infantryOnly: boolean): void {
     const prefix = this.factionPrefix;
     const subPrefix = this.subhousePrefix;
     let hotkeyIdx = 0;
 
+    // Collect and sort units by cost
+    const units: { name: string; def: UnitDef }[] = [];
     for (const [name, def] of this.rules.units) {
       if (!name.startsWith(prefix) && !(subPrefix && name.startsWith(subPrefix))) continue;
       if (def.cost <= 0) continue;
       if (infantryOnly && !def.infantry) continue;
       if (!infantryOnly && def.infantry) continue;
+      units.push({ name, def });
+    }
+    units.sort((a, b) => a.def.cost - b.def.cost);
 
+    for (const { name, def } of units) {
       const canBuild = this.production.canBuild(this.playerId, name, false);
       const hotkey = hotkeyIdx < HOTKEYS.length ? HOTKEYS[hotkeyIdx] : undefined;
-      const item = this.createBuildItem(name, def.cost, canBuild, false, hotkey);
+      const role = Sidebar.getUnitRole(name, def);
+      const item = this.createBuildItem(name, def.cost, canBuild, false, hotkey, role);
       grid.appendChild(item);
       if (hotkey && canBuild) {
         this.hotkeyMap.set(hotkey, { name, isBuilding: false });
@@ -237,20 +312,47 @@ export class Sidebar {
     }
   }
 
-  private createBuildItem(name: string, cost: number, enabled: boolean, isBuilding: boolean, hotkey?: string): HTMLElement {
+  private createBuildItem(name: string, cost: number, enabled: boolean, isBuilding: boolean, hotkey?: string, role?: string): HTMLElement {
+    // Get block reason for unavailable items
+    const blockReason = !enabled ? this.production.getBuildBlockReason(this.playerId, name, isBuilding) : null;
+    const isCostBlock = blockReason?.reason === 'cost';
+    const isPrereqBlock = blockReason?.reason === 'prereq' || blockReason?.reason === 'tech';
+
     const item = document.createElement('button');
+    const roleColor = role ? (Sidebar.ROLE_COLORS[role] ?? '#444466') : '#444466';
+
     item.style.cssText = `
-      padding:4px;background:${enabled ? '#1a1a3e' : '#0a0a15'};
+      padding:0;background:${enabled ? '#1a1a3e' : '#0a0a15'};
       border:1px solid ${enabled ? '#444' : '#222'};color:${enabled ? '#ddd' : '#555'};
-      cursor:${enabled ? 'pointer' : 'default'};font-size:10px;text-align:center;
-      position:relative;
+      cursor:${enabled ? 'pointer' : 'default'};font-size:10px;text-align:left;
+      position:relative;display:flex;align-items:stretch;overflow:hidden;
+      ${isCostBlock ? 'opacity:0.7;' : ''}
     `;
+
     // Short display name (strip house prefix)
     const displayName = name.replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, '');
+
+    // Colored role indicator bar + content
+    const iconOpacity = enabled ? '1' : '0.4';
+    const costColor = isCostBlock ? '#b8942a' : (enabled ? '#f0c040' : '#665520');
     const hotkeyBadge = hotkey ? `<span style="position:absolute;top:1px;right:3px;font-size:9px;color:${enabled ? '#8cf' : '#335'};font-weight:bold;">${hotkey.toUpperCase()}</span>` : '';
     const repeatBadge = !isBuilding && this.production.isOnRepeat(this.playerId, name)
       ? '<span style="position:absolute;bottom:1px;right:3px;font-size:9px;color:#4f4;">&#x21bb;</span>' : '';
-    item.innerHTML = `${hotkeyBadge}${repeatBadge}<div style="font-size:11px;font-weight:bold">${displayName}</div><div style="color:#f0c040;font-size:10px">$${cost}</div>`;
+
+    // Lock icon for prereq/tech blocks
+    const lockIcon = isPrereqBlock ? '<span style="font-size:10px;color:#f44;margin-right:2px;">&#x1F512;</span>' : '';
+    const blockDetail = (isPrereqBlock && blockReason?.detail)
+      ? `<div style="font-size:8px;color:#a44;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Need: ${blockReason.detail}</div>` : '';
+
+    item.innerHTML = `
+      <div style="width:6px;background:${roleColor};opacity:${iconOpacity};flex-shrink:0;"></div>
+      <div style="padding:4px 4px;flex:1;min-width:0;">
+        ${hotkeyBadge}${repeatBadge}
+        <div style="font-size:11px;font-weight:bold;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${lockIcon}${displayName}</div>
+        <div style="color:${costColor};font-size:10px;">$${cost}</div>
+        ${blockDetail}
+      </div>
+    `;
 
     // Tooltip on hover
     item.onmouseenter = (e) => {
