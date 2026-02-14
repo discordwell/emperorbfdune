@@ -2,14 +2,19 @@ import type { GameSystem } from '../core/Game';
 import type { World } from '../core/ECS';
 import {
   Position, Owner, Health, MoveTarget, UnitType, AttackTarget,
-  addComponent, addEntity, unitQuery, buildingQuery,
-  BuildingType, Harvester, hasComponent,
+  addEntity, unitQuery, buildingQuery,
+  BuildingType, Harvester, hasComponent, ViewRange,
 } from '../core/ECS';
 import type { GameRules } from '../config/RulesParser';
 import type { CombatSystem } from '../simulation/CombatSystem';
 import type { ProductionSystem } from '../simulation/ProductionSystem';
 import type { HarvestSystem } from '../simulation/HarvestSystem';
-import { randomFloat, distance2D } from '../utils/MathUtils';
+import { randomFloat, distance2D, worldToTile, TILE_SIZE } from '../utils/MathUtils';
+
+const MAP_SIZE = 128;
+
+// Unit combat role classification
+type UnitRole = 'antiInf' | 'antiVeh' | 'antiBldg' | 'scout';
 
 // AI: builds structures, trains units, sends attack waves
 export class AIPlayer implements GameSystem {
@@ -53,22 +58,42 @@ export class AIPlayer implements GameSystem {
   private lastAttackTick = 0;
   private attackCooldown = 500; // 20 seconds between major attacks
   private difficulty = 1.0; // Scales with game time
+  private difficultyLevel: 'easy' | 'normal' | 'hard' = 'normal';
+
+  // --- Scouting System ---
+  private scoutMap: Uint8Array = new Uint8Array(MAP_SIZE * MAP_SIZE);
+  private scoutQueue: { x: number; z: number }[] = [];
+  private scoutEntities = new Set<number>();
+  private knownEnemyPositions = new Map<number, { x: number; z: number; typeName: string; tick: number }>();
+  private maxScouts = 2;
+  private scoutInitialized = false;
+
+  // --- Unit Composition System ---
+  private unitRoles = new Map<string, UnitRole>();
+  private compositionGoal = { antiInf: 0.3, antiVeh: 0.4, antiBldg: 0.2, scout: 0.1 };
+  private rolesClassified = false;
+
+  // Cached world reference for methods that need it (set each update tick)
+  private currentWorld: World | null = null;
 
   setDifficulty(level: 'easy' | 'normal' | 'hard'): void {
+    this.difficultyLevel = level;
     if (level === 'easy') {
       this.waveInterval = 1200;
       this.waveSize = 2;
       this.buildCooldown = 350;
       this.attackGroupSize = 3;
       this.attackCooldown = 800;
+      this.maxScouts = 1;
     } else if (level === 'hard') {
       this.waveInterval = 500;
       this.waveSize = 5;
       this.buildCooldown = 120;
       this.attackGroupSize = 6;
       this.attackCooldown = 300;
+      this.maxScouts = 2;
     }
-    // 'normal' uses defaults
+    // 'normal' uses defaults (maxScouts = 2)
   }
 
   constructor(rules: GameRules, combatSystem: CombatSystem, playerId: number, baseX: number, baseZ: number, targetX: number, targetZ: number) {
@@ -131,6 +156,8 @@ export class AIPlayer implements GameSystem {
         }
       }
     }
+    // Re-classify roles when pool changes
+    this.rolesClassified = false;
   }
 
   setUnitPool(prefix: string): void {
@@ -158,12 +185,21 @@ export class AIPlayer implements GameSystem {
     if (this.vehiclePool.length === 0) {
       this.vehiclePool = this.unitPool.slice(0, 2);
     }
+    // Re-classify roles when pool changes
+    this.rolesClassified = false;
   }
 
   init(_world: World): void {}
 
   update(world: World, _dt: number): void {
     this.tickCounter++;
+    this.currentWorld = world;
+
+    // One-time role classification (deferred until first update so all pools are set)
+    if (!this.rolesClassified) {
+      this.classifyUnitRoles();
+      this.rolesClassified = true;
+    }
 
     // Scale difficulty over time (ramps up over 5 minutes)
     this.difficulty = 1.0 + Math.min(2.0, this.tickCounter / 7500);
@@ -211,10 +247,589 @@ export class AIPlayer implements GameSystem {
     if (this.tickCounter % 500 === 250) {
       this.updateAttackTarget(world);
     }
+
+    // --- Scouting ---
+    // Difficulty-based scouting start: easy=1500, normal=750, hard=0
+    const scoutStartTick = this.difficultyLevel === 'easy' ? 1500
+      : this.difficultyLevel === 'normal' ? 750 : 0;
+
+    if (this.tickCounter >= scoutStartTick) {
+      // Manage scouting every ~100 ticks (4 seconds)
+      if (this.tickCounter % 100 === 0) {
+        this.manageScouting(world);
+      }
+      // Update scout knowledge every ~50 ticks (2 seconds)
+      if (this.tickCounter % 50 === 10) {
+        this.updateScoutKnowledge(world);
+      }
+    }
+
+    // --- Composition counter-adjustment every ~200 ticks (8 seconds) ---
+    if (this.tickCounter % 200 === 100) {
+      this.adjustCompositionForCounters();
+    }
+
+    // --- Economy management every ~150 ticks (6 seconds) ---
+    if (this.tickCounter % 150 === 75 && this.production && this.harvestSystem) {
+      this.manageEconomy(world);
+    }
   }
+
+  // ==========================================
+  // Scouting System
+  // ==========================================
+
+  /** Initialize the scout queue with strategic map points */
+  private initScoutQueue(): void {
+    if (this.scoutInitialized) return;
+    this.scoutInitialized = true;
+
+    const worldMax = MAP_SIZE * TILE_SIZE; // 256 world units
+    const margin = 10;
+
+    // On hard difficulty, bias toward the player's side of map first
+    const playerSideFirst = this.difficultyLevel === 'hard';
+
+    // Strategic exploration points: center, edge midpoints, corners
+    const points: { x: number; z: number; priority: number }[] = [
+      // Map center
+      { x: worldMax / 2, z: worldMax / 2, priority: 1 },
+      // Edge midpoints
+      { x: worldMax / 2, z: margin, priority: 2 },
+      { x: worldMax / 2, z: worldMax - margin, priority: 2 },
+      { x: margin, z: worldMax / 2, priority: 2 },
+      { x: worldMax - margin, z: worldMax / 2, priority: 2 },
+      // Corners
+      { x: margin, z: margin, priority: 3 },
+      { x: worldMax - margin, z: margin, priority: 3 },
+      { x: margin, z: worldMax - margin, priority: 3 },
+      { x: worldMax - margin, z: worldMax - margin, priority: 3 },
+      // Quarter points for additional coverage
+      { x: worldMax / 4, z: worldMax / 4, priority: 4 },
+      { x: worldMax * 3 / 4, z: worldMax / 4, priority: 4 },
+      { x: worldMax / 4, z: worldMax * 3 / 4, priority: 4 },
+      { x: worldMax * 3 / 4, z: worldMax * 3 / 4, priority: 4 },
+    ];
+
+    if (playerSideFirst) {
+      // Sort by distance to target (player base) - closest first
+      points.sort((a, b) => {
+        const da = distance2D(a.x, a.z, this.targetX, this.targetZ);
+        const db = distance2D(b.x, b.z, this.targetX, this.targetZ);
+        return da - db;
+      });
+    } else {
+      // Sort by priority (lower = higher priority), then distance from AI base
+      points.sort((a, b) => {
+        if (a.priority !== b.priority) return a.priority - b.priority;
+        const da = distance2D(a.x, a.z, this.baseX, this.baseZ);
+        const db = distance2D(b.x, b.z, this.baseX, this.baseZ);
+        return da - db;
+      });
+    }
+
+    this.scoutQueue = points.map(p => ({ x: p.x, z: p.z }));
+  }
+
+  /** Manage scout unit assignments and movement */
+  private manageScouting(world: World): void {
+    this.initScoutQueue();
+
+    // Clean up dead scouts
+    for (const eid of this.scoutEntities) {
+      if (Health.current[eid] <= 0) {
+        this.scoutEntities.delete(eid);
+      }
+    }
+
+    // Check if scouts have reached their targets
+    for (const eid of this.scoutEntities) {
+      if (Health.current[eid] <= 0) continue;
+      // If scout is idle (reached destination or stuck), assign next waypoint
+      if (MoveTarget.active[eid] === 0) {
+        this.assignNextScoutTarget(eid);
+      } else {
+        // Check if close enough to current target
+        const dx = Position.x[eid] - MoveTarget.x[eid];
+        const dz = Position.z[eid] - MoveTarget.z[eid];
+        if (dx * dx + dz * dz < 25) { // Within 5 world units
+          // Mark surrounding area as explored
+          this.markExplored(Position.x[eid], Position.z[eid], 8);
+          // Move to next target
+          this.assignNextScoutTarget(eid);
+        }
+      }
+    }
+
+    // Recruit new scouts if needed
+    if (this.scoutEntities.size < this.maxScouts) {
+      const units = unitQuery(world);
+      // Find cheap, fast, idle units for scouting
+      const candidates: { eid: number; score: number }[] = [];
+
+      for (const eid of units) {
+        if (Owner.playerId[eid] !== this.playerId) continue;
+        if (Health.current[eid] <= 0) continue;
+        if (hasComponent(world, Harvester, eid)) continue;
+        if (this.scoutEntities.has(eid)) continue;
+        if (this.defenders.has(eid)) continue;
+        // Only consider idle units
+        if (MoveTarget.active[eid] !== 0) continue;
+
+        const unitTypeName = this.getUnitTypeName(eid);
+        if (!unitTypeName) continue;
+
+        const def = this.rules.units.get(unitTypeName);
+        if (!def) continue;
+
+        // Prefer cheap, fast units as scouts
+        const costScore = 1000 / Math.max(1, def.cost); // Higher for cheaper units
+        const speedScore = def.speed;
+        candidates.push({ eid, score: costScore + speedScore * 2 });
+      }
+
+      // Sort by score (best scouts first)
+      candidates.sort((a, b) => b.score - a.score);
+
+      for (const candidate of candidates) {
+        if (this.scoutEntities.size >= this.maxScouts) break;
+        this.scoutEntities.add(candidate.eid);
+        this.assignNextScoutTarget(candidate.eid);
+      }
+    }
+  }
+
+  /** Assign the next unexplored waypoint to a scout */
+  private assignNextScoutTarget(eid: number): void {
+    // Find next unexplored target from queue
+    while (this.scoutQueue.length > 0) {
+      const target = this.scoutQueue[0];
+      const tile = worldToTile(target.x, target.z);
+      if (tile.tx >= 0 && tile.tx < MAP_SIZE && tile.tz >= 0 && tile.tz < MAP_SIZE) {
+        if (this.scoutMap[tile.tz * MAP_SIZE + tile.tx] === 0) {
+          // This tile is unexplored, send scout there
+          MoveTarget.x[eid] = target.x;
+          MoveTarget.z[eid] = target.z;
+          MoveTarget.active[eid] = 1;
+          // Move to back of queue so other scouts get different targets
+          this.scoutQueue.push(this.scoutQueue.shift()!);
+          return;
+        }
+      }
+      // Already explored, remove from queue
+      this.scoutQueue.shift();
+    }
+
+    // All queued targets explored - generate random unexplored location
+    const worldMax = MAP_SIZE * TILE_SIZE;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const rx = randomFloat(10, worldMax - 10);
+      const rz = randomFloat(10, worldMax - 10);
+      const tile = worldToTile(rx, rz);
+      if (tile.tx >= 0 && tile.tx < MAP_SIZE && tile.tz >= 0 && tile.tz < MAP_SIZE) {
+        if (this.scoutMap[tile.tz * MAP_SIZE + tile.tx] === 0) {
+          MoveTarget.x[eid] = rx;
+          MoveTarget.z[eid] = rz;
+          MoveTarget.active[eid] = 1;
+          return;
+        }
+      }
+    }
+
+    // Map mostly explored - patrol between known enemy positions
+    if (this.knownEnemyPositions.size > 0) {
+      const entries = Array.from(this.knownEnemyPositions.values());
+      const target = entries[Math.floor(Math.random() * entries.length)];
+      MoveTarget.x[eid] = target.x + randomFloat(-15, 15);
+      MoveTarget.z[eid] = target.z + randomFloat(-15, 15);
+      MoveTarget.active[eid] = 1;
+    }
+  }
+
+  /** Mark tiles around a world position as explored */
+  private markExplored(wx: number, wz: number, radiusTiles: number): void {
+    const center = worldToTile(wx, wz);
+    for (let dz = -radiusTiles; dz <= radiusTiles; dz++) {
+      for (let dx = -radiusTiles; dx <= radiusTiles; dx++) {
+        if (dx * dx + dz * dz > radiusTiles * radiusTiles) continue;
+        const tx = center.tx + dx;
+        const tz = center.tz + dz;
+        if (tx >= 0 && tx < MAP_SIZE && tz >= 0 && tz < MAP_SIZE) {
+          this.scoutMap[tz * MAP_SIZE + tx] = 1;
+        }
+      }
+    }
+  }
+
+  /** Update the AI's knowledge of enemy positions based on scout vision */
+  private updateScoutKnowledge(world: World): void {
+    const units = unitQuery(world);
+    const buildings = buildingQuery(world);
+
+    // For each AI unit (not just scouts), detect nearby enemy entities
+    for (const eid of units) {
+      if (Owner.playerId[eid] !== this.playerId) continue;
+      if (Health.current[eid] <= 0) continue;
+
+      const viewRange = ViewRange.range ? (ViewRange.range[eid] || 10) : 10;
+      const px = Position.x[eid];
+      const pz = Position.z[eid];
+
+      // Mark explored tiles around this unit
+      const tileSightRadius = Math.ceil(viewRange / TILE_SIZE);
+      // Only scouts actively mark explored tiles (to avoid revealing everything)
+      if (this.scoutEntities.has(eid)) {
+        this.markExplored(px, pz, tileSightRadius);
+      }
+
+      // Scan for enemy units within view range
+      for (const other of units) {
+        if (Owner.playerId[other] === this.playerId) continue;
+        if (Health.current[other] <= 0) continue;
+        const dx = Position.x[other] - px;
+        const dz = Position.z[other] - pz;
+        if (dx * dx + dz * dz < viewRange * viewRange) {
+          const otherTypeName = this.getUnitTypeName(other);
+          this.knownEnemyPositions.set(other, {
+            x: Position.x[other],
+            z: Position.z[other],
+            typeName: otherTypeName ?? 'Unknown',
+            tick: this.tickCounter,
+          });
+        }
+      }
+
+      // Scan for enemy buildings within view range
+      for (const beid of buildings) {
+        if (Owner.playerId[beid] === this.playerId) continue;
+        if (Health.current[beid] <= 0) continue;
+        const dx = Position.x[beid] - px;
+        const dz = Position.z[beid] - pz;
+        if (dx * dx + dz * dz < viewRange * viewRange) {
+          const typeId = BuildingType.id[beid];
+          const bName = this.buildingTypeNames[typeId] ?? 'Building';
+          this.knownEnemyPositions.set(beid + 100000, { // Offset to avoid collision with unit eids
+            x: Position.x[beid],
+            z: Position.z[beid],
+            typeName: bName,
+            tick: this.tickCounter,
+          });
+        }
+      }
+    }
+
+    // Expire old entries (>2000 ticks old = ~80 seconds)
+    for (const [key, info] of this.knownEnemyPositions) {
+      if (this.tickCounter - info.tick > 2000) {
+        this.knownEnemyPositions.delete(key);
+      }
+    }
+  }
+
+  /** Get a unit type name from an entity's UnitType.id component */
+  private getUnitTypeName(eid: number): string | null {
+    const typeId = UnitType.id[eid];
+    // typeId is an index into the rules.units Map (insertion order)
+    if (typeId === undefined || typeId === 0) {
+      // Check if 0 is valid (it's the first unit type) or uninitialized
+      // We'll try to return it regardless since 0 is a valid index
+    }
+    let idx = 0;
+    for (const [name] of this.rules.units) {
+      if (idx === typeId) return name;
+      idx++;
+    }
+    return null;
+  }
+
+  // ==========================================
+  // Unit Composition System
+  // ==========================================
+
+  /** Classify each unit in the pool by combat role using the turret->bullet->warhead chain */
+  private classifyUnitRoles(): void {
+    for (const unitName of this.unitPool) {
+      const def = this.rules.units.get(unitName);
+      if (!def) {
+        this.unitRoles.set(unitName, 'scout');
+        continue;
+      }
+
+      // Check if this is a cheap fast unit with no/weak weapon -> scout
+      if (!def.turretAttach || def.turretAttach === '') {
+        // No turret = no weapon. If cheap and fast, it's a scout
+        if (def.cost <= 200 || def.engineer || def.saboteur || def.infiltrator) {
+          this.unitRoles.set(unitName, 'scout');
+        } else {
+          // Expensive with no weapon - probably a special unit, default to antiVeh
+          this.unitRoles.set(unitName, 'antiVeh');
+        }
+        continue;
+      }
+
+      // Follow the turret -> bullet -> warhead chain
+      const turret = this.rules.turrets.get(def.turretAttach);
+      if (!turret || !turret.bullet) {
+        this.unitRoles.set(unitName, 'scout');
+        continue;
+      }
+
+      const bullet = this.rules.bullets.get(turret.bullet);
+      if (!bullet || !bullet.warhead) {
+        this.unitRoles.set(unitName, 'scout');
+        continue;
+      }
+
+      const warhead = this.rules.warheads.get(bullet.warhead);
+      if (!warhead) {
+        this.unitRoles.set(unitName, 'antiVeh'); // default
+        continue;
+      }
+
+      // Determine best damage type from warhead.vs
+      const vs = warhead.vs;
+
+      // Anti-infantry: best vs None, Earplugs, BPV, Light
+      const antiInfScore = Math.max(
+        vs['None'] ?? 0, vs['Earplugs'] ?? 0, vs['BPV'] ?? 0, vs['Light'] ?? 0
+      );
+
+      // Anti-vehicle: best vs Medium, Heavy
+      const antiVehScore = Math.max(vs['Medium'] ?? 0, vs['Heavy'] ?? 0);
+
+      // Anti-building: best vs Building, CY, Concrete
+      const antiBldgScore = Math.max(vs['Building'] ?? 0, vs['CY'] ?? 0, vs['Concrete'] ?? 0);
+
+      // Cheap fast units with low damage are scouts regardless
+      if (def.cost <= 150 && def.speed >= 3 && bullet.damage < 50) {
+        this.unitRoles.set(unitName, 'scout');
+        continue;
+      }
+
+      // Classify by best relative effectiveness
+      if (antiBldgScore >= antiVehScore && antiBldgScore >= antiInfScore && antiBldgScore > 50) {
+        this.unitRoles.set(unitName, 'antiBldg');
+      } else if (antiVehScore >= antiInfScore) {
+        this.unitRoles.set(unitName, 'antiVeh');
+      } else {
+        this.unitRoles.set(unitName, 'antiInf');
+      }
+    }
+  }
+
+  /** Count living AI units by role */
+  private countUnitsByRole(world: World): Record<UnitRole, number> {
+    const counts: Record<UnitRole, number> = { antiInf: 0, antiVeh: 0, antiBldg: 0, scout: 0 };
+    const units = unitQuery(world);
+
+    for (const eid of units) {
+      if (Owner.playerId[eid] !== this.playerId) continue;
+      if (Health.current[eid] <= 0) continue;
+      if (hasComponent(world, Harvester, eid)) continue;
+
+      const typeName = this.getUnitTypeName(eid);
+      if (!typeName) continue;
+
+      const role = this.unitRoles.get(typeName) ?? 'antiVeh';
+      counts[role]++;
+    }
+
+    return counts;
+  }
+
+  /** Determine which role is most under-represented compared to the composition goal */
+  private getMostNeededRole(world: World): UnitRole {
+    const counts = this.countUnitsByRole(world);
+    const total = counts.antiInf + counts.antiVeh + counts.antiBldg + counts.scout;
+
+    if (total === 0) return 'antiVeh'; // Default on first unit
+
+    // Calculate current ratios vs goal ratios
+    let worstRole: UnitRole = 'antiVeh';
+    let worstDeficit = -Infinity;
+
+    for (const role of ['antiInf', 'antiVeh', 'antiBldg', 'scout'] as UnitRole[]) {
+      const currentRatio = counts[role] / total;
+      const goalRatio = this.compositionGoal[role];
+      const deficit = goalRatio - currentRatio;
+      if (deficit > worstDeficit) {
+        worstDeficit = deficit;
+        worstRole = role;
+      }
+    }
+
+    return worstRole;
+  }
+
+  /** Adjust composition goal based on observed enemy composition (counter-strategy) */
+  private adjustCompositionForCounters(): void {
+    if (this.knownEnemyPositions.size === 0) return;
+
+    let enemyInfantry = 0;
+    let enemyVehicles = 0;
+    let enemyBuildings = 0;
+
+    for (const info of this.knownEnemyPositions.values()) {
+      // Only consider recent sightings (within last 1000 ticks)
+      if (this.tickCounter - info.tick > 1000) continue;
+
+      const def = this.rules.units.get(info.typeName);
+      if (def) {
+        if (def.infantry) {
+          enemyInfantry++;
+        } else {
+          enemyVehicles++;
+        }
+      } else {
+        // Likely a building
+        enemyBuildings++;
+      }
+    }
+
+    const total = enemyInfantry + enemyVehicles + enemyBuildings;
+    if (total < 3) return; // Not enough intel to adjust
+
+    // Start from default ratios and shift toward countering
+    const goal = { antiInf: 0.3, antiVeh: 0.4, antiBldg: 0.2, scout: 0.1 };
+
+    const infRatio = enemyInfantry / total;
+    const vehRatio = enemyVehicles / total;
+    const bldgRatio = enemyBuildings / total;
+
+    // If enemy has lots of infantry, build more anti-infantry
+    if (infRatio > 0.5) {
+      goal.antiInf = 0.5;
+      goal.antiVeh = 0.25;
+      goal.antiBldg = 0.15;
+    }
+    // If enemy has lots of vehicles, build more anti-vehicle
+    else if (vehRatio > 0.5) {
+      goal.antiVeh = 0.55;
+      goal.antiInf = 0.2;
+      goal.antiBldg = 0.15;
+    }
+    // If enemy has lots of buildings (turtling), build more anti-building
+    else if (bldgRatio > 0.4) {
+      goal.antiBldg = 0.35;
+      goal.antiVeh = 0.35;
+      goal.antiInf = 0.2;
+    }
+
+    this.compositionGoal = goal;
+  }
+
+  // ==========================================
+  // Economy Management
+  // ==========================================
+
+  /** Ensure the AI has enough harvesters */
+  private manageEconomy(world: World): void {
+    if (!this.production || !this.harvestSystem) return;
+
+    // Count living AI harvesters
+    const units = unitQuery(world);
+    let harvesterCount = 0;
+    for (const eid of units) {
+      if (Owner.playerId[eid] !== this.playerId) continue;
+      if (Health.current[eid] <= 0) continue;
+      if (hasComponent(world, Harvester, eid)) {
+        harvesterCount++;
+      }
+    }
+
+    // Desired harvester count by difficulty
+    const desiredHarvesters = this.difficultyLevel === 'hard' ? 3 : 2;
+
+    if (harvesterCount < desiredHarvesters) {
+      const solaris = this.harvestSystem.getSolaris(this.playerId);
+      if (solaris < 600) return; // Can't afford one
+
+      // Try to find a harvester unit type in the rules
+      const harvesterNames = [
+        `${this.factionPrefix}Harvester`,
+        `${this.factionPrefix}harvester`,
+        // Also check for generic harvester types
+      ];
+
+      // Also search all units for any harvester-type unit matching our faction
+      for (const [name, def] of this.rules.units) {
+        if (name.startsWith(this.factionPrefix) && def.getUnitWhenBuilt) {
+          // Some buildings produce harvesters when built (refineries)
+          // But we want to directly train harvesters
+        }
+        if (name.toLowerCase().includes('harvester') && name.startsWith(this.factionPrefix)) {
+          if (!harvesterNames.includes(name)) harvesterNames.push(name);
+        }
+      }
+
+      for (const hName of harvesterNames) {
+        if (this.production.canBuild(this.playerId, hName, false)) {
+          this.production.startProduction(this.playerId, hName, false);
+          return;
+        }
+      }
+
+      // If direct harvester training fails, build a refinery (which comes with a harvester)
+      const refName = `${this.factionPrefix}Refinery`;
+      if (solaris >= 1600 && this.production.canBuild(this.playerId, refName, true)) {
+        this.production.startProduction(this.playerId, refName, true);
+      }
+    }
+  }
+
+  // ==========================================
+  // Original Methods (with scout-aware targeting)
+  // ==========================================
 
   /** Dynamically retarget to the player's most valuable building cluster */
   private updateAttackTarget(world: World): void {
+    // First, try to use scout-gathered intelligence
+    if (this.knownEnemyPositions.size > 0) {
+      let bestX = this.targetX;
+      let bestZ = this.targetZ;
+      let bestScore = 0;
+
+      // Score known enemy positions by value
+      for (const info of this.knownEnemyPositions.values()) {
+        // Skip very old intel
+        if (this.tickCounter - info.tick > 1500) continue;
+
+        let score = 1;
+        const name = info.typeName;
+        if (name.includes('ConYard')) score = 10;
+        else if (name.includes('Refinery')) score = 8;
+        else if (name.includes('Factory')) score = 6;
+        else if (name.includes('Starport')) score = 5;
+        else if (name.includes('Windtrap')) score = 3;
+        else if (name.includes('Barracks')) score = 4;
+
+        // Freshness bonus: more recent intel is more reliable
+        const freshness = 1.0 - (this.tickCounter - info.tick) / 2000;
+        score *= Math.max(0.3, freshness);
+
+        // Cluster bonus: count nearby known enemies
+        for (const other of this.knownEnemyPositions.values()) {
+          if (other === info) continue;
+          const dx = other.x - info.x;
+          const dz = other.z - info.z;
+          if (dx * dx + dz * dz < 400) score += 0.5;
+        }
+
+        if (score > bestScore) {
+          bestScore = score;
+          bestX = info.x;
+          bestZ = info.z;
+        }
+      }
+
+      if (bestScore > 0) {
+        this.targetX = bestX;
+        this.targetZ = bestZ;
+        return;
+      }
+    }
+
+    // Fallback: omniscient building scan (original behavior)
     const buildings = buildingQuery(world);
     let bestX = this.targetX;
     let bestZ = this.targetZ;
@@ -406,12 +1021,28 @@ export class AIPlayer implements GameSystem {
     const solaris = this.harvestSystem.getSolaris(this.playerId);
     if (solaris < 200) return;
 
-    // Prefer vehicles when we can afford them, infantry when cheap
+    // --- Composition-aware training ---
+    // Determine which role is most needed
+    if (!this.currentWorld) return;
+    const neededRole = this.getMostNeededRole(this.currentWorld);
+
+    // Filter unit pool by needed role
+    const roleFilteredPool = this.unitPool.filter(name => {
+      const role = this.unitRoles.get(name);
+      return role === neededRole;
+    });
+
+    // Choose pool: role-filtered if available (70% chance), otherwise original logic
     let pool: string[];
-    if (solaris > 800 && this.vehiclePool.length > 0) {
-      pool = Math.random() < 0.3 ? this.infantryPool : this.vehiclePool;
+    if (roleFilteredPool.length > 0 && Math.random() < 0.7) {
+      pool = roleFilteredPool;
     } else {
-      pool = Math.random() < 0.6 ? this.infantryPool : this.vehiclePool;
+      // Fallback to original infantry/vehicle preference
+      if (solaris > 800 && this.vehiclePool.length > 0) {
+        pool = Math.random() < 0.3 ? this.infantryPool : this.vehiclePool;
+      } else {
+        pool = Math.random() < 0.6 ? this.infantryPool : this.vehiclePool;
+      }
     }
     if (pool.length === 0) pool = this.unitPool;
     if (pool.length === 0) return;
@@ -455,6 +1086,8 @@ export class AIPlayer implements GameSystem {
       if (Health.current[eid] <= 0) continue;
       // Skip harvesters
       if (hasComponent(world, Harvester, eid)) continue;
+      // Skip scouts - they have their own orders
+      if (this.scoutEntities.has(eid)) continue;
       totalUnits++;
 
       if (MoveTarget.active[eid] === 0) {
@@ -549,6 +1182,8 @@ export class AIPlayer implements GameSystem {
           if (hasComponent(world, AttackTarget, eid)) {
             AttackTarget.active[eid] = 0;
           }
+          // Remove from scouts if retreating
+          this.scoutEntities.delete(eid);
         }
       }
     }
@@ -604,6 +1239,8 @@ export class AIPlayer implements GameSystem {
         if (hasComponent(world, AttackTarget, eid)) {
           AttackTarget.active[eid] = 0;
         }
+        // Remove from scouts when recalled
+        this.scoutEntities.delete(eid);
       }
     }
   }
@@ -634,6 +1271,7 @@ export class AIPlayer implements GameSystem {
       if (Owner.playerId[eid] !== this.playerId) continue;
       if (Health.current[eid] <= 0) continue;
       if (hasComponent(world, Harvester, eid)) continue;
+      if (this.scoutEntities.has(eid)) continue; // Don't pull scouts
       if (MoveTarget.active[eid] === 0) {
         hunters.push(eid);
         if (hunters.length >= 3) break;
