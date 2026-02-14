@@ -111,6 +111,10 @@ export function parseRules(text: string): GameRules {
   const bulletTypeNames = getListValues(sectionMap.get('BulletTypes') ?? { name: '', entries: [] });
   const warheadTypeNames = getListValues(sectionMap.get('WarheadTypes') ?? { name: '', entries: [] });
 
+  // Global stealth timing defaults from [General] section
+  const globalStealthDelay = parseNum(general['StealthDelay'] ?? '0');
+  const globalStealthDelayAfterFiring = parseNum(general['StealthDelayAfterFiring'] ?? '0');
+
   // Parse units
   const units = new Map<string, UnitDef>();
   for (const name of unitTypeNames) {
@@ -119,6 +123,11 @@ export function parseRules(text: string): GameRules {
     const def = parseUnitDef(name, section);
     // Auto-detect deviator by name
     if (name.toLowerCase().includes('deviator')) def.deviator = true;
+    // Apply global stealth delays as fallback for stealth-capable units
+    if (def.stealth) {
+      if (def.stealthDelay === 0) def.stealthDelay = globalStealthDelay;
+      if (def.stealthDelayAfterFiring === 0) def.stealthDelayAfterFiring = globalStealthDelayAfterFiring;
+    }
     units.set(name, def);
   }
 
@@ -205,6 +214,8 @@ function parseUnitDef(name: string, section: Section): UnitDef {
       case 'CanMoveAnyDirection': def.canMoveAnyDirection = parseBool(value); break;
       case 'StealthedWhenStill': def.stealth = parseBool(value); break;
       case 'Stealthed': def.stealth = parseBool(value); break;
+      case 'StealthDelay': def.stealthDelay = parseNum(value); break;
+      case 'StealthDelayAfterFiring': def.stealthDelayAfterFiring = parseNum(value); break;
       case 'Devastator': def.selfDestruct = parseBool(value); break;
       case 'APC': if (parseBool(value)) { def.apc = true; def.passengerCapacity = 5; } break;
       case 'Ornithoptor': def.ornithopter = parseBool(value); break;
@@ -225,6 +236,8 @@ function parseUnitDef(name: string, section: Section): UnitDef {
       case 'StormDamage': def.stormDamage = parseNum(value); break;
       case 'HitSlowDownAmount': def.hitSlowDownAmount = parseNum(value); break;
       case 'HitSlowDownDuration': def.hitSlowDownDuration = parseNum(value); break;
+      case 'SoundFile': def.soundFile = parseNum(value, -1); break;
+      case 'SoundID': def.soundFile = parseNum(value, -1); break;
       case 'GetUnitWhenBuilt': def.getUnitWhenBuilt = value; break;
       case 'DeploysTo': def.deploysTo = value; break;
       case 'VeterancyLevel':

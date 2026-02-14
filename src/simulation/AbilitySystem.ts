@@ -66,6 +66,11 @@ export class AbilitySystem {
   // --- Infiltrator reveal persistence: eid -> tick when reveal expires ---
   private infiltratorRevealed = new Map<number, number>();
 
+  // --- Stealth timing: per-entity idle/fire cooldown tracking ---
+  private stealthTimers = new Map<number, { idleTicks: number; fireCooldown: number; active: boolean }>();
+  // Track previous positions for movement detection
+  private stealthPrevPositions = new Map<number, { x: number; z: number }>();
+
   // --- APC Transport system ---
   private transportPassengers = new Map<number, number[]>();
 
@@ -95,6 +100,8 @@ export class AbilitySystem {
     this.leechTargets.delete(entityId);
     this.projectorHolograms.delete(entityId);
     this.infiltratorRevealed.delete(entityId);
+    this.stealthTimers.delete(entityId);
+    this.stealthPrevPositions.delete(entityId);
 
     // Kobra: restore base range on death (for ECS entity recycling safety)
     if (this.kobraDeployed.has(entityId)) {
@@ -195,6 +202,33 @@ export class AbilitySystem {
   // =========================================================================
 
   private setupEventHandlers(): void {
+    // Stealth: when a stealthed unit fires, break stealth and set fire cooldown
+    EventBus.on('combat:fire', ({ attackerEntity }) => {
+      if (attackerEntity === undefined) return;
+      const timer = this.stealthTimers.get(attackerEntity);
+      if (timer) {
+        const typeName = this.deps.unitTypeNames[UnitType.id[attackerEntity]];
+        const def = typeName ? this.deps.rules.units.get(typeName) : null;
+        if (def?.stealth) {
+          const delayAfterFiring = def.stealthDelayAfterFiring || 125; // default 5 seconds
+          timer.fireCooldown = delayAfterFiring;
+          timer.idleTicks = 0;
+          if (timer.active) {
+            timer.active = false;
+            this.deps.combatSystem.setStealthed(attackerEntity, false);
+            // Instantly visible when firing
+            const obj = this.deps.unitRenderer.getEntityObject(attackerEntity);
+            if (obj) {
+              obj.traverse(child => {
+                const mat = (child as any).material;
+                if (mat) { mat.transparent = false; mat.opacity = 1.0; }
+              });
+            }
+          }
+        }
+      }
+    });
+
     // NIAB Tank teleport: handle target selection
     EventBus.on('teleport:target' as any, ({ x, z }: { x: number; z: number }) => {
       const { selectionManager, effectsManager, audioManager, selectionPanel, combatSystem } = this.deps;
@@ -242,40 +276,170 @@ export class AbilitySystem {
     }
   }
 
-  /** Stealth visuals: stealthed units become transparent when idle */
+  /** Stealth timing: units gradually stealth when idle, break stealth on move/fire */
   private updateStealth(world: World, tickCount: number): void {
-    if (tickCount % 25 !== 0) return;
+    // Run every tick for smooth transitions (but skip expensive work when possible)
     const { combatSystem, unitRenderer, unitTypeNames, rules } = this.deps;
     const units = unitQuery(world);
 
-    // Clean up expired infiltrator reveals
-    const currentTick = tickCount;
-    for (const [revEid, expireTick] of this.infiltratorRevealed) {
-      if (currentTick >= expireTick || Health.current[revEid] <= 0) {
-        this.infiltratorRevealed.delete(revEid);
+    // Clean up expired infiltrator reveals (every 25 ticks)
+    if (tickCount % 25 === 0) {
+      for (const [revEid, expireTick] of this.infiltratorRevealed) {
+        if (tickCount >= expireTick || Health.current[revEid] <= 0) {
+          this.infiltratorRevealed.delete(revEid);
+        }
       }
     }
+
+    // Check buildings with unstealthRange (every 25 ticks) — collect positions
+    let unstealthZones: { x: number; z: number; r2: number }[] | null = null;
+    if (tickCount % 25 === 0) {
+      unstealthZones = [];
+      const allBuildings = buildingQuery(world);
+      for (const bid of allBuildings) {
+        if (Health.current[bid] <= 0) continue;
+        const bTypeId = BuildingType.id[bid];
+        const bName = this.deps.buildingTypeNames[bTypeId];
+        const bDef = bName ? rules.buildings.get(bName) : null;
+        if (bDef && bDef.unstealthRange > 0) {
+          unstealthZones.push({
+            x: Position.x[bid],
+            z: Position.z[bid],
+            r2: bDef.unstealthRange * bDef.unstealthRange,
+          });
+        }
+      }
+    }
+
+    // Stealth fade transition rate: ~10 ticks to fully fade
+    const FADE_RATE = 0.07; // per tick, 0.7 opacity change over 10 ticks
+
     for (const eid of units) {
       if (Health.current[eid] <= 0) continue;
       const typeId = UnitType.id[eid];
       const typeName = unitTypeNames[typeId];
       const def = typeName ? rules.units.get(typeName) : null;
       if (!def?.stealth) continue;
-      // Don't re-stealth if revealed by infiltrator
+
+      // Initialize timer if needed
+      if (!this.stealthTimers.has(eid)) {
+        this.stealthTimers.set(eid, { idleTicks: 0, fireCooldown: 0, active: false });
+        this.stealthPrevPositions.set(eid, { x: Position.x[eid], z: Position.z[eid] });
+      }
+      const timer = this.stealthTimers.get(eid)!;
+
+      // Detect movement: compare current position to previous
+      const prev = this.stealthPrevPositions.get(eid)!;
+      const cx = Position.x[eid], cz = Position.z[eid];
+      const moved = (cx - prev.x) * (cx - prev.x) + (cz - prev.z) * (cz - prev.z) > 0.01;
+      prev.x = cx;
+      prev.z = cz;
+
+      // Infiltrator reveal overrides stealth
       const isRevealed = this.infiltratorRevealed.has(eid);
-      const isIdle = MoveTarget.active[eid] === 0;
-      const shouldStealth = isIdle && !isRevealed;
-      combatSystem.setStealthed(eid, shouldStealth);
+
+      // Check if near an enemy unstealth building (use cached zones)
+      let inUnstealthZone = false;
+      if (unstealthZones) {
+        const owner = Owner.playerId[eid];
+        const allBuildings = buildingQuery(world);
+        for (const zone of unstealthZones) {
+          // Only enemy buildings unstealth this unit
+          // We need to check building ownership — find the matching building
+          const dx = cx - zone.x;
+          const dz = cz - zone.z;
+          if (dx * dx + dz * dz < zone.r2) {
+            // Check if any building at this zone position is an enemy
+            for (const bid of allBuildings) {
+              if (Health.current[bid] <= 0) continue;
+              if (Owner.playerId[bid] === owner) continue;
+              const bdx = Position.x[bid] - zone.x;
+              const bdz = Position.z[bid] - zone.z;
+              if (bdx * bdx + bdz * bdz < 1) {
+                inUnstealthZone = true;
+                break;
+              }
+            }
+            if (inUnstealthZone) break;
+          }
+        }
+      }
+
+      // Decrement fire cooldown
+      if (timer.fireCooldown > 0) {
+        timer.fireCooldown--;
+      }
+
+      // Determine stealth delay (with defaults)
+      const stealthDelay = def.stealthDelay || 75; // default 3 seconds at 25 tps
+
+      // Update idle tracking
+      if (moved || isRevealed || inUnstealthZone) {
+        // Reset idle counter when moving, revealed, or in unstealth zone
+        timer.idleTicks = 0;
+        if (timer.active) {
+          timer.active = false;
+          combatSystem.setStealthed(eid, false);
+        }
+      } else if (timer.fireCooldown <= 0) {
+        // Not moving, not revealed, fire cooldown expired — count idle ticks
+        timer.idleTicks++;
+        if (timer.idleTicks >= stealthDelay && !timer.active) {
+          // Activate stealth (visual transition handled below)
+          timer.active = true;
+          combatSystem.setStealthed(eid, true);
+        }
+      } else {
+        // Fire cooldown still active — remain visible, reset idle
+        timer.idleTicks = 0;
+        if (timer.active) {
+          timer.active = false;
+          combatSystem.setStealthed(eid, false);
+        }
+      }
+
+      // Visual opacity transition
       const obj = unitRenderer.getEntityObject(eid);
       if (obj) {
-        const targetAlpha = shouldStealth ? (Owner.playerId[eid] === 0 ? 0.3 : 0.0) : 1.0;
+        // Determine target opacity
+        let targetAlpha: number;
+        if (timer.active) {
+          // Stealthed: player's own units at 0.4, enemy units invisible
+          targetAlpha = Owner.playerId[eid] === 0 ? 0.4 : 0.0;
+        } else {
+          targetAlpha = 1.0;
+        }
+
+        // Get current opacity from the first mesh material
+        let currentAlpha = 1.0;
         obj.traverse(child => {
           const mat = (child as any).material;
-          if (mat) {
-            mat.transparent = true;
-            mat.opacity = targetAlpha;
+          if (mat && currentAlpha === 1.0 && mat.opacity !== undefined) {
+            currentAlpha = mat.opacity;
           }
         });
+
+        // Smoothly transition toward target
+        let newAlpha: number;
+        if (timer.active) {
+          // Gradual fade when becoming stealthed
+          newAlpha = Math.max(targetAlpha, currentAlpha - FADE_RATE);
+        } else {
+          // Instant reveal when breaking stealth
+          newAlpha = targetAlpha;
+        }
+
+        // Apply opacity
+        if (Math.abs(newAlpha - currentAlpha) > 0.001) {
+          const isTransparent = newAlpha < 0.99;
+          obj.traverse(child => {
+            const mat = (child as any).material;
+            if (mat) {
+              mat.transparent = isTransparent;
+              mat.opacity = newAlpha;
+            }
+          });
+        }
       }
     }
   }

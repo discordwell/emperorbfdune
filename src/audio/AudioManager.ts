@@ -1,6 +1,8 @@
 import { EventBus } from '../core/EventBus';
 import { SampleBank } from './SampleBank';
+import { VoiceManager } from './VoiceManager';
 import { SFX_MANIFEST, getPrioritySamplePaths } from './SfxManifest';
+import type { GameRules } from '../config/RulesParser';
 
 interface TrackInfo {
   name: string;
@@ -42,8 +44,10 @@ export class AudioManager {
   private combatIntensity = 0; // 0-1
   private lastCombatEvent = 0;
   private sampleBank: SampleBank | null = null;
+  private voiceManager: VoiceManager | null = null;
   private sfxCooldowns = new Map<string, number>(); // SfxType -> last play timestamp
   private samplesPreloaded = false;
+  private unitTypeResolver: ((eid: number) => string) | null = null;
 
   constructor() {
     this.setupEventListeners();
@@ -94,12 +98,56 @@ export class AudioManager {
     this.buildingChecker = fn;
   }
 
+  /**
+   * Set a function that resolves entity ID -> unit type name.
+   * Required for voice line playback (to look up unit-specific voices).
+   */
+  setUnitTypeResolver(fn: (eid: number) => string): void {
+    this.unitTypeResolver = fn;
+  }
+
+  /**
+   * Initialize the voice system. Call after rules are parsed.
+   * Creates the VoiceManager and builds the unit->soundId mapping.
+   */
+  initVoices(rules: GameRules): void {
+    const ctx = this.getContext();
+    if (this.sampleBank) {
+      this.voiceManager = new VoiceManager(this.sampleBank);
+      this.voiceManager.init(rules);
+    }
+  }
+
+  /**
+   * Preload voice files for a faction. Call after initVoices().
+   */
+  async preloadVoices(factionPrefix: string): Promise<void> {
+    if (this.voiceManager) {
+      await this.voiceManager.preloadFaction(factionPrefix);
+    }
+  }
+
+  /**
+   * Get the VoiceManager instance (if initialized).
+   */
+  getVoiceManager(): VoiceManager | null {
+    return this.voiceManager;
+  }
+
   private setupEventListeners(): void {
-    // Unit selection uses classifier for category-specific response
+    // Unit selection: try voice line first, then category SFX
     EventBus.on('unit:selected', (data) => {
-      if (data.entityIds.length > 0 && this.unitClassifier) {
-        const cat = this.unitClassifier(data.entityIds[0]);
-        this.playUnitSfx('select', cat);
+      if (data.entityIds.length > 0) {
+        const eid = data.entityIds[0];
+        // Try voice line
+        if (this.tryPlayVoice(eid, 'select')) return;
+        // Fall back to category SFX
+        if (this.unitClassifier) {
+          const cat = this.unitClassifier(eid);
+          this.playUnitSfx('select', cat);
+        } else {
+          this.playSfx('select');
+        }
       } else {
         this.playSfx('select');
       }

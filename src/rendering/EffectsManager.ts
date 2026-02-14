@@ -18,6 +18,7 @@ interface Explosion {
 type WeaponStyle = 'bullet' | 'rocket' | 'laser' | 'flame' | 'mortar';
 
 interface Projectile {
+  id: number; // Unique ID for trail tracking
   mesh: THREE.Mesh | THREE.Line;
   start: THREE.Vector3;
   end: THREE.Vector3;
@@ -31,6 +32,38 @@ interface Projectile {
 interface Beam {
   line: THREE.Line;
   life: number;
+}
+
+/** Configuration for trail appearance per weapon style */
+interface TrailConfig {
+  maxParticles: number;    // Max trail particles per projectile
+  maxAge: number;          // Lifetime in seconds
+  spawnRate: number;       // Seconds between particle spawns
+  startSize: number;       // Initial particle size
+  endSize: number;         // Final particle size (growth for smoke)
+  startColor: THREE.Color; // Starting color
+  endColor: THREE.Color;   // Fade-to color
+  startOpacity: number;    // Initial opacity
+  drift: number;           // Random lateral drift speed
+  rise: number;            // Upward drift speed (smoke rises)
+}
+
+/** Per-particle data stored in flat arrays for GPU upload */
+interface TrailParticle {
+  x: number;
+  y: number;
+  z: number;
+  age: number;
+  maxAge: number;
+  size: number;
+  endSize: number;
+  r: number; g: number; b: number;       // Start color
+  endR: number; endG: number; endB: number; // End color
+  startOpacity: number;
+  driftX: number;
+  driftZ: number;
+  rise: number;
+  alive: boolean;
 }
 
 interface WormVisual {
@@ -66,6 +99,58 @@ export class EffectsManager {
   private dustPuffs: { mesh: THREE.Mesh; life: number; vy: number }[] = [];
   private dustGeo: THREE.SphereGeometry | null = null;
 
+  // Projectile trail particle system (GPU-efficient single Points object)
+  private static readonly MAX_TRAIL_PARTICLES = 500;
+  private trailParticles: TrailParticle[] = [];
+  private trailPoints: THREE.Points | null = null;
+  private trailPositions!: Float32Array;
+  private trailColors!: Float32Array;
+  private trailSizes!: Float32Array;
+  private trailGeometry!: THREE.BufferGeometry;
+  private trailMaterial!: THREE.PointsMaterial;
+  private nextProjectileId = 0;
+  private projectileTrailTimers = new Map<number, number>(); // projectile id -> time since last spawn
+  // Orphaned trails: projectile ID -> particles that outlive their projectile
+  private orphanedTrailIds = new Set<number>();
+  private static readonly TRAIL_CONFIGS: Record<string, TrailConfig> = {
+    rocket: {
+      maxParticles: 18,
+      maxAge: 0.8,
+      spawnRate: 0.02,
+      startSize: 3.0,
+      endSize: 8.0,
+      startColor: new THREE.Color(0.95, 0.85, 0.75),
+      endColor: new THREE.Color(0.5, 0.5, 0.5),
+      startOpacity: 0.7,
+      drift: 0.3,
+      rise: 0.8,
+    },
+    flame: {
+      maxParticles: 10,
+      maxAge: 0.5,
+      spawnRate: 0.025,
+      startSize: 4.0,
+      endSize: 2.0,
+      startColor: new THREE.Color(1.0, 0.5, 0.1),
+      endColor: new THREE.Color(0.4, 0.05, 0.0),
+      startOpacity: 0.8,
+      drift: 0.5,
+      rise: 0.3,
+    },
+    mortar: {
+      maxParticles: 12,
+      maxAge: 0.6,
+      spawnRate: 0.03,
+      startSize: 2.0,
+      endSize: 5.0,
+      startColor: new THREE.Color(0.7, 0.7, 0.7),
+      endColor: new THREE.Color(0.35, 0.35, 0.35),
+      startOpacity: 0.5,
+      drift: 0.2,
+      rise: 0.5,
+    },
+  };
+
   // Crate visuals: id -> mesh
   private crateVisuals = new Map<number, THREE.Mesh>();
   private crateGeo: THREE.BoxGeometry;
@@ -94,6 +179,9 @@ export class EffectsManager {
     this.wormDustGeo = new THREE.SphereGeometry(0.3, 4, 4);
     this.wormTrailGeo = new THREE.SphereGeometry(0.2, 3, 3);
     this.smokeGeo = new THREE.SphereGeometry(0.4, 5, 5);
+
+    // Initialize trail particle Points system
+    this.initTrailSystem();
   }
 
   spawnExplosion(x: number, y: number, z: number, size: 'small' | 'medium' | 'large' = 'medium'): void {

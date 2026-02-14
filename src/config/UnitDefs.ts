@@ -46,6 +46,8 @@ export interface UnitDef {
 
   // Abilities
   stealth: boolean;
+  stealthDelay: number; // ticks idle before becoming stealthed (0 = use default 75)
+  stealthDelayAfterFiring: number; // ticks after firing before re-stealthing (0 = use default 125)
   selfDestruct: boolean;
   deviator: boolean;
   apc: boolean;
@@ -73,6 +75,9 @@ export interface UnitDef {
   stormDamage: number;
   hitSlowDownAmount: number;
   hitSlowDownDuration: number;
+
+  // Audio
+  soundFile: number; // SoundID for voice lines (-1 = none)
 
   // Special
   getUnitWhenBuilt?: string;
@@ -114,6 +119,8 @@ export function createDefaultUnitDef(name: string): UnitDef {
     wormAttraction: 0,
     canMoveAnyDirection: false,
     stealth: false,
+    stealthDelay: 0,
+    stealthDelayAfterFiring: 0,
     selfDestruct: false,
     deviator: false,
     apc: false,
@@ -132,6 +139,7 @@ export function createDefaultUnitDef(name: string): UnitDef {
     aiSpecial: false,
     aiThreat: 0,
     veterancy: [],
+    soundFile: -1,
     stormDamage: 0,
     hitSlowDownAmount: 0,
     hitSlowDownDuration: 0,
