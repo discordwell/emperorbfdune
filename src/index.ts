@@ -28,6 +28,7 @@ import { CampaignMap } from './ui/CampaignMap';
 import { SelectionPanel } from './ui/SelectionPanel';
 import { EffectsManager } from './rendering/EffectsManager';
 import { SandwormSystem } from './simulation/SandwormSystem';
+import { AbilitySystem } from './simulation/AbilitySystem';
 import { showMissionBriefing } from './ui/MissionBriefing';
 import {
   addEntity, addComponent, removeEntity, hasComponent,
@@ -700,7 +701,31 @@ async function main() {
     }
   });
   selectionPanel.setCombatSystem(combatSystem);
-  selectionPanel.setPassengerCountFn(getTransportPassengerCount);
+  // --- ABILITY SYSTEM ---
+  const abilitySystem = new AbilitySystem({
+    rules: gameRules,
+    combatSystem,
+    sandwormSystem,
+    productionSystem,
+    unitRenderer,
+    effectsManager,
+    scene,
+    audioManager,
+    commandManager,
+    selectionManager,
+    selectionPanel,
+    unitTypeNames,
+    buildingTypeNames,
+    unitTypeIdMap,
+    spawnUnit: (w, typeName, owner, x, z) => spawnUnit(w, typeName, owner, x, z),
+    spawnBuilding: (w, typeName, owner, x, z) => spawnBuilding(w, typeName, owner, x, z),
+    getWorld: () => game.getWorld(),
+    getTickCount: () => game.getTickCount(),
+    housePrefix: house.prefix,
+    enemyPrefix: house.enemyPrefix,
+  });
+
+  selectionPanel.setPassengerCountFn((eid) => abilitySystem.getTransportPassengerCount(eid));
 
   // --- AI SPAWN CALLBACK ---
 
@@ -742,42 +767,11 @@ async function main() {
     movement.unregisterFlyer(entityId);
     effectsManager.clearBuildingDamage(entityId);
 
-    // Kill passengers if this was a transport
-    killPassengers(entityId);
-    // If this entity was a passenger, remove from its transport
-    for (const [tid, passengers] of transportPassengers) {
-      const idx = passengers.indexOf(entityId);
-      if (idx >= 0) { passengers.splice(idx, 1); break; }
-    }
     // Clean up aircraft ammo tracking
     aircraftAmmo.delete(entityId);
     rearmingAircraft.delete(entityId);
-    // Clean up special ability tracking
-    leechTargets.delete(entityId);
-    projectorHolograms.delete(entityId);
-    infiltratorRevealed.delete(entityId);
-    // Kobra: restore base range on death (for ECS entity recycling safety)
-    if (kobraDeployed.has(entityId)) {
-      kobraDeployed.delete(entityId);
-      kobraBaseRange.delete(entityId);
-    }
-    // NIAB: clear suppression on death
-    if (niabCooldowns.has(entityId)) {
-      niabCooldowns.delete(entityId);
-      combatSystem.setSuppressed(entityId, false);
-    }
-    // Dismount worm if rider dies
-    sandwormSystem.dismountWorm(entityId);
-    // If this entity was being leeched, detach the leech(es)
-    const leechesToDetach: number[] = [];
-    for (const [leechEid, targetEid] of leechTargets) {
-      if (targetEid === entityId) leechesToDetach.push(leechEid);
-    }
-    for (const leechEid of leechesToDetach) {
-      leechTargets.delete(leechEid);
-      combatSystem.setSuppressed(leechEid, false);
-      Position.y[leechEid] = 0.1;
-    }
+    // Clean up all ability tracking (transport, leech, kobra, NIAB, etc.)
+    abilitySystem.handleUnitDeath(entityId);
 
     // Visual effects — infantry get small, vehicles medium, buildings large
     const isUnit = hasComponent(world, UnitType, entityId);
@@ -932,9 +926,6 @@ async function main() {
   });
 
   // Projectile visuals — color and speed vary by weapon type
-  // Deviator conversion tracking: entityId -> { originalOwner, revertTick }
-  const deviatedUnits = new Map<number, { originalOwner: number; revertTick: number }>();
-
   EventBus.on('combat:fire', ({ attackerX, attackerZ, targetX, targetZ, weaponType, attackerEntity, targetEntity }) => {
     let color = 0xffaa00; // Default orange
     let speed = 40;
@@ -973,50 +964,9 @@ async function main() {
       }
     }
 
-    // Deviator conversion: if attacker is a deviator, convert target temporarily
+    // Deviator & contaminator abilities (delegated to AbilitySystem)
     if (attackerEntity !== undefined && targetEntity !== undefined) {
-      const atTypeId = UnitType.id[attackerEntity];
-      const atName = unitTypeNames[atTypeId];
-      const atDef = atName ? gameRules.units.get(atName) : null;
-      if (atDef?.deviator && Health.current[targetEntity] > 0) {
-        const tgtDef = unitTypeNames[UnitType.id[targetEntity]] ? gameRules.units.get(unitTypeNames[UnitType.id[targetEntity]]) : null;
-        if (tgtDef?.canBeDeviated !== false) {
-          const attackerOwner = Owner.playerId[attackerEntity];
-          const originalOwner = Owner.playerId[targetEntity];
-          if (originalOwner !== attackerOwner) {
-            // Store original owner for revert
-            if (!deviatedUnits.has(targetEntity)) {
-              deviatedUnits.set(targetEntity, { originalOwner, revertTick: game.getTickCount() + 400 });
-            }
-            Owner.playerId[targetEntity] = attackerOwner;
-            if (attackerOwner === 0) selectionPanel.addMessage('Unit deviated!', '#cc44ff');
-            else if (originalOwner === 0) selectionPanel.addMessage('Unit mind-controlled!', '#ff4444');
-          }
-        }
-      }
-
-      // Contaminator replication: Contaminator kills infantry and spawns a new Contaminator
-      const atName2 = unitTypeNames[UnitType.id[attackerEntity]];
-      if (atName2?.includes('Contaminator')) {
-        const tgtTypeId = UnitType.id[targetEntity];
-        const tgtName = unitTypeNames[tgtTypeId];
-        const tgtDef = tgtName ? gameRules.units.get(tgtName) : null;
-        if (tgtDef?.infantry && Health.current[targetEntity] > 0) {
-          const attackerOwner = Owner.playerId[attackerEntity];
-          const tgtOwner = Owner.playerId[targetEntity];
-          if (tgtOwner !== attackerOwner) {
-            // Kill the target
-            Health.current[targetEntity] = 0;
-            EventBus.emit('unit:died', { entityId: targetEntity, killerEntity: attackerEntity });
-            // Spawn a new Contaminator at the target's position
-            const cx = Position.x[targetEntity];
-            const cz = Position.z[targetEntity];
-            spawnUnit(game.getWorld(), atName2, attackerOwner, cx, cz);
-            if (attackerOwner === 0) selectionPanel.addMessage('Infantry contaminated!', '#88ff44');
-            else if (tgtOwner === 0) selectionPanel.addMessage('Unit contaminated by enemy!', '#ff4444');
-          }
-        }
-      }
+      abilitySystem.handleCombatHit(attackerEntity, targetEntity);
     }
   });
 
@@ -1032,33 +982,7 @@ async function main() {
     }
   });
 
-  // NIAB Tank teleport: handle target selection
-  EventBus.on('teleport:target', ({ x, z }: { x: number; z: number }) => {
-    const selected = selectionManager.getSelectedEntities();
-    const w = game.getWorld();
-    for (const eid of selected) {
-      if (Owner.playerId[eid] !== 0 || Health.current[eid] <= 0) continue;
-      const typeName = unitTypeNames[UnitType.id[eid]];
-      const def = typeName ? gameRules.units.get(typeName) : null;
-      if (!def?.niabTank) continue;
-      if (niabCooldowns.has(eid)) continue;
-
-      // Teleport!
-      effectsManager.spawnExplosion(Position.x[eid], 0, Position.z[eid], 'small');
-      Position.x[eid] = x;
-      Position.z[eid] = z;
-      Position.y[eid] = 0.1;
-      MoveTarget.active[eid] = 0;
-      effectsManager.spawnExplosion(x, 0, z, 'small');
-      audioManager.playSfx('explosion');
-      // Cooldown (suppress combat during sleep time)
-      const sleepTime = def.teleportSleepTime || 93;
-      niabCooldowns.set(eid, sleepTime);
-      combatSystem.setSuppressed(eid, true);
-      selectionPanel.addMessage('NIAB teleported!', '#88aaff');
-      break; // Only teleport first selected NIAB
-    }
-  });
+  // NIAB Tank teleport handling moved to AbilitySystem
 
   // Track credits spent on production
   EventBus.on('production:started', ({ unitType, owner }: { unitType: string; owner: number }) => {
@@ -1272,87 +1196,14 @@ async function main() {
   let nextCrateId = 0;
   const activeCrates = new Map<number, { x: number; z: number; type: string }>();
 
-  // --- APC TRANSPORT SYSTEM ---
-  // Maps transport entity -> array of passenger entity IDs
-  const transportPassengers = new Map<number, number[]>();
-
-  function loadIntoTransport(transportEid: number, infantryEid: number): boolean {
-    const typeName = unitTypeNames[UnitType.id[transportEid]];
-    const def = typeName ? gameRules.units.get(typeName) : null;
-    if (!def?.apc) return false;
-    const passengers = transportPassengers.get(transportEid) ?? [];
-    if (passengers.length >= def.passengerCapacity) return false;
-    // Only infantry can board
-    const infTypeName = unitTypeNames[UnitType.id[infantryEid]];
-    const infDef = infTypeName ? gameRules.units.get(infTypeName) : null;
-    if (!infDef?.infantry) return false;
-    // Must be same owner
-    if (Owner.playerId[infantryEid] !== Owner.playerId[transportEid]) return false;
-
-    passengers.push(infantryEid);
-    transportPassengers.set(transportEid, passengers);
-    // Hide the passenger: move off-map, stop movement
-    Position.x[infantryEid] = -999;
-    Position.z[infantryEid] = -999;
-    Position.y[infantryEid] = -999;
-    MoveTarget.active[infantryEid] = 0;
-    AttackTarget.active[infantryEid] = 0;
-    return true;
-  }
-
-  function unloadTransport(transportEid: number): number {
-    const passengers = transportPassengers.get(transportEid);
-    if (!passengers || passengers.length === 0) return 0;
-    const tx = Position.x[transportEid];
-    const tz = Position.z[transportEid];
-    let unloaded = 0;
-    for (let i = 0; i < passengers.length; i++) {
-      const pEid = passengers[i];
-      if (Health.current[pEid] <= 0) continue;
-      // Place in a circle around the transport
-      const angle = (i / passengers.length) * Math.PI * 2;
-      Position.x[pEid] = tx + Math.cos(angle) * 3;
-      Position.z[pEid] = tz + Math.sin(angle) * 3;
-      Position.y[pEid] = 0.1;
-      MoveTarget.active[pEid] = 0;
-      unloaded++;
-    }
-    transportPassengers.delete(transportEid);
-    return unloaded;
-  }
-
-  function killPassengers(transportEid: number): void {
-    const passengers = transportPassengers.get(transportEid);
-    if (!passengers) return;
-    const world = game.getWorld();
-    for (const pEid of passengers) {
-      if (Health.current[pEid] <= 0) continue;
-      Health.current[pEid] = 0;
-      EventBus.emit('unit:died', { entityId: pEid, killerEntity: -1 });
-    }
-    transportPassengers.delete(transportEid);
-  }
-
-  function getTransportPassengerCount(transportEid: number): number {
-    return transportPassengers.get(transportEid)?.length ?? 0;
-  }
+  // --- APC TRANSPORT SYSTEM (delegated to AbilitySystem) ---
 
   // --- AIRCRAFT AMMO/REARMING SYSTEM ---
   const MAX_AMMO = 6;
   const aircraftAmmo = new Map<number, number>(); // eid -> shots remaining
   const rearmingAircraft = new Set<number>(); // aircraft currently at a pad rearming
 
-  // Leech parasitization: leechEid -> targetVehicleEid
-  const leechTargets = new Map<number, number>();
-  // Projector holograms: hologramEid -> ticksRemaining
-  const projectorHolograms = new Map<number, number>();
-  // Kobra deployed units (immobilized, doubled range)
-  const kobraDeployed = new Set<number>();
-  const kobraBaseRange = new Map<number, number>(); // eid -> original combat range
-  // NIAB Tank teleport cooldowns: eid -> ticksRemaining
-  const niabCooldowns = new Map<number, number>();
-  // Infiltrator reveal persistence: eid -> tick when reveal expires
-  const infiltratorRevealed = new Map<number, number>();
+  // Ability state maps moved to AbilitySystem
 
   function findNearestLandingPad(world: World, owner: number, fromX: number, fromZ: number): { eid: number; x: number; z: number } | null {
     const blds = buildingQuery(world);
@@ -1629,18 +1480,7 @@ async function main() {
       }
     }
 
-    // Revert deviated units when timer expires
-    if (game.getTickCount() % 25 === 0 && deviatedUnits.size > 0) {
-      const tick = game.getTickCount();
-      for (const [eid, info] of deviatedUnits) {
-        if (tick >= info.revertTick || Health.current[eid] <= 0) {
-          if (Health.current[eid] > 0) {
-            Owner.playerId[eid] = info.originalOwner;
-          }
-          deviatedUnits.delete(eid);
-        }
-      }
-    }
+    // Deviator revert now handled by AbilitySystem.update()
 
     // Dust trails for moving ground units (every 3rd tick to limit particles)
     if (game.getTickCount() % 3 === 0) {
@@ -1817,413 +1657,13 @@ async function main() {
         );
       }
 
-      // Stealth visuals: stealthed units become transparent when idle
-      // Clean up expired infiltrator reveals
-      const currentTick = game.getTickCount();
-      for (const [revEid, expireTick] of infiltratorRevealed) {
-        if (currentTick >= expireTick || Health.current[revEid] <= 0) {
-          infiltratorRevealed.delete(revEid);
-        }
-      }
-      for (const eid of units) {
-        if (Health.current[eid] <= 0) continue;
-        const typeId = UnitType.id[eid];
-        const typeName = unitTypeNames[typeId];
-        const def = typeName ? gameRules.units.get(typeName) : null;
-        if (!def?.stealth) continue;
-        // Don't re-stealth if revealed by infiltrator
-        const isRevealed = infiltratorRevealed.has(eid);
-        const isIdle = MoveTarget.active[eid] === 0;
-        const shouldStealth = isIdle && !isRevealed;
-        combatSystem.setStealthed(eid, shouldStealth);
-        const obj = unitRenderer.getEntityObject(eid);
-        if (obj) {
-          const targetAlpha = shouldStealth ? (Owner.playerId[eid] === 0 ? 0.3 : 0.0) : 1.0;
-          obj.traverse(child => {
-            const mat = (child as any).material;
-            if (mat) {
-              mat.transparent = true;
-              mat.opacity = targetAlpha;
-            }
-          });
-        }
-      }
+      // Stealth visuals now handled by AbilitySystem.updateStealth()
     }
 
-    // Infantry crushing: vehicles crush infantry they overlap (every 10 ticks)
-    if (game.getTickCount() % 10 === 0) {
-      const allUnits = unitQuery(world);
-      // Pre-filter: collect moving crushers and crushable infantry separately
-      const crushers: number[] = [];
-      const crushable: number[] = [];
-      for (const eid of allUnits) {
-        if (Health.current[eid] <= 0) continue;
-        const typeId = UnitType.id[eid];
-        const typeName = unitTypeNames[typeId];
-        const def = typeName ? gameRules.units.get(typeName) : null;
-        if (!def) continue;
-        if (def.crushes && MoveTarget.active[eid] === 1) crushers.push(eid);
-        if (def.crushable) crushable.push(eid);
-      }
-      // Only do O(crushers * crushable) check, typically much smaller than O(n^2)
-      for (const eid of crushers) {
-        const px = Position.x[eid], pz = Position.z[eid];
-        const owner = Owner.playerId[eid];
-        for (const other of crushable) {
-          if (Health.current[other] <= 0) continue;
-          if (Owner.playerId[other] === owner) continue;
-          const dx = px - Position.x[other];
-          const dz = pz - Position.z[other];
-          if (dx * dx + dz * dz < 2.0) {
-            Health.current[other] = 0;
-            EventBus.emit('unit:died', { entityId: other, killerEntity: eid });
-          }
-        }
-      }
-    }
-
-    // Engineer building capture: engineers capture enemy buildings on contact (every 10 ticks)
-    if (game.getTickCount() % 10 === 5) {
-      const allUnits = unitQuery(world);
-      const allBuildings = buildingQuery(world);
-      for (const eid of allUnits) {
-        if (Health.current[eid] <= 0) continue;
-        const typeId = UnitType.id[eid];
-        const typeName = unitTypeNames[typeId];
-        const def = typeName ? gameRules.units.get(typeName) : null;
-        if (!def || !def.engineer) continue;
-        if (MoveTarget.active[eid] !== 1) continue; // Only capture while moving (toward target)
-
-        const engOwner = Owner.playerId[eid];
-
-        for (const bid of allBuildings) {
-          if (Health.current[bid] <= 0) continue;
-          if (Owner.playerId[bid] === engOwner) continue; // Skip friendly buildings
-          const bTypeId = BuildingType.id[bid];
-          const bName = buildingTypeNames[bTypeId];
-          const bDef = bName ? gameRules.buildings.get(bName) : null;
-          if (bDef && !bDef.canBeEngineered) continue; // Building can't be captured
-
-          const dx = Position.x[eid] - Position.x[bid];
-          const dz = Position.z[eid] - Position.z[bid];
-          if (dx * dx + dz * dz < 6.0) { // Within ~2.4 units
-            // Capture: transfer ownership
-            const prevOwner = Owner.playerId[bid];
-            Owner.playerId[bid] = engOwner;
-            productionSystem.removePlayerBuilding(prevOwner, bName ?? '');
-            productionSystem.addPlayerBuilding(engOwner, bName ?? '');
-
-            // Engineer is consumed
-            Health.current[eid] = 0;
-            EventBus.emit('unit:died', { entityId: eid, killerEntity: -1 });
-
-            if (engOwner === 0) {
-              selectionPanel.addMessage(`Captured ${(bName ?? '').replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, '')}!`, '#44ff44');
-            } else if (prevOwner === 0) {
-              selectionPanel.addMessage('Building captured by enemy!', '#ff4444');
-            }
-            break; // Engineer consumed, stop checking
-          }
-        }
-      }
-    }
-
-    // Saboteur auto-suicide: saboteurs destroy enemy buildings on contact (same tick as engineer check)
-    if (game.getTickCount() % 10 === 5) {
-      const sabUnits = unitQuery(world);
-      const sabBlds = buildingQuery(world);
-      for (const eid of sabUnits) {
-        if (Health.current[eid] <= 0) continue;
-        const typeId = UnitType.id[eid];
-        const typeName = unitTypeNames[typeId];
-        const def = typeName ? gameRules.units.get(typeName) : null;
-        if (!def?.saboteur) continue;
-
-        const sabOwner = Owner.playerId[eid];
-        for (const bid of sabBlds) {
-          if (Health.current[bid] <= 0) continue;
-          if (Owner.playerId[bid] === sabOwner) continue;
-          const dx = Position.x[eid] - Position.x[bid];
-          const dz = Position.z[eid] - Position.z[bid];
-          if (dx * dx + dz * dz < 9.0) { // Within 3 units
-            // Massive damage to the building (usually kills it)
-            const dmg = Math.max(Health.max[bid] * 0.8, 2000);
-            Health.current[bid] = Math.max(0, Health.current[bid] - dmg);
-            // Explosion effects
-            effectsManager.spawnExplosion(Position.x[bid], 0, Position.z[bid], 'large');
-            audioManager.playSfx('explosion');
-            scene.shake(0.5);
-            if (Health.current[bid] <= 0) {
-              EventBus.emit('unit:died', { entityId: bid, killerEntity: eid });
-            }
-            // Saboteur is consumed
-            Health.current[eid] = 0;
-            EventBus.emit('unit:died', { entityId: eid, killerEntity: -1 });
-            if (sabOwner === 0) selectionPanel.addMessage('Saboteur detonated!', '#ff8800');
-            else if (Owner.playerId[bid] === 0) selectionPanel.addMessage('Saboteur attack on base!', '#ff4444');
-            break;
-          }
-        }
-      }
-    }
-
-    // Infiltrator: reveals stealthed enemies within blast radius, then suicide-attacks building
-    if (game.getTickCount() % 10 === 5) {
-      const infUnits = unitQuery(world);
-      const infBlds = buildingQuery(world);
-      for (const eid of infUnits) {
-        if (Health.current[eid] <= 0) continue;
-        const typeId = UnitType.id[eid];
-        const typeName = unitTypeNames[typeId];
-        const def = typeName ? gameRules.units.get(typeName) : null;
-        if (!def?.infiltrator) continue;
-        const infOwner = Owner.playerId[eid];
-
-        // Passive: reveal stealthed enemies within 10 tiles (persistent for 200 ticks)
-        for (const other of infUnits) {
-          if (Health.current[other] <= 0 || Owner.playerId[other] === infOwner) continue;
-          const dx = Position.x[eid] - Position.x[other];
-          const dz = Position.z[eid] - Position.z[other];
-          if (dx * dx + dz * dz < 100) { // ~10 unit radius
-            combatSystem.setStealthed(other, false);
-            infiltratorRevealed.set(other, game.getTickCount() + 200);
-          }
-        }
-
-        // Active: suicide on enemy building contact (like saboteur but full HP damage + destealths area)
-        if (MoveTarget.active[eid] !== 1) continue;
-        for (const bid of infBlds) {
-          if (Health.current[bid] <= 0) continue;
-          if (Owner.playerId[bid] === infOwner) continue;
-          const dx = Position.x[eid] - Position.x[bid];
-          const dz = Position.z[eid] - Position.z[bid];
-          if (dx * dx + dz * dz < 9.0) {
-            // Full HP damage to building
-            const dmg = Health.max[bid];
-            Health.current[bid] = Math.max(0, Health.current[bid] - dmg);
-            effectsManager.spawnExplosion(Position.x[bid], 0, Position.z[bid], 'large');
-            audioManager.playSfx('explosion');
-            scene.shake(0.5);
-            if (Health.current[bid] <= 0) {
-              EventBus.emit('unit:died', { entityId: bid, killerEntity: eid });
-            }
-            // Destealth all enemies in radius
-            for (const other of infUnits) {
-              if (Owner.playerId[other] === infOwner || Health.current[other] <= 0) continue;
-              const ox = Position.x[other] - Position.x[eid];
-              const oz = Position.z[other] - Position.z[eid];
-              if (ox * ox + oz * oz < 100) {
-                combatSystem.setStealthed(other, false);
-              }
-            }
-            Health.current[eid] = 0;
-            EventBus.emit('unit:died', { entityId: eid, killerEntity: -1 });
-            if (infOwner === 0) selectionPanel.addMessage('Infiltrator deployed!', '#88aaff');
-            else if (Owner.playerId[bid] === 0) selectionPanel.addMessage('Infiltrator attack on base!', '#ff4444');
-            break;
-          }
-        }
-      }
-    }
-
-    // Leech: parasitizes enemy vehicles, drains HP over time, spawns new Leech when vehicle dies
-    if (game.getTickCount() % 15 === 0) {
-      const leechUnits = unitQuery(world);
-      for (const eid of leechUnits) {
-        if (Health.current[eid] <= 0) continue;
-        const typeId = UnitType.id[eid];
-        const typeName = unitTypeNames[typeId];
-        const def = typeName ? gameRules.units.get(typeName) : null;
-        if (!def?.leech) continue;
-
-        const leechOwner = Owner.playerId[eid];
-
-        // Check if actively parasitizing (stored in leechTargets map)
-        const parasiteTarget = leechTargets.get(eid);
-        if (parasiteTarget !== undefined) {
-          // Drain target vehicle
-          if (Health.current[parasiteTarget] <= 0 || Position.x[parasiteTarget] < -900) {
-            // Target died or gone - spawn a new Leech at target's position
-            const tx = Position.x[parasiteTarget];
-            const tz = Position.z[parasiteTarget];
-            if (tx > -900) {
-              spawnUnit(game.getWorld(), typeName, leechOwner, tx + 2, tz + 2);
-              if (leechOwner === 0) selectionPanel.addMessage('Leech replicated!', '#88ff44');
-            }
-            leechTargets.delete(eid);
-            // Leech detaches and becomes active again
-            Position.y[eid] = 0.1;
-            continue;
-          }
-          // Drain 2% of target's max HP per tick
-          const drainDmg = Health.max[parasiteTarget] * 0.02;
-          Health.current[parasiteTarget] = Math.max(0, Health.current[parasiteTarget] - drainDmg);
-          // Follow target position
-          Position.x[eid] = Position.x[parasiteTarget];
-          Position.z[eid] = Position.z[parasiteTarget];
-          Position.y[eid] = 1.5; // Sit on top of vehicle
-          if (Health.current[parasiteTarget] <= 0) {
-            EventBus.emit('unit:died', { entityId: parasiteTarget, killerEntity: eid });
-            // Spawn new Leech
-            spawnUnit(game.getWorld(), typeName, leechOwner,
-              Position.x[parasiteTarget] + 2, Position.z[parasiteTarget] + 2);
-            leechTargets.delete(eid);
-            Position.y[eid] = 0.1;
-            if (leechOwner === 0) selectionPanel.addMessage('Leech replicated!', '#88ff44');
-            else if (Owner.playerId[parasiteTarget] === 0) selectionPanel.addMessage('Vehicle destroyed by Leech!', '#ff4444');
-          }
-          continue;
-        }
-
-        // Not parasitizing: look for nearby enemy vehicles to latch onto
-        if (MoveTarget.active[eid] !== 1) continue; // Only while moving toward target
-        for (const other of leechUnits) {
-          if (other === eid || Health.current[other] <= 0) continue;
-          if (Owner.playerId[other] === leechOwner) continue;
-          // Must be a vehicle (not infantry, not flying)
-          const otherTypeId = UnitType.id[other];
-          const otherTypeName = unitTypeNames[otherTypeId];
-          const otherDef = otherTypeName ? gameRules.units.get(otherTypeName) : null;
-          if (!otherDef || otherDef.infantry || otherDef.canFly) continue;
-          if (otherDef.cantBeLeeched || otherDef.leech) continue;
-          const dx = Position.x[eid] - Position.x[other];
-          const dz = Position.z[eid] - Position.z[other];
-          if (dx * dx + dz * dz < 6.0) {
-            // Latch on!
-            leechTargets.set(eid, other);
-            MoveTarget.active[eid] = 0;
-            combatSystem.setSuppressed(eid, true);
-            if (leechOwner === 0) selectionPanel.addMessage('Leech attached!', '#88ff44');
-            else if (Owner.playerId[other] === 0) selectionPanel.addMessage('Leech on your vehicle!', '#ff4444');
-            break;
-          }
-        }
-      }
-    }
-
-    // Projector: creates holographic copies that decay over time
-    if (game.getTickCount() % 25 === 12) {
-      // Decay existing holograms
-      for (const [hEid, ticksLeft] of projectorHolograms) {
-        if (Health.current[hEid] <= 0) { projectorHolograms.delete(hEid); continue; }
-        const remaining = ticksLeft - 25;
-        if (remaining <= 0) {
-          // Hologram expires
-          Health.current[hEid] = 0;
-          EventBus.emit('unit:died', { entityId: hEid, killerEntity: -1 });
-          projectorHolograms.delete(hEid);
-        } else {
-          projectorHolograms.set(hEid, remaining);
-          // Holograms flicker at low life
-          if (remaining < 500) {
-            const obj = unitRenderer.getEntityObject(hEid);
-            if (obj) {
-              const alpha = 0.3 + 0.4 * Math.sin(game.getTickCount() * 0.2);
-              obj.traverse(child => {
-                const mat = (child as any).material;
-                if (mat) { mat.transparent = true; mat.opacity = alpha; }
-              });
-            }
-          }
-        }
-      }
-    }
-
-    // Kobra deployed state: immobilized but doubled range
-    if (game.getTickCount() % 25 === 0) {
-      for (const eid of kobraDeployed) {
-        if (Health.current[eid] <= 0) { kobraDeployed.delete(eid); continue; }
-        // Prevent movement while deployed
-        MoveTarget.active[eid] = 0;
-      }
-    }
-
-    // NIAB Tank teleport cooldowns
-    if (game.getTickCount() % 25 === 0 && niabCooldowns.size > 0) {
-      for (const [eid, ticks] of niabCooldowns) {
-        if (Health.current[eid] <= 0) { niabCooldowns.delete(eid); continue; }
-        const remaining = ticks - 25;
-        if (remaining <= 0) {
-          niabCooldowns.delete(eid);
-          combatSystem.setSuppressed(eid, false);
-        } else {
-          niabCooldowns.set(eid, remaining);
-        }
-      }
-    }
-
-    // Passive repair: idle units near friendly buildings heal slowly every 2 seconds
-    if (game.getTickCount() % 50 === 0) {
-      const allUnits = unitQuery(world);
-      const allBuildings = buildingQuery(world);
-      for (const eid of allUnits) {
-        if (Health.current[eid] <= 0) continue;
-        if (Health.current[eid] >= Health.max[eid]) continue;
-        // Only heal when idle (not moving, not attacking)
-        if (MoveTarget.active[eid] === 1) continue;
-        if (hasComponent(world, AttackTarget, eid) && AttackTarget.active[eid] === 1) continue;
-
-        const owner = Owner.playerId[eid];
-        const ux = Position.x[eid];
-        const uz = Position.z[eid];
-
-        // Check if near a friendly building (within 15 units)
-        let nearBase = false;
-        for (const bid of allBuildings) {
-          if (Owner.playerId[bid] !== owner) continue;
-          if (Health.current[bid] <= 0) continue;
-          const dx = Position.x[bid] - ux;
-          const dz = Position.z[bid] - uz;
-          if (dx * dx + dz * dz < 225) { nearBase = true; break; }
-        }
-        if (nearBase) {
-          Health.current[eid] = Math.min(Health.max[eid], Health.current[eid] + Health.max[eid] * 0.02);
-        }
-      }
-    }
-
-    // Repair vehicles: units with repair flag heal nearby friendly units and buildings
-    if (game.getTickCount() % 25 === 0) {
-      const allUnits = unitQuery(world);
-      for (const eid of allUnits) {
-        if (Health.current[eid] <= 0) continue;
-        const typeId = UnitType.id[eid];
-        const typeName = unitTypeNames[typeId];
-        const repDef = typeName ? gameRules.units.get(typeName) : null;
-        if (!repDef?.repair) continue;
-
-        const owner = Owner.playerId[eid];
-        const rx = Position.x[eid];
-        const rz = Position.z[eid];
-
-        // Heal all friendly units within 8 units, 3% max HP per tick
-        for (const other of allUnits) {
-          if (other === eid) continue;
-          if (Owner.playerId[other] !== owner) continue;
-          if (Health.current[other] <= 0) continue;
-          if (Health.current[other] >= Health.max[other]) continue;
-          const dx = Position.x[other] - rx;
-          const dz = Position.z[other] - rz;
-          if (dx * dx + dz * dz < 64) { // 8 unit radius
-            Health.current[other] = Math.min(Health.max[other],
-              Health.current[other] + Health.max[other] * 0.03);
-          }
-        }
-
-        // Also heal nearby buildings
-        const nearBlds = buildingQuery(world);
-        for (const bid of nearBlds) {
-          if (Owner.playerId[bid] !== owner) continue;
-          if (Health.current[bid] <= 0 || Health.current[bid] >= Health.max[bid]) continue;
-          const dx = Position.x[bid] - rx;
-          const dz = Position.z[bid] - rz;
-          if (dx * dx + dz * dz < 64) {
-            Health.current[bid] = Math.min(Health.max[bid],
-              Health.current[bid] + Health.max[bid] * 0.02);
-          }
-        }
-      }
-    }
+    // --- ABILITY SYSTEM UPDATE ---
+    // Infantry crushing, engineer capture, saboteur, infiltrator, leech, projector,
+    // kobra, NIAB cooldowns, passive repair, repair vehicles, faction bonuses, stealth
+    abilitySystem.update(world, game.getTickCount());
 
     // Spice bloom visuals are now handled via HarvestSystem events (bloom:warning/tremor/eruption)
 
@@ -2252,30 +1692,6 @@ async function main() {
             if (owner === 0) selectionPanel.addMessage('Aircraft rearmed', '#44ff44');
           }
         }
-      }
-    }
-
-    // --- FACTION-SPECIFIC BONUSES (every 2 seconds) ---
-    if (game.getTickCount() % 50 === 25) {
-      const allUnits = unitQuery(world);
-
-      for (let pid = 0; pid <= 1; pid++) {
-        const prefix = pid === 0 ? house.prefix : house.enemyPrefix;
-
-        // ORDOS: self-regeneration (units slowly heal 1% HP per 2 seconds)
-        if (prefix === 'OR') {
-          for (const eid of allUnits) {
-            if (Owner.playerId[eid] !== pid) continue;
-            if (Health.current[eid] <= 0 || Health.current[eid] >= Health.max[eid]) continue;
-            Health.current[eid] = Math.min(Health.max[eid],
-              Health.current[eid] + Health.max[eid] * 0.01);
-          }
-        }
-
-        // HARKONNEN: no damage degradation — implemented via combat system bonus
-        // (In the real game, all units deal less damage as they lose HP. Harkonnen are exempt.
-        //  Our implementation: Harkonnen get +10% damage at all times to represent this advantage.)
-        // This is handled in the damage calculation below.
       }
     }
 
@@ -2493,248 +1909,11 @@ async function main() {
       // Snap to last event
       e.preventDefault();
       scene.panTo(lastEventX, lastEventZ);
-    } else if (e.key === 'x' && !e.ctrlKey && !e.altKey) {
-      // Self-destruct for Devastator units
+    } else if ('xdtluw'.includes(e.key) && !e.ctrlKey && !e.altKey) {
+      // Ability key commands: X=self-destruct, D=deploy/MCV, T=teleport/projector,
+      // L=load transport, U=unload transport, W=mount worm
       const selected = selectionManager.getSelectedEntities();
-      const w = game.getWorld();
-      for (const eid of selected) {
-        if (Owner.playerId[eid] !== 0) continue;
-        if (Health.current[eid] <= 0) continue;
-        const typeId = UnitType.id[eid];
-        const typeName = unitTypeNames[typeId];
-        const def = typeName ? gameRules.units.get(typeName) : null;
-        if (!def?.selfDestruct) continue;
-        // Massive explosion
-        const ex = Position.x[eid], ez = Position.z[eid];
-        effectsManager.spawnExplosion(ex, 0, ez, 'large');
-        effectsManager.spawnExplosion(ex + 2, 0, ez + 2, 'large');
-        effectsManager.spawnExplosion(ex - 2, 0, ez - 2, 'large');
-        audioManager.playSfx('explosion');
-        selectionPanel.addMessage('SELF-DESTRUCT!', '#ff4444');
-        scene.shake(0.8);
-        // Damage all nearby units (friend and foe) in 12 unit radius
-        const allUnits = unitQuery(w);
-        const allBuildings = buildingQuery(w);
-        const targets = [...allUnits, ...allBuildings];
-        for (const tid of targets) {
-          if (tid === eid) continue;
-          if (Health.current[tid] <= 0) continue;
-          const dx = Position.x[tid] - ex;
-          const dz = Position.z[tid] - ez;
-          const dist2 = dx * dx + dz * dz;
-          if (dist2 < 144) { // 12 unit radius
-            const dmg = Math.floor(1000 * (1 - Math.sqrt(dist2) / 12));
-            Health.current[tid] = Math.max(0, Health.current[tid] - dmg);
-            if (Health.current[tid] <= 0) {
-              EventBus.emit('unit:died', { entityId: tid, killerEntity: eid });
-            }
-          }
-        }
-        // Kill the Devastator
-        Health.current[eid] = 0;
-        EventBus.emit('unit:died', { entityId: eid, killerEntity: -1 });
-      }
-    } else if (e.key === 'd' && !e.ctrlKey && !e.altKey) {
-      // D key: MCV deploy OR Kobra deploy/undeploy
-      const selected = selectionManager.getSelectedEntities();
-      const w = game.getWorld();
-      let handled = false;
-      for (const eid of selected) {
-        if (Owner.playerId[eid] !== 0) continue;
-        if (Health.current[eid] <= 0) continue;
-        const typeId = UnitType.id[eid];
-        const typeName = unitTypeNames[typeId];
-        const def = typeName ? gameRules.units.get(typeName) : null;
-
-        // MCV deployment
-        if (typeName === 'MCV') {
-          const conYardName = `${house.prefix}ConYard`;
-          const bDef = gameRules.buildings.get(conYardName);
-          if (!bDef) continue;
-          const dx = Position.x[eid], dz = Position.z[eid];
-          Health.current[eid] = 0;
-          EventBus.emit('unit:died', { entityId: eid, killerEntity: -1 });
-          spawnBuilding(w, conYardName, 0, dx, dz);
-          selectionPanel.addMessage('MCV deployed!', '#44ff44');
-          audioManager.playSfx('build');
-          handled = true;
-          break;
-        }
-
-        // Kobra deploy/undeploy toggle
-        if (def?.kobra) {
-          if (kobraDeployed.has(eid)) {
-            // Undeploy: restore original range
-            kobraDeployed.delete(eid);
-            if (hasComponent(w, Combat, eid)) {
-              const base = kobraBaseRange.get(eid) ?? Combat.range[eid];
-              Combat.range[eid] = base;
-            }
-            kobraBaseRange.delete(eid);
-            selectionPanel.addMessage('Kobra undeployed', '#aaa');
-            audioManager.playSfx('build');
-          } else {
-            // Deploy: immobilize, double range (store base)
-            if (hasComponent(w, Combat, eid)) {
-              kobraBaseRange.set(eid, Combat.range[eid]);
-              Combat.range[eid] = Combat.range[eid] * 2;
-            }
-            kobraDeployed.add(eid);
-            MoveTarget.active[eid] = 0;
-            selectionPanel.addMessage('Kobra deployed - range doubled!', '#44ff44');
-            audioManager.playSfx('build');
-          }
-          handled = true;
-        }
-      }
-    } else if (e.key === 't' && !e.ctrlKey && !e.altKey) {
-      // T key: NIAB Tank teleport OR Projector create hologram
-      const selected = selectionManager.getSelectedEntities();
-      const w = game.getWorld();
-      for (const eid of selected) {
-        if (Owner.playerId[eid] !== 0) continue;
-        if (Health.current[eid] <= 0) continue;
-        const typeId = UnitType.id[eid];
-        const typeName = unitTypeNames[typeId];
-        const def = typeName ? gameRules.units.get(typeName) : null;
-
-        // NIAB Tank teleport: enter targeting mode
-        if (def?.niabTank) {
-          if (niabCooldowns.has(eid)) {
-            selectionPanel.addMessage('Teleport on cooldown', '#ff8800');
-            break;
-          }
-          // Enter teleport targeting mode
-          commandManager.enterCommandMode('teleport', 'Click to teleport');
-          break;
-        }
-
-        // Projector: create holographic copy of nearest friendly unit
-        if (def?.projector) {
-          // Find nearest friendly non-projector unit to copy
-          const allUnits = unitQuery(w);
-          let bestOther = -1;
-          let bestDist = Infinity;
-          for (const other of allUnits) {
-            if (other === eid || Owner.playerId[other] !== 0) continue;
-            if (Health.current[other] <= 0) continue;
-            const otherTypeName = unitTypeNames[UnitType.id[other]];
-            const otherDef = otherTypeName ? gameRules.units.get(otherTypeName) : null;
-            if (otherDef?.projector) continue; // Can't copy another projector
-            const dx = Position.x[other] - Position.x[eid];
-            const dz = Position.z[other] - Position.z[eid];
-            const dist = dx * dx + dz * dz;
-            if (dist < 225 && dist < bestDist) { // Within 15 units
-              bestDist = dist;
-              bestOther = other;
-            }
-          }
-          if (bestOther >= 0) {
-            // Create holographic copy
-            const copyTypeName = unitTypeNames[UnitType.id[bestOther]];
-            if (copyTypeName) {
-              const hx = Position.x[eid] + (Math.random() - 0.5) * 4;
-              const hz = Position.z[eid] + (Math.random() - 0.5) * 4;
-              const holoEid = spawnUnit(w, copyTypeName, 0, hx, hz);
-              if (holoEid >= 0) {
-                // Hologram: 1 HP, no damage, lasts 6000 ticks (~4 minutes)
-                Health.max[holoEid] = 1;
-                Health.current[holoEid] = 1;
-                if (hasComponent(w, Combat, holoEid)) {
-                  Combat.damage[holoEid] = 0; // Holograms can't deal damage
-                }
-                projectorHolograms.set(holoEid, 6000);
-                // Make hologram slightly transparent
-                const obj = unitRenderer.getEntityObject(holoEid);
-                if (obj) {
-                  obj.traverse(child => {
-                    const mat = (child as any).material;
-                    if (mat) { mat.transparent = true; mat.opacity = 0.7; }
-                  });
-                }
-                selectionPanel.addMessage('Hologram created!', '#88aaff');
-                audioManager.playSfx('select');
-              }
-            }
-          } else {
-            selectionPanel.addMessage('No unit nearby to copy', '#888');
-          }
-          break;
-        }
-      }
-    } else if (e.key === 'l' && !e.ctrlKey && !e.altKey) {
-      // Load infantry into selected APC
-      const selected = selectionManager.getSelectedEntities();
-      const w = game.getWorld();
-      let apcEid = -1;
-      // Find the first selected APC
-      for (const eid of selected) {
-        if (Owner.playerId[eid] !== 0 || Health.current[eid] <= 0) continue;
-        const typeName = unitTypeNames[UnitType.id[eid]];
-        const def = typeName ? gameRules.units.get(typeName) : null;
-        if (def?.apc) { apcEid = eid; break; }
-      }
-      if (apcEid >= 0) {
-        const ax = Position.x[apcEid], az = Position.z[apcEid];
-        const allUnits = unitQuery(w);
-        let loaded = 0;
-        for (const eid of allUnits) {
-          if (eid === apcEid) continue;
-          if (Owner.playerId[eid] !== 0 || Health.current[eid] <= 0) continue;
-          if (Position.x[eid] < -900) continue; // Already loaded
-          const dx = Position.x[eid] - ax;
-          const dz = Position.z[eid] - az;
-          if (dx * dx + dz * dz > 36) continue; // Within 6 units
-          if (loadIntoTransport(apcEid, eid)) loaded++;
-        }
-        if (loaded > 0) {
-          selectionPanel.addMessage(`Loaded ${loaded} infantry`, '#44ff44');
-          audioManager.playSfx('select');
-        } else {
-          selectionPanel.addMessage('No infantry nearby to load', '#888');
-        }
-      }
-    } else if (e.key === 'u' && !e.ctrlKey && !e.altKey) {
-      // Unload infantry from selected APC
-      const selected = selectionManager.getSelectedEntities();
-      for (const eid of selected) {
-        if (Owner.playerId[eid] !== 0 || Health.current[eid] <= 0) continue;
-        const count = unloadTransport(eid);
-        if (count > 0) {
-          selectionPanel.addMessage(`Unloaded ${count} infantry`, '#44ff44');
-          audioManager.playSfx('select');
-        }
-      }
-    } else if (e.key === 'w' && !e.ctrlKey && !e.altKey) {
-      // Mount/dismount sandworm (Fremen worm riders)
-      const selected = selectionManager.getSelectedEntities();
-      for (const eid of selected) {
-        if (Owner.playerId[eid] !== 0 || Health.current[eid] <= 0) continue;
-        const typeId = UnitType.id[eid];
-        const typeName = unitTypeNames[typeId];
-        const def = typeName ? gameRules.units.get(typeName) : null;
-        if (!def?.wormRider) continue;
-
-        // Check if already mounted — dismount
-        const riderWorm = sandwormSystem.getRiderWorm(eid);
-        if (riderWorm) {
-          sandwormSystem.dismountWorm(eid);
-          selectionPanel.addMessage('Dismounted worm', '#aaa');
-          audioManager.playSfx('select');
-          continue;
-        }
-
-        // Try to mount a nearby worm
-        const mounted = sandwormSystem.mountWorm(
-          eid, Position.x[eid], Position.z[eid], Owner.playerId[eid]
-        );
-        if (mounted) {
-          selectionPanel.addMessage('Worm mounted!', '#f0c040');
-          audioManager.playSfx('move');
-        } else {
-          selectionPanel.addMessage('No worm nearby to mount', '#888');
-        }
-      }
+      abilitySystem.handleKeyCommand(e.key, selected, game.getWorld());
     } else if (e.key === 'F1') {
       e.preventDefault();
       game.setSpeed(0.5);
@@ -2810,7 +1989,7 @@ async function main() {
         se.ammo = aircraftAmmo.get(eid);
       }
       // Save transport passengers (as type IDs for respawn on load)
-      const passengers = transportPassengers.get(eid);
+      const passengers = abilitySystem.getTransportPassengers().get(eid);
       if (passengers && passengers.length > 0) {
         se.passengerTypeIds = passengers
           .filter(p => Health.current[p] > 0)
@@ -3195,7 +2374,7 @@ async function main() {
                 passengers.push(pEid);
               }
             }
-            if (passengers.length > 0) transportPassengers.set(eid, passengers);
+            if (passengers.length > 0) abilitySystem.setTransportPassengers(eid, passengers);
           }
         }
       }
