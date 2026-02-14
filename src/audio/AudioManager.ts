@@ -1,6 +1,7 @@
 import { EventBus } from '../core/EventBus';
 import { SampleBank } from './SampleBank';
 import { VoiceManager } from './VoiceManager';
+import { DialogManager } from './DialogManager';
 import { SFX_MANIFEST, getPrioritySamplePaths } from './SfxManifest';
 import type { GameRules } from '../config/RulesParser';
 
@@ -45,6 +46,7 @@ export class AudioManager {
   private lastCombatEvent = 0;
   private sampleBank: SampleBank | null = null;
   private voiceManager: VoiceManager | null = null;
+  private dialogManager: DialogManager | null = null;
   private sfxCooldowns = new Map<string, number>(); // SfxType -> last play timestamp
   private samplesPreloaded = false;
   private unitTypeResolver: ((eid: number) => string) | null = null;
@@ -132,6 +134,34 @@ export class AudioManager {
    */
   getVoiceManager(): VoiceManager | null {
     return this.voiceManager;
+  }
+
+  /**
+   * Initialize the dialog system. Creates the DialogManager using the shared SampleBank.
+   * Call after the AudioContext is available (e.g., after preloadSfx).
+   */
+  initDialog(): void {
+    this.getContext(); // Ensure SampleBank exists
+    if (this.sampleBank && !this.dialogManager) {
+      this.dialogManager = new DialogManager(this.sampleBank);
+    }
+  }
+
+  /**
+   * Preload dialog audio files. Call during loading screen phase after initDialog().
+   */
+  async preloadDialog(factionPrefix: string): Promise<void> {
+    if (this.dialogManager) {
+      this.dialogManager.setPlayerFaction(factionPrefix);
+      await this.dialogManager.preload();
+    }
+  }
+
+  /**
+   * Get the DialogManager instance (if initialized).
+   */
+  getDialogManager(): DialogManager | null {
+    return this.dialogManager;
   }
 
   private setupEventListeners(): void {
@@ -962,6 +992,9 @@ export class AudioManager {
     }
     if (this.fadingOutElement) {
       this.fadingOutElement.volume = this.muted ? 0 : this.fadingOutElement.volume;
+    }
+    if (this.dialogManager) {
+      this.dialogManager.setMuted(this.muted);
     }
   }
 

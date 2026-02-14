@@ -134,6 +134,7 @@ export class VictorySystem {
     this.outcome = 'victory';
     this.audioManager.playSfx('victory');
     this.audioManager.playVictoryMusic();
+    this.audioManager.getDialogManager()?.trigger('victory');
     if (this.onVictoryCallback) this.onVictoryCallback();
     this.showScreen('VICTORY', 'You have conquered the enemy!', '#00ff44');
   }
@@ -141,6 +142,7 @@ export class VictorySystem {
   private triggerDefeat(): void {
     this.outcome = 'defeat';
     this.audioManager.playSfx('defeat');
+    this.audioManager.getDialogManager()?.trigger('defeat');
     this.showScreen('DEFEAT', 'Your base has been destroyed.', '#ff2222');
   }
 

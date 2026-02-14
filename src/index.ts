@@ -460,6 +460,11 @@ async function main() {
   updateLoading(89, 'Loading voice lines...');
   await audioManager.preloadVoices(house.prefix);
 
+  // Preload spoken dialog lines (advisor/mentat callouts)
+  updateLoading(89, 'Loading dialog lines...');
+  audioManager.initDialog();
+  await audioManager.preloadDialog(house.prefix);
+
   updateLoading(90, 'Spawning bases...');
 
   // --- SPAWN HELPERS ---
@@ -645,6 +650,7 @@ async function main() {
 
     harvestSystem.addSolaris(0, refund);
     selectionPanel.addMessage(`Sold for ${refund} Solaris`, '#f0c040');
+    audioManager.getDialogManager()?.trigger('buildingSold');
 
     effectsManager.clearBuildingDamage(eid);
 
@@ -685,6 +691,7 @@ async function main() {
     } else {
       audioManager.playSfx('error');
       selectionPanel.addMessage('Insufficient funds', '#ff4444');
+      audioManager.getDialogManager()?.trigger('insufficientFunds');
     }
   }
 
@@ -1669,6 +1676,7 @@ async function main() {
 
       if (lowPower && powerUsed > 0 && game.getTickCount() % 250 === 0) {
         audioManager.playSfx('powerlow');
+        audioManager.getDialogManager()?.trigger('lowPower');
         selectionPanel.addMessage('Low power! Build more Windtraps', '#ff4444');
       }
 
@@ -1866,6 +1874,7 @@ async function main() {
       if (!productionSystem.startProduction(0, typeName, true)) {
         audioManager.playSfx('error');
         selectionPanel.addMessage('Cannot build', '#ff4444');
+        audioManager.getDialogManager()?.trigger('insufficientFunds');
         return;
       }
     } else {
@@ -1873,6 +1882,7 @@ async function main() {
       if (!productionSystem.startProduction(0, typeName, false)) {
         audioManager.playSfx('error');
         selectionPanel.addMessage('Cannot build', '#ff4444');
+        audioManager.getDialogManager()?.trigger('insufficientFunds');
         return;
       }
     }
@@ -1885,6 +1895,7 @@ async function main() {
     buildingPlacement.startConcretePlacement((tx, tz) => {
       if (harvestSystem.getSolaris(0) < CONCRETE_COST) {
         selectionPanel.addMessage('Insufficient funds', '#ff4444');
+        audioManager.getDialogManager()?.trigger('insufficientFunds');
         return false;
       }
       harvestSystem.spendSolaris(0, CONCRETE_COST);
@@ -2508,6 +2519,26 @@ async function main() {
     // Camera starts at player base
     scene.cameraTarget.set(playerBase.x, 0, playerBase.z);
     scene.updateCameraPosition();
+  }
+
+  // --- DIALOG MANAGER WIRING ---
+  // Wire up spoken advisor/mentat dialog lines to game events
+  const dialogManager = audioManager.getDialogManager();
+  if (dialogManager) {
+    dialogManager.setPlayerFaction(house.prefix);
+    dialogManager.wireEvents(0); // Human player is ID 0
+
+    // Set up harvester detection for "harvester under attack" dialog
+    dialogManager.setHarvesterChecker(
+      (eid: number) => {
+        try { return hasComponent(game.getWorld(), Harvester, eid); } catch { return false; }
+      },
+      0,
+      (eid: number) => Owner.playerId[eid]
+    );
+
+    // Wire insufficient funds: trigger when production fails due to funds
+    // (This is handled in sidebar callbacks, but we also hook power:update for low power)
   }
 
   // Start!
