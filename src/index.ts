@@ -122,6 +122,9 @@ async function main() {
   // Audio manager (created early for menu music)
   const audioManager = new AudioManager();
 
+  // Initialize voice system with parsed game rules
+  audioManager.initVoices(gameRules);
+
   // Check for saved game to load
   const shouldLoad = localStorage.getItem('ebfd_load') === '1';
   const savedJson = shouldLoad ? (localStorage.getItem('ebfd_load_data') ?? localStorage.getItem('ebfd_save')) : null;
@@ -816,6 +819,30 @@ async function main() {
       if (typeName) {
         productionSystem.removePlayerBuilding(Owner.playerId[entityId], typeName);
       }
+
+      // Spawn infantry survivors when building is destroyed
+      const bDef = typeName ? gameRules.buildings.get(typeName) : null;
+      if (bDef && bDef.numInfantryWhenGone > 0) {
+        const FACTION_INFANTRY: Record<string, string> = {
+          'AT': 'ATInfantry', 'HK': 'HKLightInf', 'OR': 'ORChemical',
+          'FR': 'FRFremen', 'IM': 'IMSardaukar', 'IX': 'IXInfiltrator',
+          'TL': 'TLContaminator', 'GU': 'GUMaker'
+        };
+        const prefix = typeName.substring(0, 2);
+        const infantryType = FACTION_INFANTRY[prefix];
+        if (infantryType && gameRules.units.has(infantryType)) {
+          const count = Math.min(bDef.numInfantryWhenGone, 5);
+          for (let i = 0; i < count; i++) {
+            const sx = x + (Math.random() - 0.5) * 4;
+            const sz = z + (Math.random() - 0.5) * 4;
+            spawnUnit(world, infantryType, deadOwner, sx, sz);
+          }
+          EventBus.emit('building:survivors', { x, z, count, owner: deadOwner });
+          if (deadOwner === 0) {
+            selectionPanel.addMessage(`${count} survivor${count > 1 ? 's' : ''} emerged from wreckage`, '#88cc88');
+          }
+        }
+      }
     }
 
     // Auto-replace harvesters: queue a new one if player loses a harvester
@@ -1039,11 +1066,12 @@ async function main() {
       if (owner === 0) {
         buildingPlacement.startPlacement(unitType);
       } else {
-        // AI auto-places buildings near base
-        const aiBase = aiPlayer.getBasePosition();
-        const x = aiBase.x + (Math.random() - 0.5) * 20;
-        const z = aiBase.z + (Math.random() - 0.5) * 20;
-        spawnBuilding(world, unitType, owner, x, z);
+        // AI strategically places buildings based on type
+        const bDef = gameRules.buildings.get(unitType);
+        if (bDef) {
+          const pos = aiPlayer.getNextBuildingPlacement(unitType, bDef);
+          spawnBuilding(world, unitType, owner, pos.x, pos.z);
+        }
       }
     } else {
       // Check if this is a starportable unit arriving via Starport

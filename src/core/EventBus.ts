@@ -35,6 +35,7 @@ interface EventMap {
   'combat:blast': { x: number; z: number; radius: number };
   'superweapon:ready': { owner: number; type: string };
   'superweapon:fired': { owner: number; type: string; x: number; z: number };
+  'building:survivors': { x: number; z: number; count: number; owner: number };
 }
 
 type EventName = keyof EventMap;
