@@ -251,6 +251,10 @@ async function main() {
   commandManager.setCombatSystem(combatSystem);
   const harvestSystem = new HarvestSystem(terrain);
   const productionSystem = new ProductionSystem(gameRules, harvestSystem);
+  // Apply difficulty-based cost/time scaling
+  const playerDifficulty = house.difficulty ?? 'normal';
+  productionSystem.setDifficulty(0, playerDifficulty, false);  // Human player
+  productionSystem.setDifficulty(1, playerDifficulty, true);   // AI gets inverse scaling
   const minimapRenderer = new MinimapRenderer(terrain, scene);
   minimapRenderer.setRightClickCallback((worldX, worldZ) => {
     const selected = selectionManager.getSelectedEntities();

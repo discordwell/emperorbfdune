@@ -23,6 +23,13 @@ export const GameConstants = {
   GUARD_TILE_RANGE: 12,
   STEALTH_DELAY: 30,
   DEVIATE_DURATION: 500,
+  // Difficulty multipliers (percentage values from rules.txt [General])
+  EASY_BUILD_COST: 50,
+  NORMAL_BUILD_COST: 100,
+  HARD_BUILD_COST: 125,
+  EASY_BUILD_TIME: 75,
+  NORMAL_BUILD_TIME: 100,
+  HARD_BUILD_TIME: 125,
 };
 
 export function loadConstants(general: Record<string, string>): void {
@@ -52,4 +59,10 @@ export function loadConstants(general: Record<string, string>): void {
   GameConstants.GUARD_TILE_RANGE = g('GuardTileRange', 12);
   GameConstants.STEALTH_DELAY = g('StealthDelay', 30);
   GameConstants.DEVIATE_DURATION = g('DeviateDuration', 500);
+  GameConstants.EASY_BUILD_COST = g('EasyBuildCost', 50);
+  GameConstants.NORMAL_BUILD_COST = g('NormalBuildCost', 100);
+  GameConstants.HARD_BUILD_COST = g('HardBuildCost', 125);
+  GameConstants.EASY_BUILD_TIME = g('EasyBuildTime', 75);
+  GameConstants.NORMAL_BUILD_TIME = g('NormalBuildTime', 100);
+  GameConstants.HARD_BUILD_TIME = g('HardBuildTime', 125);
 }

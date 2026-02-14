@@ -233,7 +233,8 @@ export class Sidebar {
       const canBuild = this.production.canBuild(this.playerId, name, true);
       const hotkey = hotkeyIdx < HOTKEYS.length ? HOTKEYS[hotkeyIdx] : undefined;
       const role = Sidebar.getBuildingRole(name, def);
-      const item = this.createBuildItem(name, def.cost, canBuild, true, hotkey, role);
+      const adjustedCost = this.production.getAdjustedCost(this.playerId, name, true);
+      const item = this.createBuildItem(name, adjustedCost, canBuild, true, hotkey, role);
       grid.appendChild(item);
       if (hotkey && canBuild) {
         this.hotkeyMap.set(hotkey, { name, isBuilding: true });
@@ -270,7 +271,8 @@ export class Sidebar {
       const canBuild = this.production.canBuild(this.playerId, name, false);
       const hotkey = hotkeyIdx < HOTKEYS.length ? HOTKEYS[hotkeyIdx] : undefined;
       const role = Sidebar.getUnitRole(name, def);
-      const item = this.createBuildItem(name, def.cost, canBuild, false, hotkey, role);
+      const adjustedCost = this.production.getAdjustedCost(this.playerId, name, false);
+      const item = this.createBuildItem(name, adjustedCost, canBuild, false, hotkey, role);
       grid.appendChild(item);
       if (hotkey && canBuild) {
         this.hotkeyMap.set(hotkey, { name, isBuilding: false });
@@ -425,7 +427,10 @@ export class Sidebar {
     }
     if (tags.length > 0) html += `<div style="font-size:10px;margin-bottom:3px;">${tags.join(' ')}</div>`;
 
-    html += `<div style="color:#f0c040;">Cost: $${def.cost}</div>`;
+    const adjustedCost = this.production.getAdjustedCost(this.playerId, name, isBuilding);
+    const costMult = this.production.getCostMultiplier(this.playerId);
+    const costSuffix = costMult !== 1.0 ? ` <span style="color:#aaa;font-size:9px;">(${Math.round(costMult * 100)}%)</span>` : '';
+    html += `<div style="color:#f0c040;">Cost: $${adjustedCost}${costSuffix}</div>`;
     html += `<div>HP: ${def.health} &middot; Armor: ${def.armour}</div>`;
     const buildSecs = Math.round(def.buildTime / 25);
     html += `<div>Build: ${buildSecs}s</div>`;

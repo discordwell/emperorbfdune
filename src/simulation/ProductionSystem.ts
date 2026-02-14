@@ -3,6 +3,9 @@ import type { UnitDef } from '../config/UnitDefs';
 import type { BuildingDef } from '../config/BuildingDefs';
 import type { HarvestSystem } from './HarvestSystem';
 import { EventBus } from '../core/EventBus';
+import { GameConstants } from '../utils/Constants';
+
+type Difficulty = 'easy' | 'normal' | 'hard';
 
 interface QueueItem {
   typeName: string;
@@ -35,9 +38,72 @@ export class ProductionSystem {
   // Repeat mode: auto-requeue completed unit types
   private repeatUnits = new Map<number, Set<string>>(); // playerId -> Set of type names
 
+  // Difficulty-based cost/time multipliers per player
+  private costMultipliers = new Map<number, number>();   // playerId -> multiplier
+  private timeMultipliers = new Map<number, number>();   // playerId -> multiplier
+
   constructor(rules: GameRules, harvestSystem: HarvestSystem) {
     this.rules = rules;
     this.harvestSystem = harvestSystem;
+  }
+
+  /** Set difficulty scaling for a specific player.
+   *  For human player: easy=cheaper/faster, hard=more expensive/slower.
+   *  For AI player: inverse scaling (easy AI pays more, hard AI pays less). */
+  setDifficulty(playerId: number, difficulty: Difficulty, isAI = false): void {
+    let costPct: number;
+    let timePct: number;
+    if (isAI) {
+      // AI gets inverse: easy game => AI pays more, hard game => AI pays less
+      switch (difficulty) {
+        case 'easy':
+          costPct = GameConstants.HARD_BUILD_COST;   // 125% cost for AI
+          timePct = GameConstants.HARD_BUILD_TIME;   // 125% time for AI
+          break;
+        case 'hard':
+          costPct = GameConstants.EASY_BUILD_COST;   // 50% cost for AI
+          timePct = GameConstants.EASY_BUILD_TIME;   // 75% time for AI
+          break;
+        default:
+          costPct = GameConstants.NORMAL_BUILD_COST;
+          timePct = GameConstants.NORMAL_BUILD_TIME;
+      }
+    } else {
+      switch (difficulty) {
+        case 'easy':
+          costPct = GameConstants.EASY_BUILD_COST;   // 50%
+          timePct = GameConstants.EASY_BUILD_TIME;    // 75%
+          break;
+        case 'hard':
+          costPct = GameConstants.HARD_BUILD_COST;   // 125%
+          timePct = GameConstants.HARD_BUILD_TIME;    // 125%
+          break;
+        default:
+          costPct = GameConstants.NORMAL_BUILD_COST;  // 100%
+          timePct = GameConstants.NORMAL_BUILD_TIME;   // 100%
+      }
+    }
+    this.costMultipliers.set(playerId, costPct / 100);
+    this.timeMultipliers.set(playerId, timePct / 100);
+  }
+
+  /** Get the difficulty-adjusted cost for a unit or building (rounded to integer). */
+  getAdjustedCost(playerId: number, typeName: string, isBuilding: boolean): number {
+    const def = isBuilding ? this.rules.buildings.get(typeName) : this.rules.units.get(typeName);
+    if (!def) return 0;
+    const mult = this.costMultipliers.get(playerId) ?? 1.0;
+    return Math.round(def.cost * mult);
+  }
+
+  /** Get the difficulty-adjusted build time for a unit or building. */
+  private getAdjustedBuildTime(playerId: number, def: UnitDef | BuildingDef): number {
+    const mult = this.timeMultipliers.get(playerId) ?? 1.0;
+    return Math.round(def.buildTime * mult);
+  }
+
+  /** Get the cost multiplier for a player (for UI display). */
+  getCostMultiplier(playerId: number): number {
+    return this.costMultipliers.get(playerId) ?? 1.0;
   }
 
   setPowerMultiplier(playerId: number, multiplier: number): void {
@@ -98,8 +164,10 @@ export class ProductionSystem {
     if (!def || !def.upgradable) return false;
     // Already upgraded?
     if (this.upgradedBuildings.get(playerId)?.has(buildingType)) return false;
-    // Can afford?
-    if (this.harvestSystem.getSolaris(playerId) < def.upgradeCost) return false;
+    // Can afford? (apply difficulty cost multiplier to upgrade cost)
+    const costMult = this.costMultipliers.get(playerId) ?? 1.0;
+    const adjustedUpgradeCost = Math.round(def.upgradeCost * costMult);
+    if (this.harvestSystem.getSolaris(playerId) < adjustedUpgradeCost) return false;
     // Must own the building
     const owned = this.playerBuildings.get(playerId);
     if (!owned || (owned.get(buildingType) ?? 0) <= 0) return false;
@@ -109,15 +177,18 @@ export class ProductionSystem {
   startUpgrade(playerId: number, buildingType: string): boolean {
     if (!this.canUpgrade(playerId, buildingType)) return false;
     const def = this.rules.buildings.get(buildingType)!;
-    if (!this.harvestSystem.spendSolaris(playerId, def.upgradeCost)) return false;
+    const costMult = this.costMultipliers.get(playerId) ?? 1.0;
+    const timeMult = this.timeMultipliers.get(playerId) ?? 1.0;
+    const adjustedUpgradeCost = Math.round(def.upgradeCost * costMult);
+    if (!this.harvestSystem.spendSolaris(playerId, adjustedUpgradeCost)) return false;
 
     const queue = this.upgradeQueues.get(playerId) ?? [];
     queue.push({
       typeName: buildingType,
       isBuilding: true,
-      totalTime: def.buildTime, // Same time as building
+      totalTime: Math.round(def.buildTime * timeMult),
       elapsed: 0,
-      cost: def.upgradeCost,
+      cost: adjustedUpgradeCost,
     });
     this.upgradeQueues.set(playerId, queue);
     EventBus.emit('production:started', { unitType: `${buildingType} Upgrade`, owner: playerId });
@@ -162,8 +233,9 @@ export class ProductionSystem {
       : this.rules.units.get(typeName);
     if (!def) return false;
 
-    // Check cost
-    if (this.harvestSystem.getSolaris(playerId) < def.cost) return false;
+    // Check cost (difficulty-adjusted)
+    const adjustedCost = this.getAdjustedCost(playerId, typeName, isBuilding);
+    if (this.harvestSystem.getSolaris(playerId) < adjustedCost) return false;
 
     // Check prerequisites (primary building must exist)
     const owned = this.playerBuildings.get(playerId);
@@ -228,8 +300,9 @@ export class ProductionSystem {
     if (!isBuilding && this.unitCountCallback && this.unitCountCallback(playerId) >= this.maxUnits) {
       return { reason: 'cap', detail: `Max ${this.maxUnits} units` };
     }
-    if (this.harvestSystem.getSolaris(playerId) < def.cost) {
-      return { reason: 'cost', detail: `Need $${def.cost}` };
+    const adjustedCost = this.getAdjustedCost(playerId, typeName, isBuilding);
+    if (this.harvestSystem.getSolaris(playerId) < adjustedCost) {
+      return { reason: 'cost', detail: `Need $${adjustedCost}` };
     }
     return null;
   }
@@ -242,19 +315,21 @@ export class ProductionSystem {
       : this.rules.units.get(typeName);
     if (!def) return false;
 
-    // Spend money
-    if (!this.harvestSystem.spendSolaris(playerId, def.cost)) return false;
+    // Spend money (difficulty-adjusted)
+    const adjustedCost = this.getAdjustedCost(playerId, typeName, isBuilding);
+    if (!this.harvestSystem.spendSolaris(playerId, adjustedCost)) return false;
 
     const queue = isBuilding
       ? (this.buildingQueues.get(playerId) ?? [])
       : (this.unitQueues.get(playerId) ?? []);
 
+    const adjustedTime = this.getAdjustedBuildTime(playerId, def);
     queue.push({
       typeName,
       isBuilding,
-      totalTime: def.buildTime,
+      totalTime: adjustedTime,
       elapsed: 0,
-      cost: def.cost,
+      cost: adjustedCost,
     });
 
     if (isBuilding) {
