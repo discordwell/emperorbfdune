@@ -1,4 +1,6 @@
 import { EventBus } from '../core/EventBus';
+import { SampleBank } from './SampleBank';
+import { SFX_MANIFEST, getPrioritySamplePaths } from './SfxManifest';
 
 interface TrackInfo {
   name: string;
@@ -39,6 +41,9 @@ export class AudioManager {
   private crossfadeTimer: ReturnType<typeof setInterval> | null = null;
   private combatIntensity = 0; // 0-1
   private lastCombatEvent = 0;
+  private sampleBank: SampleBank | null = null;
+  private sfxCooldowns = new Map<string, number>(); // SfxType -> last play timestamp
+  private samplesPreloaded = false;
 
   constructor() {
     this.setupEventListeners();
@@ -49,7 +54,32 @@ export class AudioManager {
     if (!this.audioContext) {
       this.audioContext = new AudioContext();
     }
+    // Lazily create SampleBank when AudioContext first becomes available
+    if (!this.sampleBank && this.audioContext) {
+      this.sampleBank = new SampleBank(this.audioContext);
+      this.sampleBank.setVolume(this.sfxVolume);
+    }
     return this.audioContext;
+  }
+
+  /**
+   * Preload priority SFX samples. Call during loading screen phase.
+   * Safe to call multiple times; only loads once.
+   */
+  async preloadSfx(): Promise<void> {
+    if (this.samplesPreloaded) return;
+    this.samplesPreloaded = true;
+    const ctx = this.getContext();
+    if (ctx.state === 'suspended') {
+      // Don't block - samples will be loaded once context resumes
+      ctx.resume().catch(() => {});
+    }
+    if (this.sampleBank) {
+      const paths = getPrioritySamplePaths();
+      console.log(`[AudioManager] Preloading ${paths.length} priority SFX samples...`);
+      await this.sampleBank.preload(paths);
+      console.log(`[AudioManager] SFX preload complete.`);
+    }
   }
 
   setPlayerFaction(faction: string): void {
@@ -210,7 +240,7 @@ export class AudioManager {
     this.playNextTrack();
   }
 
-  // --- SFX (synthesized) ---
+  // --- SFX (sampled with synth fallback) ---
 
   playSfx(type: SfxType): void {
     if (this.muted) return;
@@ -221,30 +251,66 @@ export class AudioManager {
         ctx.resume();
       }
 
-      switch (type) {
-        case 'select': this.synthSelect(ctx); break;
-        case 'move': this.synthMove(ctx); break;
-        case 'attack': this.synthAttack(ctx); break;
-        case 'explosion': this.synthExplosion(ctx); break;
-        case 'build': this.synthBuild(ctx); break;
-        case 'sell': this.synthSell(ctx); break;
-        case 'error': this.synthError(ctx); break;
-        case 'victory': this.synthVictory(ctx); break;
-        case 'defeat': this.synthDefeat(ctx); break;
-        case 'harvest': this.synthHarvest(ctx); break;
-        case 'shot': this.synthShot(ctx); break;
-        case 'powerlow': this.synthPowerLow(ctx); break;
-        case 'place': this.synthPlace(ctx); break;
-        case 'worm': this.synthWorm(ctx); break;
-        case 'underattack': this.synthUnderAttack(ctx); break;
-        case 'deathInfantry': this.synthDeathInfantry(ctx); break;
-        case 'deathVehicle': this.synthDeathVehicle(ctx); break;
-        case 'deathBuilding': this.synthDeathBuilding(ctx); break;
-        case 'superweaponReady': this.synthSuperweaponReady(ctx); break;
-        case 'superweaponLaunch': this.synthSuperweaponLaunch(ctx); break;
-      }
+      // Try sampled audio first
+      if (this.playSample(type)) return;
+
+      // Fall back to synthesized SFX
+      this.playSynthSfx(type, ctx);
     } catch {
       // Audio not available
+    }
+  }
+
+  /**
+   * Attempt to play a sampled SFX. Returns true if a sample was played,
+   * false if we should fall back to synth (no manifest entry, no loaded samples,
+   * or on cooldown).
+   */
+  private playSample(type: string): boolean {
+    const entry = SFX_MANIFEST[type];
+    if (!entry || entry.paths.length === 0 || !this.sampleBank) return false;
+
+    // Cooldown check
+    if (entry.cooldown) {
+      const now = Date.now();
+      const lastPlay = this.sfxCooldowns.get(type) ?? 0;
+      if (now - lastPlay < entry.cooldown) return true; // On cooldown -- suppress but don't fallback
+      this.sfxCooldowns.set(type, now);
+    }
+
+    // Pick a random variant from the available paths
+    const path = entry.paths[Math.floor(Math.random() * entry.paths.length)];
+
+    // Only play if the sample is actually loaded
+    if (!this.sampleBank.has(path)) return false;
+
+    this.sampleBank.play(path, entry.volume, entry.pitchVariation);
+    return true;
+  }
+
+  /** Route to the appropriate synth method (extracted from old playSfx). */
+  private playSynthSfx(type: SfxType, ctx: AudioContext): void {
+    switch (type) {
+      case 'select': this.synthSelect(ctx); break;
+      case 'move': this.synthMove(ctx); break;
+      case 'attack': this.synthAttack(ctx); break;
+      case 'explosion': this.synthExplosion(ctx); break;
+      case 'build': this.synthBuild(ctx); break;
+      case 'sell': this.synthSell(ctx); break;
+      case 'error': this.synthError(ctx); break;
+      case 'victory': this.synthVictory(ctx); break;
+      case 'defeat': this.synthDefeat(ctx); break;
+      case 'harvest': this.synthHarvest(ctx); break;
+      case 'shot': this.synthShot(ctx); break;
+      case 'powerlow': this.synthPowerLow(ctx); break;
+      case 'place': this.synthPlace(ctx); break;
+      case 'worm': this.synthWorm(ctx); break;
+      case 'underattack': this.synthUnderAttack(ctx); break;
+      case 'deathInfantry': this.synthDeathInfantry(ctx); break;
+      case 'deathVehicle': this.synthDeathVehicle(ctx); break;
+      case 'deathBuilding': this.synthDeathBuilding(ctx); break;
+      case 'superweaponReady': this.synthSuperweaponReady(ctx); break;
+      case 'superweaponLaunch': this.synthSuperweaponLaunch(ctx); break;
     }
   }
 
@@ -833,6 +899,9 @@ export class AudioManager {
 
   setSfxVolume(v: number): void {
     this.sfxVolume = Math.max(0, Math.min(1, v));
+    if (this.sampleBank) {
+      this.sampleBank.setVolume(this.sfxVolume);
+    }
   }
 
   isMuted(): boolean {

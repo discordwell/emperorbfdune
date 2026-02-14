@@ -438,6 +438,11 @@ async function main() {
   await unitRenderer.preloadBuildingModels(allBuildingNames);
   // Retry any pending model assignments that were deferred during preload
   unitRenderer.resolvePendingModels();
+
+  // Preload priority SFX samples (non-blocking, runs in parallel with spawn)
+  updateLoading(88, 'Loading audio samples...');
+  await audioManager.preloadSfx();
+
   updateLoading(90, 'Spawning bases...');
 
   // --- SPAWN HELPERS ---
