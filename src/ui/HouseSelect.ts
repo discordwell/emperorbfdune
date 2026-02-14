@@ -1,5 +1,7 @@
+import * as THREE from 'three';
 import type { AudioManager } from '../audio/AudioManager';
 import { CampaignMap } from './CampaignMap';
+import { HouseSelect3D } from './HouseSelect3D';
 
 export interface SubhouseChoice {
   id: string;
@@ -83,121 +85,140 @@ const HOUSES: Omit<HouseChoice, 'difficulty' | 'gameMode'>[] = [
 export class HouseSelect {
   private overlay: HTMLDivElement;
   private audioManager: AudioManager;
+  private canvas: HTMLCanvasElement | null;
+  private renderer: THREE.WebGLRenderer | null;
 
-  constructor(audioManager: AudioManager) {
+  constructor(audioManager: AudioManager, canvas?: HTMLCanvasElement, renderer?: THREE.WebGLRenderer) {
     this.audioManager = audioManager;
     this.overlay = document.createElement('div');
+    this.canvas = canvas ?? null;
+    this.renderer = renderer ?? null;
   }
 
-  show(): Promise<HouseChoice> {
-    return new Promise((resolve) => {
-      // Check for campaign continuation (auto-start next mission)
-      const nextMission = localStorage.getItem('ebfd_campaign_next');
-      const campaignState = localStorage.getItem('ebfd_campaign');
-      if (nextMission && campaignState) {
-        localStorage.removeItem('ebfd_campaign_next');
-        try {
-          const next = JSON.parse(nextMission);
-          const state = JSON.parse(campaignState);
-          // Reconstruct house choice from saved campaign state
-          const houseMap: Record<string, { name: string; enemyPrefix: string; enemyName: string }> = {
-            'AT': { name: 'Atreides', enemyPrefix: 'HK', enemyName: 'Harkonnen' },
-            'HK': { name: 'Harkonnen', enemyPrefix: 'AT', enemyName: 'Atreides' },
-            'OR': { name: 'Ordos', enemyPrefix: 'HK', enemyName: 'Harkonnen' },
-          };
-          const info = houseMap[state.housePrefix] ?? houseMap['AT'];
-          const house: HouseChoice = {
-            id: state.housePrefix.toLowerCase(),
-            name: info.name,
-            prefix: state.housePrefix,
-            color: '#f0c040',
-            description: '',
-            enemyPrefix: state.enemyPrefix ?? info.enemyPrefix,
-            enemyName: state.enemyHouse ?? info.enemyName,
-            difficulty: next.difficulty ?? 'normal',
-            gameMode: 'campaign',
-            campaignTerritoryId: next.territoryId,
-            mapChoice: { id: `campaign-${next.territoryId}`, name: 'Campaign Mission', seed: next.mapSeed, description: '' },
-          };
-          resolve(house);
-          return;
-        } catch { /* fall through to normal menu */ }
+  async show(): Promise<HouseChoice> {
+    // Check for campaign continuation (auto-start next mission)
+    const nextMission = localStorage.getItem('ebfd_campaign_next');
+    const campaignState = localStorage.getItem('ebfd_campaign');
+    if (nextMission && campaignState) {
+      localStorage.removeItem('ebfd_campaign_next');
+      try {
+        const next = JSON.parse(nextMission);
+        const state = JSON.parse(campaignState);
+        const houseMap: Record<string, { name: string; enemyPrefix: string; enemyName: string }> = {
+          'AT': { name: 'Atreides', enemyPrefix: 'HK', enemyName: 'Harkonnen' },
+          'HK': { name: 'Harkonnen', enemyPrefix: 'AT', enemyName: 'Atreides' },
+          'OR': { name: 'Ordos', enemyPrefix: 'HK', enemyName: 'Harkonnen' },
+        };
+        const info = houseMap[state.housePrefix] ?? houseMap['AT'];
+        return {
+          id: state.housePrefix.toLowerCase(),
+          name: info.name,
+          prefix: state.housePrefix,
+          color: '#f0c040',
+          description: '',
+          enemyPrefix: state.enemyPrefix ?? info.enemyPrefix,
+          enemyName: state.enemyHouse ?? info.enemyName,
+          difficulty: next.difficulty ?? 'normal',
+          gameMode: 'campaign',
+          campaignTerritoryId: next.territoryId,
+          mapChoice: { id: `campaign-${next.territoryId}`, name: 'Campaign Mission', seed: next.mapSeed, description: '' },
+        };
+      } catch { /* fall through to normal menu */ }
+    }
+
+    this.audioManager.playMenuMusic();
+
+    // Use 3D house selection if canvas and renderer are available
+    let selectedHouseId: string;
+    if (this.canvas && this.renderer) {
+      try {
+        const houseSelect3D = new HouseSelect3D(this.canvas, this.renderer);
+        selectedHouseId = await houseSelect3D.show();
+      } catch (e) {
+        console.warn('3D house select failed, using fallback:', e);
+        selectedHouseId = await this.showHouseSelectFallback();
       }
-      this.audioManager.playMenuMusic();
-      this.showHouseSelect(resolve);
+    } else {
+      selectedHouseId = await this.showHouseSelectFallback();
+    }
+
+    // Map selected house ID to house template
+    const houseTemplate = HOUSES.find(h => h.id === selectedHouseId) ?? HOUSES[0];
+    const house: HouseChoice = { ...houseTemplate, difficulty: 'normal', gameMode: 'skirmish' };
+
+    // Continue with DOM subscreens
+    return new Promise((resolve) => {
+      this.showModeSelect(house, resolve);
     });
   }
 
-  private showHouseSelect(resolve: (house: HouseChoice) => void): void {
-    this.overlay = document.createElement('div');
-    this.overlay.style.cssText = `
-      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-      background: radial-gradient(ellipse at center, #1a0f00 0%, #000 80%);
-      display: flex; flex-direction: column;
-      align-items: center; justify-content: center;
-      z-index: 2000;
-      font-family: 'Segoe UI', Tahoma, sans-serif;
-    `;
+  private showHouseSelectFallback(): Promise<string> {
+    return new Promise((resolve) => {
+      this.overlay = document.createElement('div');
+      this.overlay.style.cssText = `
+        position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+        background: radial-gradient(ellipse at center, #1a0f00 0%, #000 80%);
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
+        z-index: 2000;
+        font-family: 'Segoe UI', Tahoma, sans-serif;
+      `;
 
-    // Title
-    const title = document.createElement('div');
-    title.style.cssText = `
-      color: #d4a840; font-size: 48px; font-weight: bold;
-      text-shadow: 0 0 20px #d4a84040;
-      margin-bottom: 8px; letter-spacing: 4px;
-    `;
-    title.textContent = 'EMPEROR';
-    this.overlay.appendChild(title);
+      const title = document.createElement('div');
+      title.style.cssText = `
+        color: #d4a840; font-size: 48px; font-weight: bold;
+        text-shadow: 0 0 20px #d4a84040;
+        margin-bottom: 8px; letter-spacing: 4px;
+      `;
+      title.textContent = 'EMPEROR';
+      this.overlay.appendChild(title);
 
-    const subtitle = document.createElement('div');
-    subtitle.style.cssText = `
-      color: #888; font-size: 18px;
-      margin-bottom: 48px; letter-spacing: 2px;
-    `;
-    subtitle.textContent = 'BATTLE FOR DUNE';
-    this.overlay.appendChild(subtitle);
+      const subtitle = document.createElement('div');
+      subtitle.style.cssText = `
+        color: #888; font-size: 18px;
+        margin-bottom: 48px; letter-spacing: 2px;
+      `;
+      subtitle.textContent = 'BATTLE FOR DUNE';
+      this.overlay.appendChild(subtitle);
 
-    // Choose your house
-    const chooseText = document.createElement('div');
-    chooseText.style.cssText = 'color:#aaa; font-size:16px; margin-bottom:24px;';
-    chooseText.textContent = 'Choose Your House';
-    this.overlay.appendChild(chooseText);
+      const chooseText = document.createElement('div');
+      chooseText.style.cssText = 'color:#aaa; font-size:16px; margin-bottom:24px;';
+      chooseText.textContent = 'Choose Your House';
+      this.overlay.appendChild(chooseText);
 
-    // House cards
-    const grid = document.createElement('div');
-    grid.style.cssText = 'display:flex; gap:24px;';
+      const grid = document.createElement('div');
+      grid.style.cssText = 'display:flex; gap:24px;';
 
-    for (const houseTemplate of HOUSES) {
-      const card = this.createCard(houseTemplate.name.split(' ')[1], houseTemplate.name, houseTemplate.description, houseTemplate.color, 220);
-      card.onclick = () => {
-        this.audioManager.playSfx('select');
-        this.overlay.remove();
-        this.showModeSelect({ ...houseTemplate, difficulty: 'normal', gameMode: 'skirmish' }, resolve);
-      };
-      grid.appendChild(card);
-    }
+      for (const houseTemplate of HOUSES) {
+        const card = this.createCard(houseTemplate.name.split(' ')[1], houseTemplate.name, houseTemplate.description, houseTemplate.color, 220);
+        card.onclick = () => {
+          this.audioManager.playSfx('select');
+          this.overlay.remove();
+          resolve(houseTemplate.id);
+        };
+        grid.appendChild(card);
+      }
 
-    this.overlay.appendChild(grid);
+      this.overlay.appendChild(grid);
 
-    // Load saved game button
-    if (localStorage.getItem('ebfd_save')) {
-      const loadBtn = document.createElement('button');
-      loadBtn.textContent = 'Load Saved Game';
-      loadBtn.style.cssText = 'margin-top:24px;padding:10px 24px;background:#1a1a3e;border:1px solid #444;color:#8cf;cursor:pointer;font-size:14px;';
-      loadBtn.onclick = () => {
-        localStorage.setItem('ebfd_load', '1');
-        window.location.reload();
-      };
-      this.overlay.appendChild(loadBtn);
-    }
+      if (localStorage.getItem('ebfd_save')) {
+        const loadBtn = document.createElement('button');
+        loadBtn.textContent = 'Load Saved Game';
+        loadBtn.style.cssText = 'margin-top:24px;padding:10px 24px;background:#1a1a3e;border:1px solid #444;color:#8cf;cursor:pointer;font-size:14px;';
+        loadBtn.onclick = () => {
+          localStorage.setItem('ebfd_load', '1');
+          window.location.reload();
+        };
+        this.overlay.appendChild(loadBtn);
+      }
 
-    // Controls hint
-    const hint = document.createElement('div');
-    hint.style.cssText = 'color:#555; font-size:12px; margin-top:24px;';
-    hint.textContent = 'WASD: Scroll | Mouse: Select/Command | M: Mute Music';
-    this.overlay.appendChild(hint);
+      const hint = document.createElement('div');
+      hint.style.cssText = 'color:#555; font-size:12px; margin-top:24px;';
+      hint.textContent = 'WASD: Scroll | Mouse: Select/Command | M: Mute Music';
+      this.overlay.appendChild(hint);
 
-    document.body.appendChild(this.overlay);
+      document.body.appendChild(this.overlay);
+    });
   }
 
   private showModeSelect(house: HouseChoice, resolve: (house: HouseChoice) => void): void {
@@ -355,7 +376,7 @@ export class HouseSelect {
   }
 
   private async showCampaignMap(house: HouseChoice, resolve: (house: HouseChoice) => void): Promise<void> {
-    const campaign = new CampaignMap(this.audioManager, house.prefix, house.name, house.enemyPrefix, house.enemyName);
+    const campaign = new CampaignMap(this.audioManager, house.prefix, house.name, house.enemyPrefix, house.enemyName, this.canvas ?? undefined, this.renderer ?? undefined);
     const result = await campaign.show();
     if (result) {
       house.campaignTerritoryId = result.territory.id;

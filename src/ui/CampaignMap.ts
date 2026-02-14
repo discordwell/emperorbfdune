@@ -1,5 +1,7 @@
+import * as THREE from 'three';
 import type { AudioManager } from '../audio/AudioManager';
 import type { Difficulty } from './HouseSelect';
+import { CampaignMap3D } from './CampaignMap3D';
 
 export interface Territory {
   id: number;
@@ -39,10 +41,14 @@ export class CampaignMap {
   private overlay: HTMLDivElement;
   private audioManager: AudioManager;
   private state: CampaignState;
+  private canvas: HTMLCanvasElement | undefined;
+  private renderer: THREE.WebGLRenderer | undefined;
 
-  constructor(audioManager: AudioManager, housePrefix: string, houseName: string, enemyPrefix: string, enemyName: string) {
+  constructor(audioManager: AudioManager, housePrefix: string, houseName: string, enemyPrefix: string, enemyName: string, canvas?: HTMLCanvasElement, renderer?: THREE.WebGLRenderer) {
     this.audioManager = audioManager;
     this.overlay = document.createElement('div');
+    this.canvas = canvas;
+    this.renderer = renderer;
 
     // Initialize territories
     const territories: Territory[] = TERRITORY_TEMPLATES.map(t => ({
@@ -94,7 +100,26 @@ export class CampaignMap {
   }
 
   /** Show the campaign map and return the chosen territory + difficulty */
-  show(): Promise<{ territory: Territory; difficulty: Difficulty; mapSeed: number } | null> {
+  async show(): Promise<{ territory: Territory; difficulty: Difficulty; mapSeed: number } | null> {
+    // Use 3D campaign map if canvas/renderer available
+    if (this.canvas && this.renderer) {
+      try {
+        const map3D = new CampaignMap3D(this.canvas, this.renderer, this.state);
+        const territoryId = await map3D.show();
+        if (territoryId === null) return null;
+        const territory = this.state.territories.find(t => t.id === territoryId);
+        if (!territory) return null;
+        return { territory, difficulty: territory.difficulty, mapSeed: territory.mapSeed };
+      } catch (e) {
+        console.warn('3D campaign map failed, using fallback:', e);
+      }
+    }
+
+    // Fallback: DOM-based campaign map
+    return this.showFallback();
+  }
+
+  private showFallback(): Promise<{ territory: Territory; difficulty: Difficulty; mapSeed: number } | null> {
     return new Promise(resolve => {
       this.overlay = document.createElement('div');
       this.overlay.style.cssText = `
@@ -104,20 +129,17 @@ export class CampaignMap {
         z-index:2000;font-family:'Segoe UI',Tahoma,sans-serif;
       `;
 
-      // Title
       const title = document.createElement('div');
       title.style.cssText = 'color:#d4a840;font-size:28px;font-weight:bold;margin-bottom:4px;letter-spacing:2px;';
       title.textContent = `${this.state.house} Campaign`;
       this.overlay.appendChild(title);
 
-      // Act indicator
       const actText = document.createElement('div');
       actText.style.cssText = 'color:#888;font-size:14px;margin-bottom:20px;';
       const actNames = ['', 'Establishing Control', 'Desert War', 'Final Assault'];
       actText.textContent = `Act ${this.state.currentAct}: ${actNames[this.state.currentAct]} | Territories: ${this.state.territories.filter(t => t.owner === 'player').length}/${this.state.territories.length}`;
       this.overlay.appendChild(actText);
 
-      // Map container
       const mapContainer = document.createElement('div');
       mapContainer.style.cssText = `
         position:relative;width:600px;height:400px;
@@ -125,7 +147,6 @@ export class CampaignMap {
         border:2px solid #444;border-radius:4px;overflow:hidden;
       `;
 
-      // Draw territory connections
       const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
       svg.setAttribute('width', '600');
       svg.setAttribute('height', '400');
@@ -133,7 +154,7 @@ export class CampaignMap {
 
       for (const t of this.state.territories) {
         for (const adjId of t.adjacent) {
-          if (adjId > t.id) { // Draw each connection once
+          if (adjId > t.id) {
             const adj = this.state.territories.find(a => a.id === adjId);
             if (!adj) continue;
             const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
@@ -149,7 +170,6 @@ export class CampaignMap {
       }
       mapContainer.appendChild(svg);
 
-      // Draw territories
       for (const t of this.state.territories) {
         const node = document.createElement('div');
         const isAttackable = t.owner !== 'player' && t.adjacent.some(
@@ -190,7 +210,6 @@ export class CampaignMap {
             node.style.borderColor = '#ffcc00';
             node.style.transform = 'scale(1.1)';
             node.style.zIndex = '5';
-            // Show description
             descEl.textContent = `${t.name}: ${t.description} [${t.difficulty.toUpperCase()}]`;
           };
           node.onmouseleave = () => {
@@ -211,13 +230,11 @@ export class CampaignMap {
 
       this.overlay.appendChild(mapContainer);
 
-      // Description area
       const descEl = document.createElement('div');
       descEl.style.cssText = 'color:#aaa;font-size:13px;margin-top:12px;max-width:500px;text-align:center;min-height:20px;';
       descEl.textContent = 'Select an adjacent territory to attack.';
       this.overlay.appendChild(descEl);
 
-      // Back button
       const backBtn = document.createElement('button');
       backBtn.textContent = 'Back to Menu';
       backBtn.style.cssText = 'margin-top:16px;padding:8px 20px;background:#1a1a3e;border:1px solid #444;color:#888;cursor:pointer;font-size:13px;';

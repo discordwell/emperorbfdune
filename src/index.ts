@@ -131,6 +131,16 @@ async function main() {
   localStorage.removeItem('ebfd_load');
   localStorage.removeItem('ebfd_load_data');
 
+  // Create WebGLRenderer early so it can be shared between 3D menus and game
+  const gameCanvas = document.getElementById('game-canvas') as HTMLCanvasElement;
+  const sharedRenderer = new THREE.WebGLRenderer({
+    canvas: gameCanvas,
+    antialias: true,
+    powerPreference: 'high-performance',
+  });
+  sharedRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  sharedRenderer.setSize(window.innerWidth, window.innerHeight);
+
   // House selection screen (skip if loading)
   let house: HouseChoice;
   if (savedGame) {
@@ -149,8 +159,13 @@ async function main() {
     const loadScreen = document.getElementById('loading-screen');
     if (loadScreen) loadScreen.style.display = 'flex';
   } else {
-    const houseSelect = new HouseSelect(audioManager);
+    // Hide loading screen so house selection is visible
+    const loadScreenEl = document.getElementById('loading-screen');
+    if (loadScreenEl) loadScreenEl.style.display = 'none';
+    const houseSelect = new HouseSelect(audioManager, gameCanvas, sharedRenderer);
     house = await houseSelect.show();
+    // Restore loading screen for asset loading phase
+    if (loadScreenEl) loadScreenEl.style.display = 'flex';
   }
 
   console.log(`Playing as ${house.name} vs ${house.enemyName}`);
@@ -183,7 +198,7 @@ async function main() {
 
   // Create game and systems
   const game = new Game();
-  const scene = new SceneManager();
+  const scene = new SceneManager(sharedRenderer);
   const terrain = new TerrainRenderer(scene);
   const input = new InputManager(scene);
   const modelManager = new ModelManager();

@@ -29,7 +29,10 @@ export class SceneManager implements RenderSystem {
   private sandParticles: THREE.Points | null = null;
   private sandParticlePositions: Float32Array | null = null;
 
-  constructor() {
+  // Whether this instance created the renderer (vs receiving an external one)
+  private ownsRenderer: boolean;
+
+  constructor(existingRenderer?: THREE.WebGLRenderer) {
     this.canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
 
     this.scene = new THREE.Scene();
@@ -61,13 +64,19 @@ export class SceneManager implements RenderSystem {
       2000
     );
 
-    this.renderer = new THREE.WebGLRenderer({
-      canvas: this.canvas,
-      antialias: true,
-      powerPreference: 'high-performance',
-    });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.setSize(window.innerWidth, window.innerHeight);
+    if (existingRenderer) {
+      this.renderer = existingRenderer;
+      this.ownsRenderer = false;
+    } else {
+      this.ownsRenderer = true;
+      this.renderer = new THREE.WebGLRenderer({
+        canvas: this.canvas,
+        antialias: true,
+        powerPreference: 'high-performance',
+      });
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      this.renderer.setSize(window.innerWidth, window.innerHeight);
+    }
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
@@ -261,6 +270,6 @@ export class SceneManager implements RenderSystem {
     if (this.scene.background instanceof THREE.Texture) {
       this.scene.background.dispose();
     }
-    this.renderer.dispose();
+    if (this.ownsRenderer) this.renderer.dispose();
   }
 }
