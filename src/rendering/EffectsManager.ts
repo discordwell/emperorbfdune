@@ -102,6 +102,7 @@ export class EffectsManager {
   // Projectile trail particle system (GPU-efficient single Points object)
   private static readonly MAX_TRAIL_PARTICLES = 500;
   private trailParticles: TrailParticle[] = [];
+  private trailFreeList: number[] = []; // Stack of available particle indices
   private trailPoints: THREE.Points | null = null;
   private trailPositions!: Float32Array;
   private trailColors!: Float32Array;
@@ -189,8 +190,9 @@ export class EffectsManager {
     this.trailColors = new Float32Array(max * 3);
     this.trailSizes = new Float32Array(max);
 
-    // Pre-fill pool with dead particles
+    // Pre-fill pool with dead particles and free-list
     for (let i = 0; i < max; i++) {
+      this.trailFreeList.push(i);
       this.trailParticles.push({
         x: 0, y: -100, z: 0, // Off-screen
         age: 0, maxAge: 1,
@@ -256,10 +258,7 @@ export class EffectsManager {
 
   /** Find a dead particle slot in the pool, or return -1 if full */
   private allocateTrailParticle(): number {
-    for (let i = 0; i < this.trailParticles.length; i++) {
-      if (!this.trailParticles[i].alive) return i;
-    }
-    return -1; // Pool exhausted
+    return this.trailFreeList.length > 0 ? this.trailFreeList.pop()! : -1;
   }
 
   /** Spawn a single trail particle at the given position with the given config */
@@ -300,8 +299,9 @@ export class EffectsManager {
       p.age += dtSec;
 
       if (p.age >= p.maxAge) {
-        // Kill particle — move off-screen
+        // Kill particle — move off-screen and return to free-list
         p.alive = false;
+        this.trailFreeList.push(i);
         this.trailPositions[i * 3 + 1] = -100;
         this.trailSizes[i] = 0;
         continue;

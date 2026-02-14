@@ -291,8 +291,8 @@ export class AbilitySystem {
       }
     }
 
-    // Check buildings with unstealthRange (every 25 ticks) — collect positions
-    let unstealthZones: { x: number; z: number; r2: number }[] | null = null;
+    // Check buildings with unstealthRange (every 25 ticks) — collect positions with owner
+    let unstealthZones: { x: number; z: number; r2: number; owner: number }[] | null = null;
     if (tickCount % 25 === 0) {
       unstealthZones = [];
       const allBuildings = buildingQuery(world);
@@ -306,6 +306,7 @@ export class AbilitySystem {
             x: Position.x[bid],
             z: Position.z[bid],
             r2: bDef.unstealthRange * bDef.unstealthRange,
+            owner: Owner.playerId[bid],
           });
         }
       }
@@ -338,29 +339,17 @@ export class AbilitySystem {
       // Infiltrator reveal overrides stealth
       const isRevealed = this.infiltratorRevealed.has(eid);
 
-      // Check if near an enemy unstealth building (use cached zones)
+      // Check if near an enemy unstealth building (use cached zones with owner)
       let inUnstealthZone = false;
       if (unstealthZones) {
-        const owner = Owner.playerId[eid];
-        const allBuildings = buildingQuery(world);
+        const unitOwner = Owner.playerId[eid];
         for (const zone of unstealthZones) {
-          // Only enemy buildings unstealth this unit
-          // We need to check building ownership — find the matching building
+          if (zone.owner === unitOwner) continue; // Only enemy buildings unstealth
           const dx = cx - zone.x;
           const dz = cz - zone.z;
           if (dx * dx + dz * dz < zone.r2) {
-            // Check if any building at this zone position is an enemy
-            for (const bid of allBuildings) {
-              if (Health.current[bid] <= 0) continue;
-              if (Owner.playerId[bid] === owner) continue;
-              const bdx = Position.x[bid] - zone.x;
-              const bdz = Position.z[bid] - zone.z;
-              if (bdx * bdx + bdz * bdz < 1) {
-                inUnstealthZone = true;
-                break;
-              }
-            }
-            if (inUnstealthZone) break;
+            inUnstealthZone = true;
+            break;
           }
         }
       }

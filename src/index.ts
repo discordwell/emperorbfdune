@@ -841,8 +841,8 @@ async function main() {
       if (bDef && bDef.numInfantryWhenGone > 0) {
         const FACTION_INFANTRY: Record<string, string> = {
           'AT': 'ATInfantry', 'HK': 'HKLightInf', 'OR': 'ORChemical',
-          'FR': 'FRFremen', 'IM': 'IMSardaukar', 'IX': 'IXInfiltrator',
-          'TL': 'TLContaminator', 'GU': 'GUMaker'
+          'FR': 'FRFremen', 'IM': 'IMSardaukar', 'IX': 'ATInfantry',
+          'TL': 'HKLightInf', 'GU': 'ATInfantry'
         };
         const prefix = typeName.substring(0, 2);
         const infantryType = FACTION_INFANTRY[prefix];

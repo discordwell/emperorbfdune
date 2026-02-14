@@ -425,37 +425,15 @@ export class DialogManager {
    */
   wireEvents(humanPlayerId: number): void {
     // Production complete -> unitReady or buildingReady
-    EventBus.on('production:complete', ({ unitType, owner }) => {
+    EventBus.on('production:complete', ({ owner, isBuilding }) => {
       if (owner !== humanPlayerId) return;
-      // Check if it's a building or unit
-      // Building types typically contain specific keywords
-      const isBuildingProduction = unitType.includes('Factory') || unitType.includes('Refinery') ||
-        unitType.includes('Windtrap') || unitType.includes('Barracks') || unitType.includes('Palace') ||
-        unitType.includes('Outpost') || unitType.includes('Silo') || unitType.includes('Wall') ||
-        unitType.includes('Turret') || unitType.includes('Yard') || unitType.includes('Starport') ||
-        unitType.includes('Hangar') || unitType.includes('Dock') || unitType.includes('IX') ||
-        unitType.includes('Gun') || unitType.includes('Tower') || unitType.includes('Pad');
-      if (isBuildingProduction) {
-        this.playDialog('constructionComplete');
-      } else {
-        this.playDialog('unitReady');
-      }
+      this.playDialog(isBuilding ? 'constructionComplete' : 'unitReady');
     });
 
     // Production started -> buildingStarted or training
-    EventBus.on('production:started', ({ unitType, owner }) => {
+    EventBus.on('production:started', ({ owner, isBuilding }) => {
       if (owner !== humanPlayerId) return;
-      const isBuildingProduction = unitType.includes('Factory') || unitType.includes('Refinery') ||
-        unitType.includes('Windtrap') || unitType.includes('Barracks') || unitType.includes('Palace') ||
-        unitType.includes('Outpost') || unitType.includes('Silo') || unitType.includes('Wall') ||
-        unitType.includes('Turret') || unitType.includes('Yard') || unitType.includes('Starport') ||
-        unitType.includes('Hangar') || unitType.includes('Dock') || unitType.includes('IX') ||
-        unitType.includes('Gun') || unitType.includes('Tower') || unitType.includes('Pad');
-      if (isBuildingProduction) {
-        this.playDialog('buildingStarted');
-      } else {
-        this.playDialog('training');
-      }
+      this.playDialog(isBuilding ? 'buildingStarted' : 'training');
     });
 
     // Building placed (construction complete and placed on map)

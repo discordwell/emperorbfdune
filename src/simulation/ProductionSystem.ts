@@ -191,7 +191,7 @@ export class ProductionSystem {
       cost: adjustedUpgradeCost,
     });
     this.upgradeQueues.set(playerId, queue);
-    EventBus.emit('production:started', { unitType: `${buildingType} Upgrade`, owner: playerId });
+    EventBus.emit('production:started', { unitType: `${buildingType} Upgrade`, owner: playerId, isBuilding: true });
     return true;
   }
 
@@ -338,7 +338,7 @@ export class ProductionSystem {
       this.unitQueues.set(playerId, queue);
     }
 
-    EventBus.emit('production:started', { unitType: typeName, owner: playerId });
+    EventBus.emit('production:started', { unitType: typeName, owner: playerId, isBuilding });
     return true;
   }
 
@@ -351,7 +351,7 @@ export class ProductionSystem {
       item.elapsed += mult;
       if (item.elapsed >= item.totalTime) {
         queue.shift();
-        EventBus.emit('production:complete', { unitType: item.typeName, owner: playerId, buildingId: 0 });
+        EventBus.emit('production:complete', { unitType: item.typeName, owner: playerId, buildingId: 0, isBuilding: true });
       }
     }
 
@@ -364,7 +364,7 @@ export class ProductionSystem {
       if (item.elapsed >= item.totalTime) {
         const completedName = item.typeName;
         queue.shift();
-        EventBus.emit('production:complete', { unitType: completedName, owner: playerId, buildingId: 0 });
+        EventBus.emit('production:complete', { unitType: completedName, owner: playerId, buildingId: 0, isBuilding: false });
         // Auto-requeue if on repeat and can afford it
         if (this.repeatUnits.get(playerId)?.has(completedName)) {
           this.startProduction(playerId, completedName, false);
@@ -384,7 +384,7 @@ export class ProductionSystem {
           this.upgradedBuildings.set(playerId, new Set());
         }
         this.upgradedBuildings.get(playerId)!.add(item.typeName);
-        EventBus.emit('production:complete', { unitType: `${item.typeName} Upgrade`, owner: playerId, buildingId: 0 });
+        EventBus.emit('production:complete', { unitType: `${item.typeName} Upgrade`, owner: playerId, buildingId: 0, isBuilding: true });
       }
     }
   }
