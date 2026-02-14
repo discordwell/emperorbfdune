@@ -117,7 +117,7 @@ export class CommandManager {
     const targetEid = this.unitRenderer.getEntityAtScreen(e.clientX, e.clientY);
     if (targetEid !== null) {
       this.issueAttackCommand(selected, targetEid);
-      this.audioManager?.playUnitSfx('attack', this.getSelectedCategory(selected));
+      this.audioManager?.playUnitVoiceOrSfx('attack', this.getSelectedCategory(selected), selected[0]);
       return;
     }
 
@@ -144,20 +144,20 @@ export class CommandManager {
       return;
     } else if (this.commandMode === 'attack-move') {
       this.issueAttackMoveCommand(selected, worldPos.x, worldPos.z);
-      this.audioManager?.playUnitSfx('move', cat);
+      this.audioManager?.playUnitVoiceOrSfx('move', cat, selected[0]);
       this.commandMode = 'normal';
       document.body.style.cursor = 'default';
     } else if (this.commandMode === 'patrol') {
       this.issuePatrolCommand(selected, worldPos.x, worldPos.z);
-      this.audioManager?.playUnitSfx('move', cat);
+      this.audioManager?.playUnitVoiceOrSfx('move', cat, selected[0]);
       this.commandMode = 'normal';
       document.body.style.cursor = 'default';
     } else if (shiftHeld) {
       this.addWaypoint(selected, worldPos.x, worldPos.z);
-      this.audioManager?.playUnitSfx('move', cat);
+      this.audioManager?.playUnitVoiceOrSfx('move', cat, selected[0]);
     } else {
       this.issueMoveCommand(selected, worldPos.x, worldPos.z);
-      this.audioManager?.playUnitSfx('move', cat);
+      this.audioManager?.playUnitVoiceOrSfx('move', cat, selected[0]);
     }
   };
 

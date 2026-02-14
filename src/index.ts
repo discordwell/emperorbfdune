@@ -246,6 +246,11 @@ async function main() {
   audioManager.setBuildingChecker((eid: number) => {
     try { return hasComponent(game.getWorld(), BuildingType, eid); } catch { return false; }
   });
+  // Unit type resolver: maps entity ID -> unit type name (for voice lines)
+  audioManager.setUnitTypeResolver((eid: number): string => {
+    const typeId = UnitType.id[eid];
+    return unitTypeNames[typeId] ?? '';
+  });
   commandManager.setUnitClassifier(classifyUnit);
 
   const pathfinder = new PathfindingSystem(terrain);
@@ -450,6 +455,10 @@ async function main() {
   // Preload priority SFX samples (non-blocking, runs in parallel with spawn)
   updateLoading(88, 'Loading audio samples...');
   await audioManager.preloadSfx();
+
+  // Preload voice lines for the player's faction
+  updateLoading(89, 'Loading voice lines...');
+  await audioManager.preloadVoices(house.prefix);
 
   updateLoading(90, 'Spawning bases...');
 

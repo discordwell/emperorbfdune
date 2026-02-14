@@ -555,6 +555,34 @@ export class AudioManager {
     }
   }
 
+  // --- Voice lines ---
+
+  /**
+   * Try to play a voice line for a specific entity. Returns true if a voice was played.
+   * Falls back gracefully if the unit has no voices.
+   */
+  tryPlayVoice(entityId: number, action: 'select' | 'move' | 'attack'): boolean {
+    if (this.muted || !this.voiceManager || !this.unitTypeResolver) return false;
+    const typeName = this.unitTypeResolver(entityId);
+    if (!typeName) return false;
+    this.voiceManager.playVoice(typeName, action);
+    // VoiceManager handles cooldown internally, but we consider it "played"
+    // if a voice manager exists and the type name was resolved
+    return this.voiceManager.hasVoice(typeName);
+  }
+
+  /**
+   * Play voice line for a unit action, falling back to category SFX.
+   * Used by CommandManager for move/attack commands.
+   */
+  playUnitVoiceOrSfx(action: 'select' | 'move' | 'attack', category: UnitCategory, entityId?: number): void {
+    if (this.muted) return;
+    // Try voice line first
+    if (entityId !== undefined && this.tryPlayVoice(entityId, action)) return;
+    // Fall back to category synth SFX
+    this.playUnitSfx(action, category);
+  }
+
   // --- Unit category-specific SFX ---
 
   playUnitSfx(action: 'select' | 'move' | 'attack', category: UnitCategory): void {
