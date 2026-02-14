@@ -42,10 +42,12 @@ export class MenuSceneManager {
     );
 
     // Set up loader with texture URL remapping
+    // Texture filenames contain special chars (%, @, !, spaces) that need URL-encoding
     const manager = new THREE.LoadingManager();
     manager.setURLModifier((url: string) => {
       if (url.includes('textures/')) {
-        return url.replace(/.*textures\//, '/assets/textures/');
+        const filename = url.replace(/.*textures\//, '');
+        return '/assets/textures/' + encodeURIComponent(filename);
       }
       return url;
     });
