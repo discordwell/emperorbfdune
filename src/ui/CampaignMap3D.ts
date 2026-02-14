@@ -22,24 +22,30 @@ const MAPPED_FACE_NAMES = new Set(Object.values(TERRITORY_MESH_MAP));
 const CAM_POS = new THREE.Vector3(106, 49, 100);
 const CAM_TARGET = new THREE.Vector3(106, 49, 545);
 
+interface TerritoryEntry {
+  id: number;
+  face: THREE.Object3D;
+  edge: THREE.Object3D | null;
+  select: THREE.Object3D | null;
+  proxy: THREE.Mesh; // invisible raycast proxy
+}
+
 export class CampaignMap3D {
   private menuScene: MenuSceneManager;
   private textOverlay: MenuTextOverlay;
   private root: THREE.Group | null = null;
   private resolveSelection: ((territoryId: number | null) => void) | null = null;
+  private resolved = false;
 
-  private territoryMeshes = new Map<number, {
-    face: THREE.Object3D;
-    edge: THREE.Object3D | null;
-    select: THREE.Object3D | null;
-  }>();
+  private territories: TerritoryEntry[] = [];
 
-  private attackButton: THREE.Object3D | null = null;
-  private exitButton: THREE.Object3D | null = null;
   private hoveredTerritoryId: number | null = null;
   private selectedTerritoryId: number | null = null;
   private planet: THREE.Object3D | null = null;
   private elapsed = 0;
+
+  // DOM buttons (Attack/Exit) — XBF mesh buttons don't raycast reliably
+  private buttonOverlay: HTMLDivElement | null = null;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -68,22 +74,20 @@ export class CampaignMap3D {
     this.menuScene.camera.updateProjectionMatrix();
 
     this.setupTerritories();
-    this.setupButtons();
     this.setupPlanet();
     this.setupGlowMaterials();
     this.colorTerritories();
 
-    // Initially hide select overlays and Attack button
-    for (const tm of this.territoryMeshes.values()) {
-      if (tm.select) tm.select.visible = false;
-    }
-    if (this.attackButton) {
-      this.attackButton.visible = false;
-      this.attackButton.scale.setScalar(1);
+    // Initially hide select overlays
+    for (const t of this.territories) {
+      if (t.select) t.select.visible = false;
     }
 
-    // Set up click/hover on attackable territories
+    // Set up click/hover on attackable territories using proxy meshes
     this.updateInteractionTargets();
+
+    // Show Exit button as DOM overlay
+    this.showExitButton();
 
     // Animation loop
     this.menuScene.addAnimation((dt) => this.animate(dt));
@@ -96,6 +100,8 @@ export class CampaignMap3D {
 
   private setupTerritories(): void {
     const root = this.root!;
+    // Ensure world matrices are current before reading positions for proxy creation
+    root.updateMatrixWorld(true);
 
     for (const [gameId, meshName] of Object.entries(TERRITORY_MESH_MAP)) {
       const id = parseInt(gameId);
@@ -103,8 +109,35 @@ export class CampaignMap3D {
       const edge = this.menuScene.findMesh(root, meshName.replace('F', 'E'));
       const select = this.menuScene.findMesh(root, `${meshName}select`);
 
-      if (face) {
-        this.territoryMeshes.set(id, { face, edge, select });
+      if (face && face instanceof THREE.Mesh) {
+        // Create invisible proxy plane from the face's bounding box
+        const geo = face.geometry;
+        geo.computeBoundingBox();
+        const bb = geo.boundingBox!;
+        const w = bb.max.x - bb.min.x;
+        const h = bb.max.y - bb.min.y;
+        const cx = (bb.min.x + bb.max.x) / 2;
+        const cy = (bb.min.y + bb.max.y) / 2;
+        const cz = (bb.min.z + bb.max.z) / 2;
+
+        // Compute world position of geometry center
+        const m = face.matrixWorld.elements;
+        const wx = cx * m[0] + cy * m[4] + cz * m[8] + m[12];
+        const wy = cx * m[1] + cy * m[5] + cz * m[9] + m[13];
+        const wz = cx * m[2] + cy * m[6] + cz * m[10] + m[14];
+
+        // Create proxy plane in XY plane, facing -Z (toward camera)
+        const proxyGeo = new THREE.PlaneGeometry(w, h);
+        const proxyMat = new THREE.MeshBasicMaterial({
+          visible: false,
+          side: THREE.DoubleSide,
+        });
+        const proxy = new THREE.Mesh(proxyGeo, proxyMat);
+        proxy.name = `proxy_${meshName}`;
+        proxy.position.set(wx, wy, wz);
+        this.menuScene.scene.add(proxy);
+
+        this.territories.push({ id, face, edge, select, proxy });
       }
     }
 
@@ -118,18 +151,6 @@ export class CampaignMap3D {
         }
       }
     });
-  }
-
-  private setupButtons(): void {
-    const root = this.root!;
-    this.attackButton = this.menuScene.findMesh(root, 'Attack');
-    this.exitButton = this.menuScene.findMesh(root, 'Exit');
-
-    // Show exit button
-    if (this.exitButton) {
-      this.exitButton.visible = true;
-      this.exitButton.scale.setScalar(1);
-    }
   }
 
   private setupPlanet(): void {
@@ -174,8 +195,8 @@ export class CampaignMap3D {
 
   private colorTerritories(): void {
     for (const territory of this.state.territories) {
-      const tm = this.territoryMeshes.get(territory.id);
-      if (!tm) continue;
+      const entry = this.territories.find(t => t.id === territory.id);
+      if (!entry) continue;
 
       const setColor = (obj: THREE.Object3D, color: number, emissive: number) => {
         obj.traverse((child) => {
@@ -191,14 +212,14 @@ export class CampaignMap3D {
       };
 
       if (territory.owner === 'player') {
-        setColor(tm.face, 0x2244aa, 0x0033aa);
-        if (tm.edge) setColor(tm.edge, 0x3366cc, 0x0044cc);
+        setColor(entry.face, 0x2244aa, 0x0033aa);
+        if (entry.edge) setColor(entry.edge, 0x3366cc, 0x0044cc);
       } else if (territory.owner === 'enemy') {
-        setColor(tm.face, 0xaa2222, 0xaa1111);
-        if (tm.edge) setColor(tm.edge, 0xcc3333, 0xcc1111);
+        setColor(entry.face, 0xaa2222, 0xaa1111);
+        if (entry.edge) setColor(entry.edge, 0xcc3333, 0xcc1111);
       } else {
-        setColor(tm.face, 0x666666, 0x222222);
-        if (tm.edge) setColor(tm.edge, 0x888888, 0x333333);
+        setColor(entry.face, 0x666666, 0x222222);
+        if (entry.edge) setColor(entry.edge, 0x888888, 0x333333);
       }
     }
   }
@@ -213,116 +234,159 @@ export class CampaignMap3D {
 
   private updateInteractionTargets(): void {
     const attackableIds = this.getAttackableTerritoryIds();
-    const clickableFaces: THREE.Object3D[] = [];
+    const clickableProxies: THREE.Object3D[] = [];
 
     for (const id of attackableIds) {
-      const tm = this.territoryMeshes.get(id);
-      if (tm) clickableFaces.push(tm.face);
+      const entry = this.territories.find(t => t.id === id);
+      if (entry) clickableProxies.push(entry.proxy);
     }
 
-    // Add exit button as click target
-    if (this.exitButton) clickableFaces.push(this.exitButton);
-
-    this.menuScene.setClickTargets(clickableFaces, (mesh) => this.onMeshClick(mesh));
-    this.menuScene.setHoverTargets(clickableFaces, (mesh) => this.onMeshHover(mesh));
+    this.menuScene.setClickTargets(clickableProxies, (mesh) => this.onProxyClick(mesh));
+    this.menuScene.setHoverTargets(clickableProxies, (mesh) => this.onProxyHover(mesh));
   }
 
-  private onMeshHover(mesh: THREE.Object3D | null): void {
+  private findTerritoryByProxy(proxy: THREE.Object3D): TerritoryEntry | undefined {
+    return this.territories.find(t => t.proxy === proxy);
+  }
+
+  private onProxyHover(mesh: THREE.Object3D | null): void {
     // Clear previous hover highlight
     if (this.hoveredTerritoryId !== null) {
-      const prev = this.territoryMeshes.get(this.hoveredTerritoryId);
+      const prev = this.territories.find(t => t.id === this.hoveredTerritoryId);
       if (prev?.select) prev.select.visible = false;
     }
 
     if (!mesh) {
       this.hoveredTerritoryId = null;
       document.body.style.cursor = 'default';
-      // Remove territory label
       this.textOverlay.removeLabel('territory-hover');
       return;
     }
 
-    // Check if it's exit or attack button
-    if (mesh === this.exitButton || mesh === this.attackButton) {
-      document.body.style.cursor = 'pointer';
-      this.hoveredTerritoryId = null;
+    const entry = this.findTerritoryByProxy(mesh);
+    if (!entry) {
+      document.body.style.cursor = 'default';
       return;
     }
 
-    // Find which territory was hovered
-    for (const [id, tm] of this.territoryMeshes.entries()) {
-      if (tm.face === mesh) {
-        this.hoveredTerritoryId = id;
-        if (tm.select) tm.select.visible = true;
-        document.body.style.cursor = 'pointer';
+    this.hoveredTerritoryId = entry.id;
+    if (entry.select) entry.select.visible = true;
+    document.body.style.cursor = 'pointer';
 
-        // Show territory name label
-        const territory = this.state.territories.find(t => t.id === id);
-        if (territory) {
-          const worldPos = new THREE.Vector3();
-          tm.face.getWorldPosition(worldPos);
-          this.textOverlay.removeLabel('territory-hover');
-          this.textOverlay.addLabel('territory-hover', `${territory.name} [${territory.difficulty.toUpperCase()}]`, worldPos, {
-            fontSize: '16px',
-            color: '#ffcc44',
-            fontWeight: 'bold',
-          });
-        }
-        return;
-      }
+    // Show territory name label
+    const territory = this.state.territories.find(t => t.id === entry.id);
+    if (territory) {
+      this.textOverlay.removeLabel('territory-hover');
+      this.textOverlay.addLabel('territory-hover', `${territory.name} [${territory.difficulty.toUpperCase()}]`, entry.proxy.position, {
+        fontSize: '16px',
+        color: '#ffcc44',
+        fontWeight: 'bold',
+      });
     }
   }
 
-  private onMeshClick(mesh: THREE.Object3D): void {
-    // Exit button - resolve before dispose to avoid use-after-dispose
-    if (mesh === this.exitButton) {
+  private onProxyClick(mesh: THREE.Object3D): void {
+    if (this.resolved) return;
+
+    const entry = this.findTerritoryByProxy(mesh);
+    if (!entry) return;
+
+    this.selectedTerritoryId = entry.id;
+    const territory = this.state.territories.find(t => t.id === entry.id);
+
+    // Show Attack/Cancel DOM buttons
+    this.showAttackButtons(territory?.name ?? 'Territory');
+  }
+
+  private showExitButton(): void {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = `
+      position:fixed; top:20px; left:20px;
+      z-index:2002; pointer-events:auto;
+    `;
+    const exitBtn = document.createElement('button');
+    exitBtn.textContent = 'EXIT';
+    exitBtn.style.cssText = `
+      padding:10px 24px; font-size:14px; font-weight:bold;
+      background:#1a1a2e; border:2px solid #555; color:#aaa;
+      cursor:pointer; letter-spacing:2px;
+    `;
+    exitBtn.onmouseenter = () => { exitBtn.style.borderColor = '#888'; exitBtn.style.color = '#fff'; };
+    exitBtn.onmouseleave = () => { exitBtn.style.borderColor = '#555'; exitBtn.style.color = '#aaa'; };
+    exitBtn.addEventListener('click', () => {
+      if (this.resolved) return;
+      this.resolved = true;
       const resolve = this.resolveSelection;
       this.resolveSelection = null;
       this.dispose();
       resolve?.(null);
-      return;
-    }
+    });
+    overlay.appendChild(exitBtn);
+    document.body.appendChild(overlay);
+    this.buttonOverlay = overlay;
+  }
 
-    // Territory selection
-    for (const [id, tm] of this.territoryMeshes.entries()) {
-      if (tm.face === mesh) {
-        this.selectedTerritoryId = id;
+  private showAttackButtons(territoryName: string): void {
+    this.removeAttackButtons();
 
-        // Show attack button
-        if (this.attackButton) {
-          this.attackButton.visible = true;
-          this.attackButton.scale.setScalar(1);
+    const overlay = document.createElement('div');
+    overlay.style.cssText = `
+      position:fixed; bottom:60px; left:0; right:0;
+      display:flex; flex-direction:column; align-items:center; gap:12px;
+      z-index:2002; pointer-events:auto;
+    `;
 
-          // Set attack button as additional click target
-          const attackableIds = this.getAttackableTerritoryIds();
-          const clickableFaces: THREE.Object3D[] = [];
-          for (const aid of attackableIds) {
-            const atm = this.territoryMeshes.get(aid);
-            if (atm) clickableFaces.push(atm.face);
-          }
-          clickableFaces.push(this.attackButton);
-          if (this.exitButton) clickableFaces.push(this.exitButton);
+    const label = document.createElement('div');
+    label.textContent = `Attack ${territoryName}?`;
+    label.style.cssText = `color:#ffcc44; font-size:18px; font-weight:bold; font-family:'Segoe UI',Tahoma,sans-serif; text-shadow:0 0 10px #ffcc4440;`;
+    overlay.appendChild(label);
 
-          this.menuScene.setClickTargets(clickableFaces, (m) => {
-            if (m === this.attackButton) {
-              this.onAttackConfirm();
-            } else if (m === this.exitButton) {
-              this.dispose();
-              this.resolveSelection?.(null);
-            } else {
-              this.onMeshClick(m);
-            }
-          });
-          this.menuScene.setHoverTargets(clickableFaces, (m) => this.onMeshHover(m));
-        }
-        return;
-      }
-    }
+    const btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display:flex; gap:24px;';
+
+    const attackBtn = document.createElement('button');
+    attackBtn.textContent = 'ATTACK';
+    attackBtn.style.cssText = `
+      padding:12px 36px; font-size:16px; font-weight:bold;
+      background:#aa222233; border:2px solid #cc4444; color:#ff6666;
+      cursor:pointer; letter-spacing:2px;
+    `;
+    attackBtn.onmouseenter = () => { attackBtn.style.background = '#aa222266'; };
+    attackBtn.onmouseleave = () => { attackBtn.style.background = '#aa222233'; };
+    attackBtn.addEventListener('click', () => this.onAttackConfirm());
+    btnRow.appendChild(attackBtn);
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.textContent = 'CANCEL';
+    cancelBtn.style.cssText = `
+      padding:12px 36px; font-size:16px; font-weight:bold;
+      background:#33333333; border:2px solid #666; color:#aaa;
+      cursor:pointer; letter-spacing:2px;
+    `;
+    cancelBtn.onmouseenter = () => { cancelBtn.style.background = '#33333366'; };
+    cancelBtn.onmouseleave = () => { cancelBtn.style.background = '#33333333'; };
+    cancelBtn.addEventListener('click', () => {
+      this.selectedTerritoryId = null;
+      this.removeAttackButtons();
+    });
+    btnRow.appendChild(cancelBtn);
+
+    overlay.appendChild(btnRow);
+
+    // Store reference so we can find and remove it
+    overlay.dataset.attackButtons = 'true';
+    document.body.appendChild(overlay);
+  }
+
+  private removeAttackButtons(): void {
+    document.querySelectorAll('[data-attack-buttons]').forEach(el => el.remove());
   }
 
   private onAttackConfirm(): void {
-    if (this.selectedTerritoryId === null) return;
+    if (this.resolved || this.selectedTerritoryId === null) return;
+    this.resolved = true;
     const id = this.selectedTerritoryId;
+    this.removeAttackButtons();
     this.menuScene.fadeOut(500).then(() => {
       this.dispose();
       this.resolveSelection?.(id);
@@ -339,9 +403,9 @@ export class CampaignMap3D {
 
     // Pulse hovered territory
     if (this.hoveredTerritoryId !== null) {
-      const tm = this.territoryMeshes.get(this.hoveredTerritoryId);
-      if (tm?.select && tm.select instanceof THREE.Mesh) {
-        const mat = tm.select.material as THREE.MeshStandardMaterial;
+      const entry = this.territories.find(t => t.id === this.hoveredTerritoryId);
+      if (entry?.select && entry.select instanceof THREE.Mesh) {
+        const mat = entry.select.material as THREE.MeshStandardMaterial;
         if (mat.emissive) {
           const pulse = 0.3 + 0.3 * Math.sin(this.elapsed * 4);
           mat.emissiveIntensity = pulse;
@@ -356,6 +420,11 @@ export class CampaignMap3D {
   dispose(): void {
     this.menuScene.dispose();
     this.textOverlay.dispose();
+    this.removeAttackButtons();
+    if (this.buttonOverlay) {
+      this.buttonOverlay.remove();
+      this.buttonOverlay = null;
+    }
     document.body.style.cursor = 'default';
   }
 }

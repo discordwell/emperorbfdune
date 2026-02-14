@@ -172,37 +172,37 @@ async function main() {
     if (uiOverlay) uiOverlay.style.display = 'none';
     const houseSelect = new HouseSelect(audioManager, sharedRenderer ? gameCanvas : undefined, sharedRenderer ?? undefined);
     house = await houseSelect.show();
-    // Restore loading screen and HUD for asset loading / game phase
-    if (loadScreenEl) loadScreenEl.style.display = 'flex';
     if (uiOverlay) uiOverlay.style.display = '';
+
+    // Show mission briefing for campaign mode BEFORE restoring loading screen
+    if (house.gameMode === 'campaign' && house.campaignTerritoryId !== undefined) {
+      const TERRITORY_DATA: Record<number, { name: string; description: string; difficulty: 'easy' | 'normal' | 'hard' }> = {
+        0: { name: 'Carthag Basin', description: 'A wide desert basin near the Carthag spaceport. Light enemy presence.', difficulty: 'easy' },
+        1: { name: 'Habbanya Ridge', description: 'Rocky ridge with scattered spice fields. Good defensive terrain.', difficulty: 'easy' },
+        2: { name: 'Wind Pass', description: 'A narrow canyon pass battered by constant sandstorms.', difficulty: 'normal' },
+        3: { name: 'Arrakeen Flats', description: 'Open desert near the capital. Rich spice deposits attract worms.', difficulty: 'normal' },
+        4: { name: 'Sietch Tabr', description: 'Central crossroads territory. Controls access to the deep desert.', difficulty: 'normal' },
+        5: { name: 'Shield Wall', description: 'Mountainous terrain near the Shield Wall. Heavily defended.', difficulty: 'normal' },
+        6: { name: 'Spice Fields', description: 'The richest spice fields on Arrakis. A strategic prize.', difficulty: 'hard' },
+        7: { name: 'Old Gap', description: 'Ancient rock formations hide enemy strongholds.', difficulty: 'hard' },
+        8: { name: 'Enemy Capital', description: "The enemy's main base of operations. Final battle.", difficulty: 'hard' },
+      };
+      const tData = TERRITORY_DATA[house.campaignTerritoryId];
+      if (tData) {
+        const objectiveOverride = house.campaignTerritoryId === 3 ? 'Survive for 8 minutes against enemy assault' : undefined;
+        await showMissionBriefing(
+          { id: house.campaignTerritoryId, name: tData.name, description: tData.description, difficulty: tData.difficulty, x: 0, y: 0, adjacent: [], mapSeed: 0, owner: 'enemy' },
+          house.name, house.prefix, house.enemyName, objectiveOverride
+        );
+      }
+    }
+
+    // Now restore loading screen for asset loading phase
+    if (loadScreenEl) loadScreenEl.style.display = 'flex';
   }
 
   console.log(`Playing as ${house.name} vs ${house.enemyName}`);
   audioManager.setPlayerFaction(house.prefix);
-
-  // Show mission briefing for campaign mode
-  if (house.gameMode === 'campaign' && house.campaignTerritoryId !== undefined && !savedGame) {
-    const TERRITORY_DATA: Record<number, { name: string; description: string; difficulty: 'easy' | 'normal' | 'hard' }> = {
-      0: { name: 'Carthag Basin', description: 'A wide desert basin near the Carthag spaceport. Light enemy presence.', difficulty: 'easy' },
-      1: { name: 'Habbanya Ridge', description: 'Rocky ridge with scattered spice fields. Good defensive terrain.', difficulty: 'easy' },
-      2: { name: 'Wind Pass', description: 'A narrow canyon pass battered by constant sandstorms.', difficulty: 'normal' },
-      3: { name: 'Arrakeen Flats', description: 'Open desert near the capital. Rich spice deposits attract worms.', difficulty: 'normal' },
-      4: { name: 'Sietch Tabr', description: 'Central crossroads territory. Controls access to the deep desert.', difficulty: 'normal' },
-      5: { name: 'Shield Wall', description: 'Mountainous terrain near the Shield Wall. Heavily defended.', difficulty: 'normal' },
-      6: { name: 'Spice Fields', description: 'The richest spice fields on Arrakis. A strategic prize.', difficulty: 'hard' },
-      7: { name: 'Old Gap', description: 'Ancient rock formations hide enemy strongholds.', difficulty: 'hard' },
-      8: { name: 'Enemy Capital', description: "The enemy's main base of operations. Final battle.", difficulty: 'hard' },
-    };
-    const tData = TERRITORY_DATA[house.campaignTerritoryId];
-    if (tData) {
-      const objectiveOverride = house.campaignTerritoryId === 3 ? 'Survive for 8 minutes against enemy assault' : undefined;
-      await showMissionBriefing(
-        { id: house.campaignTerritoryId, name: tData.name, description: tData.description, difficulty: tData.difficulty, x: 0, y: 0, adjacent: [], mapSeed: 0, owner: 'enemy' },
-        house.name, house.prefix, house.enemyName, objectiveOverride
-      );
-    }
-  }
-
   audioManager.startGameMusic();
 
   // Create game and systems
