@@ -2,12 +2,15 @@ import type { GameSystem } from '../core/Game';
 import type { World } from '../core/ECS';
 import {
   Position, Health, Combat, Owner, AttackTarget, MoveTarget, Rotation, Speed,
-  Armour, BuildingType, Veterancy, combatQuery, hasComponent,
+  Armour, BuildingType, Veterancy, combatQuery, healthQuery, hasComponent,
 } from '../core/ECS';
 import type { GameRules } from '../config/RulesParser';
+import type { BulletDef } from '../config/WeaponDefs';
 import { distance2D, worldToTile, angleBetween, lerpAngle } from '../utils/MathUtils';
 import { EventBus } from '../core/EventBus';
 import type { FogOfWar } from '../rendering/FogOfWar';
+
+const TILE_SIZE = 2;
 
 export class CombatSystem implements GameSystem {
   private rules: GameRules;
@@ -34,6 +37,8 @@ export class CombatSystem implements GameSystem {
   private playerFactions = new Map<number, string>();
   // Suppressed entities: skip combat entirely (rearming aircraft, etc.)
   private suppressedEntities = new Set<number>();
+  // Bullet definition lookup cache: turret name -> BulletDef (null if not found)
+  private bulletCache = new Map<string, BulletDef | null>();
 
   constructor(rules: GameRules) {
     this.rules = rules;
@@ -277,83 +282,52 @@ export class CombatSystem implements GameSystem {
     }
   }
 
-  private fire(world: World, attackerEid: number, targetEid: number): void {
-    // Look up weapon damage
-    const weaponId = Combat.weaponId[attackerEid];
-    // For now, use a simplified damage model
-    // weaponId indexes into a runtime array; we store base damage in rof for simplicity
-    // In a full impl, look up turret -> bullet -> warhead chain
-
-    let baseDamage = 100; // Default
-    let bulletName = '';
+  /** Look up the BulletDef for an attacker entity via turretAttach -> bullet chain. Cached. */
+  private getBulletDef(attackerEid: number): BulletDef | null {
     const typeName = this.unitTypeMap.get(attackerEid);
-    if (typeName) {
-      // Look up turret from either unit or building definition
-      const unitDef = this.rules.units.get(typeName);
-      const bldgDef = this.rules.buildings.get(typeName);
-      const turretName = unitDef?.turretAttach ?? bldgDef?.turretAttach;
-      if (turretName) {
-        const turret = this.rules.turrets.get(turretName);
-        if (turret?.bullet) {
-          bulletName = turret.bullet;
-          const bullet = this.rules.bullets.get(turret.bullet);
-          if (bullet) {
-            baseDamage = bullet.damage;
-            // Apply warhead vs armor
-            if (bullet.warhead && hasComponent(world, Armour, targetEid)) {
-              const warhead = this.rules.warheads.get(bullet.warhead);
-              const armourIdx = Armour.type[targetEid];
-              const armourName = this.armourTypes[armourIdx] ?? 'None';
-              if (warhead) {
-                const multiplier = (warhead.vs[armourName] ?? 100) / 100;
-                baseDamage = Math.round(baseDamage * multiplier);
-              }
-            }
-          }
-        }
-      }
+    if (!typeName) return null;
+
+    const cached = this.bulletCache.get(typeName);
+    if (cached !== undefined) return cached;
+
+    const unitDef = this.rules.units.get(typeName);
+    const bldgDef = this.rules.buildings.get(typeName);
+    const turretName = unitDef?.turretAttach ?? bldgDef?.turretAttach;
+    if (!turretName) {
+      this.bulletCache.set(typeName, null);
+      return null;
     }
-
-    // Veterancy damage bonus: +15%/+30%/+50% per rank
-    if (hasComponent(world, Veterancy, attackerEid)) {
-      const rank = Veterancy.rank[attackerEid];
-      const vetBonus = [1.0, 1.15, 1.30, 1.50][rank] ?? 1.0;
-      baseDamage = Math.round(baseDamage * vetBonus);
+    const turret = this.rules.turrets.get(turretName);
+    if (!turret?.bullet) {
+      this.bulletCache.set(typeName, null);
+      return null;
     }
+    const bullet = this.rules.bullets.get(turret.bullet) ?? null;
+    this.bulletCache.set(typeName, bullet);
+    return bullet;
+  }
 
-    // Veterancy defense bonus on target: -10%/-20%/-30% damage taken
-    if (hasComponent(world, Veterancy, targetEid)) {
-      const defRank = Veterancy.rank[targetEid];
-      const defBonus = [1.0, 0.9, 0.8, 0.7][defRank] ?? 1.0;
-      baseDamage = Math.round(baseDamage * defBonus);
-    }
+  /** Apply warhead multiplier based on target's armor type. Returns adjusted damage. */
+  private applyWarheadMultiplier(baseDamage: number, warheadName: string, targetEid: number): number {
+    if (!warheadName || !hasComponent(this.world!, Armour, targetEid)) return baseDamage;
+    const warhead = this.rules.warheads.get(warheadName);
+    if (!warhead) return baseDamage;
+    const armourIdx = Armour.type[targetEid];
+    const armourName = this.armourTypes[armourIdx] ?? 'None';
+    const multiplier = (warhead.vs[armourName] ?? 100) / 100;
+    return Math.round(baseDamage * multiplier);
+  }
 
-    // Damage degradation: damaged units deal less damage (proportional to HP ratio)
-    // Harkonnen are exempt — they maintain full combat power until destroyed
-    const attackerOwner = Owner.playerId[attackerEid];
-    const attackerFaction = this.playerFactions.get(attackerOwner);
-    if (attackerFaction !== 'HK') {
-      const hpRatio = Health.current[attackerEid] / Math.max(1, Health.max[attackerEid]);
-      // Scale: 100% HP = full damage, 50% HP = 75% damage, 0% HP = 50% damage
-      const degradation = 0.5 + hpRatio * 0.5;
-      baseDamage = Math.round(baseDamage * degradation);
-    }
+  /** Apply damage to a single entity, handling kill tracking, veterancy XP, and events. */
+  private applyDamageToEntity(
+    world: World, attackerEid: number, targetEid: number, damage: number
+  ): void {
+    if (damage <= 0) return;
+    if (!hasComponent(world, Health, targetEid) || Health.current[targetEid] <= 0) return;
 
-    // Emit fire event for visual projectile
-    EventBus.emit('combat:fire', {
-      attackerX: Position.x[attackerEid],
-      attackerZ: Position.z[attackerEid],
-      targetX: Position.x[targetEid],
-      targetZ: Position.z[targetEid],
-      weaponType: bulletName,
-      attackerEntity: attackerEid,
-      targetEntity: targetEid,
-    });
+    Health.current[targetEid] -= damage;
 
-    // Apply damage
-    Health.current[targetEid] -= baseDamage;
-
-    // Notify when local player's units/buildings take damage (only player 0)
+    // Notify when local player's units/buildings take damage
     const targetOwner = Owner.playerId[targetEid];
     if (targetOwner === this.localPlayerId && Owner.playerId[attackerEid] !== targetOwner) {
       EventBus.emit('unit:damaged', {
@@ -383,6 +357,129 @@ export class CombatSystem implements GameSystem {
 
       EventBus.emit('unit:died', { entityId: targetEid, killerEntity: attackerEid });
     }
+  }
+
+  /** Apply AoE blast damage at the target's position, hitting all entities within blast radius. */
+  private applyBlastDamage(
+    world: World, attackerEid: number, targetEid: number,
+    baseDamage: number, bullet: BulletDef
+  ): void {
+    // Impact point = target position
+    const impactX = Position.x[targetEid];
+    const impactZ = Position.z[targetEid];
+
+    // Convert game-units blast radius to world units: 32 game units = 1 tile = TILE_SIZE world units
+    const worldRadius = (bullet.blastRadius / 32) * TILE_SIZE;
+    const worldRadiusSq = worldRadius * worldRadius;
+
+    const attackerOwner = Owner.playerId[attackerEid];
+
+    // Emit blast event for visual effects
+    EventBus.emit('combat:blast', { x: impactX, z: impactZ, radius: worldRadius });
+
+    // Iterate all entities with Health+Position
+    const entities = healthQuery(world);
+    for (const eid of entities) {
+      if (Health.current[eid] <= 0) continue;
+
+      const dx = Position.x[eid] - impactX;
+      const dz = Position.z[eid] - impactZ;
+      const distSq = dx * dx + dz * dz;
+
+      if (distSq > worldRadiusSq) continue;
+
+      const dist = Math.sqrt(distSq);
+
+      // Check friendly fire
+      const entityOwner = Owner.playerId[eid];
+      const isFriendly = hasComponent(world, Owner, eid) && entityOwner === attackerOwner;
+
+      if (isFriendly && !bullet.damageFriendly) continue;
+
+      // Calculate damage for this entity: apply warhead multiplier per-target (different armor types)
+      let damage = this.applyWarheadMultiplier(baseDamage, bullet.warhead, eid);
+
+      // Distance falloff: linear from full damage at center to 0 at edge
+      if (bullet.reduceDamageWithDistance && worldRadius > 0) {
+        damage *= (1 - dist / worldRadius);
+      }
+
+      // Friendly damage reduction
+      if (isFriendly) {
+        damage *= bullet.friendlyDamageAmount / 100;
+      }
+
+      damage = Math.round(damage);
+
+      // Apply veterancy defense bonus per target
+      if (hasComponent(world, Veterancy, eid)) {
+        const defRank = Veterancy.rank[eid];
+        const defBonus = [1.0, 0.9, 0.8, 0.7][defRank] ?? 1.0;
+        damage = Math.round(damage * defBonus);
+      }
+
+      this.applyDamageToEntity(world, attackerEid, eid, damage);
+    }
+  }
+
+  private fire(world: World, attackerEid: number, targetEid: number): void {
+    let baseDamage = 100; // Default
+    let bulletName = '';
+    const bullet = this.getBulletDef(attackerEid);
+
+    if (bullet) {
+      baseDamage = bullet.damage;
+      bulletName = bullet.name;
+    }
+
+    // Veterancy damage bonus: +15%/+30%/+50% per rank
+    if (hasComponent(world, Veterancy, attackerEid)) {
+      const rank = Veterancy.rank[attackerEid];
+      const vetBonus = [1.0, 1.15, 1.30, 1.50][rank] ?? 1.0;
+      baseDamage = Math.round(baseDamage * vetBonus);
+    }
+
+    // Damage degradation: damaged units deal less damage (proportional to HP ratio)
+    // Harkonnen are exempt — they maintain full combat power until destroyed
+    const attackerOwner = Owner.playerId[attackerEid];
+    const attackerFaction = this.playerFactions.get(attackerOwner);
+    if (attackerFaction !== 'HK') {
+      const hpRatio = Health.current[attackerEid] / Math.max(1, Health.max[attackerEid]);
+      // Scale: 100% HP = full damage, 50% HP = 75% damage, 0% HP = 50% damage
+      const degradation = 0.5 + hpRatio * 0.5;
+      baseDamage = Math.round(baseDamage * degradation);
+    }
+
+    // Emit fire event for visual projectile
+    EventBus.emit('combat:fire', {
+      attackerX: Position.x[attackerEid],
+      attackerZ: Position.z[attackerEid],
+      targetX: Position.x[targetEid],
+      targetZ: Position.z[targetEid],
+      weaponType: bulletName,
+      attackerEntity: attackerEid,
+      targetEntity: targetEid,
+    });
+
+    // AoE blast damage: if bullet has a blast radius, damage all entities in the area
+    if (bullet && bullet.blastRadius > 0) {
+      this.applyBlastDamage(world, attackerEid, targetEid, baseDamage, bullet);
+      return;
+    }
+
+    // Single-target damage path: apply warhead multiplier for the specific target
+    if (bullet) {
+      baseDamage = this.applyWarheadMultiplier(baseDamage, bullet.warhead, targetEid);
+    }
+
+    // Veterancy defense bonus on target: -10%/-20%/-30% damage taken
+    if (hasComponent(world, Veterancy, targetEid)) {
+      const defRank = Veterancy.rank[targetEid];
+      const defBonus = [1.0, 0.9, 0.8, 0.7][defRank] ?? 1.0;
+      baseDamage = Math.round(baseDamage * defBonus);
+    }
+
+    this.applyDamageToEntity(world, attackerEid, targetEid, baseDamage);
   }
 
   private findNearestEnemy(world: World, eid: number, entities: readonly number[]): number {

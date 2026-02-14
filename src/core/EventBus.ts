@@ -32,6 +32,7 @@ interface EventMap {
   'bloom:warning': { x: number; z: number };
   'bloom:tremor': { x: number; z: number; intensity: number };
   'bloom:eruption': { x: number; z: number };
+  'combat:blast': { x: number; z: number; radius: number };
   'superweapon:ready': { owner: number; type: string };
   'superweapon:fired': { owner: number; type: string; x: number; z: number };
 }

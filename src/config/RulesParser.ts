@@ -342,6 +342,10 @@ function parseBulletDef(name: string, section: Section): BulletDef {
   def.antiAircraft = parseBool(entries.get('AntiAircraft') ?? 'false');
   def.isLaser = parseBool(entries.get('IsLaser') ?? 'false');
   def.blowUp = parseBool(entries.get('BlowUp') ?? 'false');
+  def.blastRadius = parseNum(entries.get('BlastRadius') ?? '0');
+  def.reduceDamageWithDistance = parseBool(entries.get('ReduceDamageWithDistance') ?? 'true');
+  def.damageFriendly = parseBool(entries.get('DamageFriendly') ?? 'false');
+  def.friendlyDamageAmount = parseNum(entries.get('FriendlyDamageAmount') ?? '0');
 
   return def;
 }

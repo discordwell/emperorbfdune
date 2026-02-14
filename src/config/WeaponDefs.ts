@@ -25,6 +25,10 @@ export interface BulletDef {
   antiAircraft: boolean;
   isLaser: boolean;
   blowUp: boolean;
+  blastRadius: number; // 0 = single target, game units where 32 = 1 tile
+  reduceDamageWithDistance: boolean; // Linear falloff from center to edge
+  damageFriendly: boolean; // Whether AoE damages friendly units
+  friendlyDamageAmount: number; // 0-100, percentage of damage applied to friendlies
 }
 
 // Warhead damage multipliers per armor type (percentage 0-100)
@@ -69,6 +73,10 @@ export function createDefaultBulletDef(name: string): BulletDef {
     antiAircraft: false,
     isLaser: false,
     blowUp: false,
+    blastRadius: 0,
+    reduceDamageWithDistance: true,
+    damageFriendly: false,
+    friendlyDamageAmount: 0,
   };
 }
 

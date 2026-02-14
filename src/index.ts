@@ -1015,6 +1015,12 @@ async function main() {
     }
   });
 
+  // AoE blast visual effects — sized by blast radius
+  EventBus.on('combat:blast', ({ x, z, radius }) => {
+    const size: 'small' | 'medium' | 'large' = radius <= 2 ? 'small' : radius <= 5 ? 'medium' : 'large';
+    effectsManager.spawnExplosion(x, 0, z, size);
+  });
+
   EventBus.on('unit:move', ({ entityIds }) => {
     for (const eid of entityIds) {
       movement.clearPath(eid);
