@@ -6,6 +6,7 @@ import {
   BuildingType, Harvester, hasComponent, ViewRange,
 } from '../core/ECS';
 import type { GameRules } from '../config/RulesParser';
+import type { BuildingDef } from '../config/BuildingDefs';
 import type { CombatSystem } from '../simulation/CombatSystem';
 import type { ProductionSystem } from '../simulation/ProductionSystem';
 import type { HarvestSystem } from '../simulation/HarvestSystem';
@@ -52,6 +53,9 @@ export class AIPlayer implements GameSystem {
   private baseUnderAttack = false;
   private baseAttackTick = 0;
 
+  // Strategic building placement tracking
+  private placedBuildings: { x: number; z: number; name: string }[] = [];
+
   // Army management
   private attackGroupSize = 4;
   private retreatHealthPct = 0.3;
@@ -59,6 +63,7 @@ export class AIPlayer implements GameSystem {
   private attackCooldown = 500; // 20 seconds between major attacks
   private difficulty = 1.0; // Scales with game time
   private difficultyLevel: 'easy' | 'normal' | 'hard' = 'normal';
+  private maxAttackFronts = 2; // Multi-front: easy=1, normal=2, hard=3
 
   // --- Scouting System ---
   private scoutMap: Uint8Array = new Uint8Array(MAP_SIZE * MAP_SIZE);
@@ -85,6 +90,7 @@ export class AIPlayer implements GameSystem {
       this.attackGroupSize = 3;
       this.attackCooldown = 800;
       this.maxScouts = 1;
+      this.maxAttackFronts = 1;
     } else if (level === 'hard') {
       this.waveInterval = 500;
       this.waveSize = 5;
@@ -92,8 +98,9 @@ export class AIPlayer implements GameSystem {
       this.attackGroupSize = 6;
       this.attackCooldown = 300;
       this.maxScouts = 2;
+      this.maxAttackFronts = 3;
     }
-    // 'normal' uses defaults (maxScouts = 2)
+    // 'normal' uses defaults (maxScouts = 2, maxAttackFronts = 2)
   }
 
   constructor(rules: GameRules, combatSystem: CombatSystem, playerId: number, baseX: number, baseZ: number, targetX: number, targetZ: number) {
@@ -1075,6 +1082,57 @@ export class AIPlayer implements GameSystem {
     }
   }
 
+  /** Build a list of 2-3 attack objectives from scouted enemy positions */
+  private planAttackObjectives(): { x: number; z: number; priority: number }[] {
+    if (this.knownEnemyPositions.size === 0) {
+      return [{ x: this.targetX, z: this.targetZ, priority: 1 }];
+    }
+
+    // Score and cluster known enemy positions into objectives
+    const scored: { x: number; z: number; priority: number }[] = [];
+    for (const info of this.knownEnemyPositions.values()) {
+      if (this.tickCounter - info.tick > 1500) continue;
+      let score = 1;
+      const name = info.typeName;
+      if (name.includes('Refinery') || name.includes('Harvester')) score = 8;
+      else if (name.includes('ConYard')) score = 10;
+      else if (name.includes('Factory') || name.includes('Barracks')) score = 6;
+      else if (name.includes('Starport')) score = 5;
+      else score = 2;
+      scored.push({ x: info.x, z: info.z, priority: score });
+    }
+    if (scored.length === 0) {
+      return [{ x: this.targetX, z: this.targetZ, priority: 1 }];
+    }
+
+    // Cluster nearby positions (within 20 world units) into single objectives
+    const clusters: { x: number; z: number; priority: number }[] = [];
+    const used = new Set<number>();
+    for (let i = 0; i < scored.length; i++) {
+      if (used.has(i)) continue;
+      let cx = scored[i].x * scored[i].priority;
+      let cz = scored[i].z * scored[i].priority;
+      let totalWeight = scored[i].priority;
+      used.add(i);
+      for (let j = i + 1; j < scored.length; j++) {
+        if (used.has(j)) continue;
+        const dx = scored[j].x - scored[i].x;
+        const dz = scored[j].z - scored[i].z;
+        if (dx * dx + dz * dz < 400) { // Within 20 world units
+          cx += scored[j].x * scored[j].priority;
+          cz += scored[j].z * scored[j].priority;
+          totalWeight += scored[j].priority;
+          used.add(j);
+        }
+      }
+      clusters.push({ x: cx / totalWeight, z: cz / totalWeight, priority: totalWeight });
+    }
+
+    // Sort by priority descending, take top N
+    clusters.sort((a, b) => b.priority - a.priority);
+    return clusters.slice(0, this.maxAttackFronts);
+  }
+
   private manageArmy(world: World): void {
     const units = unitQuery(world);
     const idleUnits: number[] = [];
@@ -1121,35 +1179,82 @@ export class AIPlayer implements GameSystem {
     if (attackableUnits.length >= attackThreshold && canAttack) {
       this.lastAttackTick = this.tickCounter;
 
-      // Split into groups for multi-direction attack
-      const groupSize = Math.ceil(attackableUnits.length / 2);
-      const group1 = attackableUnits.slice(0, groupSize);
-      const group2 = attackableUnits.slice(groupSize);
-
-      // Main attack direction
-      const angle1 = Math.atan2(this.targetZ - this.baseZ, this.targetX - this.baseX);
-      // Flanking direction (±30-45 degrees)
-      const flankAngle = (Math.random() * 0.5 + 0.4) * (Math.random() < 0.5 ? 1 : -1);
-      const angle2 = angle1 + flankAngle;
-
-      // Group 1: direct assault
-      for (const eid of group1) {
-        const spread = randomFloat(-10, 10);
-        MoveTarget.x[eid] = this.targetX + Math.cos(angle1 + 1.57) * spread;
-        MoveTarget.z[eid] = this.targetZ + Math.sin(angle1 + 1.57) * spread;
-        MoveTarget.active[eid] = 1;
+      // Hard difficulty: split off 2-3 fast units for harvester harassment
+      let harassUnits: number[] = [];
+      if (this.difficultyLevel === 'hard' && attackableUnits.length > 5) {
+        harassUnits = attackableUnits.splice(attackableUnits.length - 3, 3);
       }
 
-      // Group 2: flanking attack (offset target)
-      if (group2.length > 0) {
-        const flankDist = 30;
-        const flankTargetX = this.targetX + Math.cos(angle2) * flankDist;
-        const flankTargetZ = this.targetZ + Math.sin(angle2) * flankDist;
-        for (const eid of group2) {
-          MoveTarget.x[eid] = flankTargetX + randomFloat(-8, 8);
-          MoveTarget.z[eid] = flankTargetZ + randomFloat(-8, 8);
+      // Plan multi-front attack objectives from scout data
+      const objectives = this.planAttackObjectives();
+
+      if (objectives.length <= 1) {
+        // Single objective: original 2-group flank behavior
+        const target = objectives[0] ?? { x: this.targetX, z: this.targetZ };
+        const groupSize = Math.ceil(attackableUnits.length / 2);
+        const group1 = attackableUnits.slice(0, groupSize);
+        const group2 = attackableUnits.slice(groupSize);
+
+        const angle1 = Math.atan2(target.z - this.baseZ, target.x - this.baseX);
+        const flankAngle = (Math.random() * 0.5 + 0.4) * (Math.random() < 0.5 ? 1 : -1);
+        const angle2 = angle1 + flankAngle;
+
+        for (const eid of group1) {
+          const spread = randomFloat(-10, 10);
+          MoveTarget.x[eid] = target.x + Math.cos(angle1 + 1.57) * spread;
+          MoveTarget.z[eid] = target.z + Math.sin(angle1 + 1.57) * spread;
           MoveTarget.active[eid] = 1;
         }
+        if (group2.length > 0) {
+          const flankDist = 30;
+          for (const eid of group2) {
+            MoveTarget.x[eid] = target.x + Math.cos(angle2) * flankDist + randomFloat(-8, 8);
+            MoveTarget.z[eid] = target.z + Math.sin(angle2) * flankDist + randomFloat(-8, 8);
+            MoveTarget.active[eid] = 1;
+          }
+        }
+      } else {
+        // Multi-front: assign units to closest objective to minimize travel
+        const groups: number[][] = objectives.map(() => []);
+        for (const eid of attackableUnits) {
+          let bestIdx = 0;
+          let bestDist = Infinity;
+          for (let i = 0; i < objectives.length; i++) {
+            const d = distance2D(Position.x[eid], Position.z[eid], objectives[i].x, objectives[i].z);
+            if (d < bestDist) { bestDist = d; bestIdx = i; }
+          }
+          groups[bestIdx].push(eid);
+        }
+        // Ensure no group is empty by redistributing from largest
+        for (let i = 0; i < groups.length; i++) {
+          if (groups[i].length === 0) {
+            const largest = groups.reduce((a, b, _idx, _arr) => b.length > a.length ? b : a, groups[0]);
+            if (largest.length > 1) groups[i].push(largest.pop()!);
+          }
+        }
+
+        // Send each group toward its objective from a unique approach angle
+        for (let i = 0; i < objectives.length; i++) {
+          const obj = objectives[i];
+          const group = groups[i];
+          if (group.length === 0) continue;
+          // Compute approach angle from group centroid + random offset for unpredictability
+          let cx = 0, cz = 0;
+          for (const eid of group) { cx += Position.x[eid]; cz += Position.z[eid]; }
+          cx /= group.length; cz /= group.length;
+          const approachAngle = Math.atan2(obj.z - cz, obj.x - cx) + randomFloat(-0.3, 0.3);
+          for (const eid of group) {
+            const spread = randomFloat(-8, 8);
+            MoveTarget.x[eid] = obj.x + Math.cos(approachAngle + 1.57) * spread;
+            MoveTarget.z[eid] = obj.z + Math.sin(approachAngle + 1.57) * spread;
+            MoveTarget.active[eid] = 1;
+          }
+        }
+      }
+
+      // Dispatch harassment group concurrently (hard difficulty)
+      if (harassUnits.length > 0) {
+        this.sendHarassGroup(world, harassUnits);
       }
     } else if (idleUnits.length > 0 && idleUnits.length < attackThreshold) {
       // Rally idle units near base
@@ -1159,6 +1264,40 @@ export class AIPlayer implements GameSystem {
         MoveTarget.x[eid] = rallyX;
         MoveTarget.z[eid] = rallyZ;
         MoveTarget.active[eid] = 1;
+      }
+    }
+  }
+
+  /** Send a small harassment group to target enemy harvesters concurrently with main attack */
+  private sendHarassGroup(world: World, harassers: number[]): void {
+    const units = unitQuery(world);
+    let targetHarvester = -1;
+    let bestDist = Infinity;
+    for (const eid of units) {
+      if (Owner.playerId[eid] === this.playerId) continue;
+      if (Health.current[eid] <= 0) continue;
+      if (!hasComponent(world, Harvester, eid)) continue;
+      const dist = distance2D(Position.x[eid], Position.z[eid], this.baseX, this.baseZ);
+      if (dist < bestDist) { bestDist = dist; targetHarvester = eid; }
+    }
+    if (targetHarvester < 0) {
+      // No harvester found: send harassers to a secondary objective instead
+      const tx = this.targetX + randomFloat(-30, 30);
+      const tz = this.targetZ + randomFloat(-30, 30);
+      for (const eid of harassers) {
+        MoveTarget.x[eid] = tx + randomFloat(-5, 5);
+        MoveTarget.z[eid] = tz + randomFloat(-5, 5);
+        MoveTarget.active[eid] = 1;
+      }
+      return;
+    }
+    for (const eid of harassers) {
+      MoveTarget.x[eid] = Position.x[targetHarvester] + randomFloat(-5, 5);
+      MoveTarget.z[eid] = Position.z[targetHarvester] + randomFloat(-5, 5);
+      MoveTarget.active[eid] = 1;
+      if (hasComponent(world, AttackTarget, eid)) {
+        AttackTarget.entityId[eid] = targetHarvester;
+        AttackTarget.active[eid] = 1;
       }
     }
   }
