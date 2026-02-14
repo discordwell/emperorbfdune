@@ -785,6 +785,129 @@ export class AIPlayer implements GameSystem {
   }
 
   // ==========================================
+  // Strategic Building Placement
+  // ==========================================
+
+  /** Determine the ideal position for a new building based on its role */
+  getNextBuildingPlacement(typeName: string, def: BuildingDef): { x: number; z: number } {
+    const baseX = this.baseX;
+    const baseZ = this.baseZ;
+
+    // Direction TOWARD player (for defensive buildings)
+    const toPlayerX = this.targetX - baseX;
+    const toPlayerZ = this.targetZ - baseZ;
+    const dist = Math.sqrt(toPlayerX * toPlayerX + toPlayerZ * toPlayerZ) || 1;
+    const dirX = toPlayerX / dist;
+    const dirZ = toPlayerZ / dist;
+
+    // Direction AWAY from player (for economy/power)
+    const awayX = -dirX;
+    const awayZ = -dirZ;
+
+    let idealX = baseX;
+    let idealZ = baseZ;
+
+    if (def.powerGenerated > 0) {
+      // Windtraps: behind base, away from player
+      idealX = baseX + awayX * 8 + (Math.random() - 0.5) * 6;
+      idealZ = baseZ + awayZ * 8 + (Math.random() - 0.5) * 6;
+    } else if (def.refinery) {
+      // Refineries: to the side of base (perpendicular to player direction)
+      const perpX = -dirZ;
+      const perpZ = dirX;
+      const side = Math.random() > 0.5 ? 1 : -1;
+      idealX = baseX + perpX * 10 * side + (Math.random() - 0.5) * 4;
+      idealZ = baseZ + perpZ * 10 * side + (Math.random() - 0.5) * 4;
+    } else if (def.aiDefence || def.turretAttach) {
+      // Turrets/defense: toward player, in front of base
+      idealX = baseX + dirX * 10 + (Math.random() - 0.5) * 8;
+      idealZ = baseZ + dirZ * 10 + (Math.random() - 0.5) * 8;
+    } else if (typeName.includes('Barracks') || typeName.includes('Factory') || typeName.includes('Hanger')) {
+      // Production buildings: near center with slight random offset
+      idealX = baseX + (Math.random() - 0.5) * 8;
+      idealZ = baseZ + (Math.random() - 0.5) * 8;
+    } else {
+      // Other buildings (Palace, Research, etc.): near base
+      idealX = baseX + (Math.random() - 0.5) * 10;
+      idealZ = baseZ + (Math.random() - 0.5) * 10;
+    }
+
+    // Validate and adjust position
+    const result = this.findValidPlacement(idealX, idealZ);
+
+    // Track the placed building and update base center of mass
+    this.placedBuildings.push({ x: result.x, z: result.z, name: typeName });
+    this.updateBaseCenterOfMass();
+
+    return result;
+  }
+
+  /** Find a valid placement near the ideal position using spiral search */
+  private findValidPlacement(idealX: number, idealZ: number): { x: number; z: number } {
+    const worldMax = MAP_SIZE * TILE_SIZE; // 256 world units
+    const margin = 4; // Keep buildings away from map edges
+    const minSpacing = 4; // Minimum distance between AI buildings (world units)
+
+    // Try the ideal position first, then spiral outward
+    for (let ring = 0; ring < 10; ring++) {
+      const steps = ring === 0 ? 1 : ring * 8;
+      const radius = ring * 3;
+
+      for (let step = 0; step < steps; step++) {
+        let tryX: number, tryZ: number;
+
+        if (ring === 0) {
+          tryX = idealX;
+          tryZ = idealZ;
+        } else {
+          const angle = (step / steps) * Math.PI * 2;
+          tryX = idealX + Math.cos(angle) * radius;
+          tryZ = idealZ + Math.sin(angle) * radius;
+        }
+
+        // Clamp to map boundaries with margin
+        tryX = Math.max(margin, Math.min(worldMax - margin, tryX));
+        tryZ = Math.max(margin, Math.min(worldMax - margin, tryZ));
+
+        // Check minimum spacing against all existing AI buildings
+        let tooClose = false;
+        for (const placed of this.placedBuildings) {
+          const dx = placed.x - tryX;
+          const dz = placed.z - tryZ;
+          if (dx * dx + dz * dz < minSpacing * minSpacing) {
+            tooClose = true;
+            break;
+          }
+        }
+
+        if (!tooClose) {
+          return { x: tryX, z: tryZ };
+        }
+      }
+    }
+
+    // Fallback: return ideal position clamped to map bounds
+    return {
+      x: Math.max(margin, Math.min(worldMax - margin, idealX)),
+      z: Math.max(margin, Math.min(worldMax - margin, idealZ)),
+    };
+  }
+
+  /** Update the AI base position to the center of mass of all placed buildings */
+  private updateBaseCenterOfMass(): void {
+    if (this.placedBuildings.length === 0) return;
+
+    let sumX = 0;
+    let sumZ = 0;
+    for (const b of this.placedBuildings) {
+      sumX += b.x;
+      sumZ += b.z;
+    }
+    this.baseX = sumX / this.placedBuildings.length;
+    this.baseZ = sumZ / this.placedBuildings.length;
+  }
+
+  // ==========================================
   // Original Methods (with scout-aware targeting)
   // ==========================================
 
