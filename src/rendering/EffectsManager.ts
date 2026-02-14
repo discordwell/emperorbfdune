@@ -107,11 +107,9 @@ export class EffectsManager {
   private trailColors!: Float32Array;
   private trailSizes!: Float32Array;
   private trailGeometry!: THREE.BufferGeometry;
-  private trailMaterial!: THREE.PointsMaterial;
+  private trailMaterial!: THREE.ShaderMaterial;
   private nextProjectileId = 0;
   private projectileTrailTimers = new Map<number, number>(); // projectile id -> time since last spawn
-  // Orphaned trails: projectile ID -> particles that outlive their projectile
-  private orphanedTrailIds = new Set<number>();
   private static readonly TRAIL_CONFIGS: Record<string, TrailConfig> = {
     rocket: {
       maxParticles: 18,
@@ -182,6 +180,191 @@ export class EffectsManager {
 
     // Initialize trail particle Points system
     this.initTrailSystem();
+  }
+
+  /** Initialize the GPU-efficient trail particle system using a single THREE.Points */
+  private initTrailSystem(): void {
+    const max = EffectsManager.MAX_TRAIL_PARTICLES;
+    this.trailPositions = new Float32Array(max * 3);
+    this.trailColors = new Float32Array(max * 3);
+    this.trailSizes = new Float32Array(max);
+
+    // Pre-fill pool with dead particles
+    for (let i = 0; i < max; i++) {
+      this.trailParticles.push({
+        x: 0, y: -100, z: 0, // Off-screen
+        age: 0, maxAge: 1,
+        size: 0, endSize: 0,
+        r: 1, g: 1, b: 1,
+        endR: 0.5, endG: 0.5, endB: 0.5,
+        startOpacity: 0,
+        driftX: 0, driftZ: 0, rise: 0,
+        alive: false,
+      });
+      // Position off-screen
+      this.trailPositions[i * 3] = 0;
+      this.trailPositions[i * 3 + 1] = -100;
+      this.trailPositions[i * 3 + 2] = 0;
+      this.trailColors[i * 3] = 1;
+      this.trailColors[i * 3 + 1] = 1;
+      this.trailColors[i * 3 + 2] = 1;
+      this.trailSizes[i] = 0;
+    }
+
+    this.trailGeometry = new THREE.BufferGeometry();
+    this.trailGeometry.setAttribute('position', new THREE.BufferAttribute(this.trailPositions, 3));
+    this.trailGeometry.setAttribute('color', new THREE.BufferAttribute(this.trailColors, 3));
+    this.trailGeometry.setAttribute('aSize', new THREE.BufferAttribute(this.trailSizes, 1));
+
+    // Custom ShaderMaterial for per-particle sizes with additive blending
+    this.trailMaterial = new THREE.ShaderMaterial({
+      vertexShader: `
+        attribute float aSize;
+        varying vec3 vColor;
+        void main() {
+          vColor = color;
+          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+          gl_PointSize = aSize * (200.0 / -mvPosition.z);
+          gl_Position = projectionMatrix * mvPosition;
+        }
+      `,
+      fragmentShader: `
+        varying vec3 vColor;
+        void main() {
+          // Soft circle falloff
+          float dist = length(gl_PointCoord - vec2(0.5));
+          if (dist > 0.5) discard;
+          float alpha = 1.0 - smoothstep(0.2, 0.5, dist);
+          gl_FragColor = vec4(vColor, alpha);
+        }
+      `,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      vertexColors: true,
+    });
+
+    this.trailPoints = new THREE.Points(this.trailGeometry, this.trailMaterial);
+    this.trailPoints.frustumCulled = false; // Particles span the scene
+    this.sceneManager.scene.add(this.trailPoints);
+  }
+
+  /** Get the trail configuration for a weapon style, or null if no trail */
+  private getTrailConfig(style: WeaponStyle): TrailConfig | null {
+    return EffectsManager.TRAIL_CONFIGS[style] ?? null;
+  }
+
+  /** Find a dead particle slot in the pool, or return -1 if full */
+  private allocateTrailParticle(): number {
+    for (let i = 0; i < this.trailParticles.length; i++) {
+      if (!this.trailParticles[i].alive) return i;
+    }
+    return -1; // Pool exhausted
+  }
+
+  /** Spawn a single trail particle at the given position with the given config */
+  private spawnTrailParticle(x: number, y: number, z: number, config: TrailConfig): void {
+    const idx = this.allocateTrailParticle();
+    if (idx < 0) return; // Pool full, skip
+
+    const p = this.trailParticles[idx];
+    p.x = x + (Math.random() - 0.5) * 0.1; // Slight positional jitter
+    p.y = y + (Math.random() - 0.5) * 0.1;
+    p.z = z + (Math.random() - 0.5) * 0.1;
+    p.age = 0;
+    p.maxAge = config.maxAge * (0.8 + Math.random() * 0.4); // Vary lifetime slightly
+    p.size = config.startSize;
+    p.endSize = config.endSize;
+    p.r = config.startColor.r;
+    p.g = config.startColor.g;
+    p.b = config.startColor.b;
+    p.endR = config.endColor.r;
+    p.endG = config.endColor.g;
+    p.endB = config.endColor.b;
+    p.startOpacity = config.startOpacity;
+    p.driftX = (Math.random() - 0.5) * config.drift;
+    p.driftZ = (Math.random() - 0.5) * config.drift;
+    p.rise = config.rise * (0.7 + Math.random() * 0.6);
+    p.alive = true;
+  }
+
+  /** Update all trail particles: age, fade, drift, and upload to GPU buffers */
+  private updateTrailParticles(dtSec: number): void {
+    let needsUpdate = false;
+
+    for (let i = 0; i < this.trailParticles.length; i++) {
+      const p = this.trailParticles[i];
+      if (!p.alive) continue;
+
+      needsUpdate = true;
+      p.age += dtSec;
+
+      if (p.age >= p.maxAge) {
+        // Kill particle — move off-screen
+        p.alive = false;
+        this.trailPositions[i * 3 + 1] = -100;
+        this.trailSizes[i] = 0;
+        continue;
+      }
+
+      const t = p.age / p.maxAge; // 0..1 normalized age
+
+      // Drift and rise
+      p.x += p.driftX * dtSec;
+      p.y += p.rise * dtSec;
+      p.z += p.driftZ * dtSec;
+
+      // Interpolate size
+      const currentSize = p.size + (p.endSize - p.size) * t;
+
+      // Interpolate color
+      const cr = p.r + (p.endR - p.r) * t;
+      const cg = p.g + (p.endG - p.g) * t;
+      const cb = p.b + (p.endB - p.b) * t;
+
+      // Fade opacity: multiply into color (since PointsMaterial uses vertexColors)
+      // Use smooth fade-out curve
+      const opacity = p.startOpacity * (1 - t) * (1 - t);
+
+      // Write to GPU buffers
+      this.trailPositions[i * 3] = p.x;
+      this.trailPositions[i * 3 + 1] = p.y;
+      this.trailPositions[i * 3 + 2] = p.z;
+      this.trailColors[i * 3] = cr * opacity;
+      this.trailColors[i * 3 + 1] = cg * opacity;
+      this.trailColors[i * 3 + 2] = cb * opacity;
+      this.trailSizes[i] = currentSize * (1 - t * 0.3); // Slight shrink at end
+    }
+
+    if (needsUpdate) {
+      this.trailGeometry.attributes.position.needsUpdate = true;
+      this.trailGeometry.attributes.color.needsUpdate = true;
+      this.trailGeometry.attributes.aSize.needsUpdate = true;
+    }
+  }
+
+  /** Spawn trail particles for all active projectiles that have trail configs */
+  private updateProjectileTrails(dtSec: number): void {
+    for (const proj of this.projectiles) {
+      const config = this.getTrailConfig(proj.style);
+      if (!config) continue;
+
+      // Accumulate time since last spawn
+      const timer = (this.projectileTrailTimers.get(proj.id) ?? 0) + dtSec;
+
+      // Spawn particles at the configured rate
+      if (timer >= config.spawnRate) {
+        this.spawnTrailParticle(
+          proj.mesh.position.x,
+          proj.mesh.position.y,
+          proj.mesh.position.z,
+          config,
+        );
+        this.projectileTrailTimers.set(proj.id, 0);
+      } else {
+        this.projectileTrailTimers.set(proj.id, timer);
+      }
+    }
   }
 
   spawnExplosion(x: number, y: number, z: number, size: 'small' | 'medium' | 'large' = 'medium'): void {
@@ -309,7 +492,9 @@ export class EffectsManager {
       setTimeout(() => { this.sceneManager.scene.remove(flash); flash.dispose(); }, 50);
     }
 
+    const id = this.nextProjectileId++;
     this.projectiles.push({
+      id,
       mesh,
       start: startPos,
       end: endPos,
@@ -319,6 +504,11 @@ export class EffectsManager {
       style,
       trail,
     });
+
+    // Register trail timer for styles that have trails
+    if (this.getTrailConfig(style)) {
+      this.projectileTrailTimers.set(id, 0);
+    }
   }
 
   private spawnBeam(start: THREE.Vector3, end: THREE.Vector3, color: number): void {
@@ -488,6 +678,8 @@ export class EffectsManager {
           this.sceneManager.scene.remove(proj.trail);
           (proj.trail.material as THREE.Material).dispose();
         }
+        // Clean up trail timer (existing trail particles fade out naturally)
+        this.projectileTrailTimers.delete(proj.id);
         if (proj.onHit) proj.onHit();
         // Impact size based on weapon type
         const impactSize = proj.style === 'rocket' || proj.style === 'mortar' ? 'medium' : 'small';
@@ -616,6 +808,10 @@ export class EffectsManager {
         (puff.mesh.material as THREE.MeshBasicMaterial).opacity = puff.life / 0.8 * 0.4;
       }
     }
+
+    // Projectile trail particles: spawn new + age/fade existing
+    this.updateProjectileTrails(dtSec);
+    this.updateTrailParticles(dtSec);
   }
 
   /** Spawn a small dust puff at the given position (for moving ground units) */
