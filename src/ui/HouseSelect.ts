@@ -33,6 +33,11 @@ export interface SkirmishOptions {
   victoryCondition: 'annihilate' | 'conyard';
 }
 
+export interface OpponentConfig {
+  prefix: string;
+  difficulty: Difficulty;
+}
+
 export interface HouseChoice {
   id: string;
   name: string;
@@ -47,6 +52,7 @@ export interface HouseChoice {
   gameMode: GameMode;
   campaignTerritoryId?: number;
   skirmishOptions?: SkirmishOptions;
+  opponents?: OpponentConfig[];
 }
 
 const SUBHOUSES: SubhouseChoice[] = [
@@ -596,7 +602,12 @@ export class HouseSelect {
           this.audioManager.playSfx('select');
           house.mapChoice = map;
           this.overlay.remove();
-          resolve(house);
+          const maxPlayers = map.players ?? 2;
+          if (maxPlayers > 2) {
+            this.showOpponentSelect(house, maxPlayers, resolve);
+          } else {
+            resolve(house);
+          }
         };
         grid.appendChild(card);
       }
@@ -617,6 +628,63 @@ export class HouseSelect {
       resolve(house);
     };
     grid.appendChild(randomCard);
+
+    this.overlay.appendChild(grid);
+    document.body.appendChild(this.overlay);
+  }
+
+  private showOpponentSelect(house: HouseChoice, maxPlayers: number, resolve: (house: HouseChoice) => void): void {
+    this.overlay = document.createElement('div');
+    this.overlay.style.cssText = `
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: radial-gradient(ellipse at center, #1a0f00 0%, #000 80%);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      z-index: 2000;
+      font-family: 'Segoe UI', Tahoma, sans-serif;
+    `;
+
+    const headerText = document.createElement('div');
+    headerText.style.cssText = `color:${house.color}; font-size:24px; font-weight:bold; margin-bottom:8px;`;
+    headerText.textContent = house.name;
+    this.overlay.appendChild(headerText);
+
+    const mapText = document.createElement('div');
+    mapText.style.cssText = 'color:#888; font-size:14px; margin-bottom:16px;';
+    mapText.textContent = house.mapChoice?.name ?? 'Unknown Map';
+    this.overlay.appendChild(mapText);
+
+    const chooseText = document.createElement('div');
+    chooseText.style.cssText = 'color:#aaa; font-size:16px; margin-bottom:24px;';
+    chooseText.textContent = 'Number of Opponents';
+    this.overlay.appendChild(chooseText);
+
+    const grid = document.createElement('div');
+    grid.style.cssText = 'display:flex; gap:12px; flex-wrap:wrap; justify-content:center;';
+
+    const maxOpponents = maxPlayers - 1;
+    const enemyHouses = HOUSES.filter(h => h.id !== house.id);
+
+    for (let count = 1; count <= maxOpponents; count++) {
+      const desc = count === 1 ? '1v1 Classic' : `1v${count} — ${count} AI enemies`;
+      const color = count === 1 ? '#88aacc' : count <= 3 ? '#ccaa44' : '#cc4444';
+      const card = this.createCard(`${count}`, '', desc, color, 120);
+      card.onclick = () => {
+        this.audioManager.playSfx('select');
+        // Assign opponents: cycle through enemy houses
+        const opponents: OpponentConfig[] = [];
+        for (let i = 0; i < count; i++) {
+          const enemyHouse = enemyHouses[i % enemyHouses.length];
+          opponents.push({ prefix: enemyHouse.prefix, difficulty: house.difficulty });
+        }
+        house.opponents = opponents;
+        // Keep enemyPrefix for backward compat (first opponent)
+        house.enemyPrefix = opponents[0].prefix;
+        this.overlay.remove();
+        resolve(house);
+      };
+      grid.appendChild(card);
+    }
 
     this.overlay.appendChild(grid);
     document.body.appendChild(this.overlay);

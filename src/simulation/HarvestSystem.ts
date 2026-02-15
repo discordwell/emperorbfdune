@@ -72,10 +72,11 @@ export class HarvestSystem implements GameSystem {
     return this.airlifting;
   }
 
-  init(_world: World): void {
-    // Start players with initial credits
-    this.solaris.set(0, 5000);
-    this.solaris.set(1, 5000);
+  init(_world: World, playerCount = 2): void {
+    // Start all players with initial credits
+    for (let i = 0; i < playerCount; i++) {
+      this.solaris.set(i, 5000);
+    }
   }
 
   getSolaris(playerId: number): number {

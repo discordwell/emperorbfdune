@@ -68,6 +68,9 @@ export class AIPlayer implements GameSystem {
   private mapWidth = 128;
   private mapHeight = 128;
 
+  // Tick offset for staggering multiple AI players across frames
+  private tickOffset = 0;
+
   // --- Scouting System ---
   private scoutMap: Uint8Array = new Uint8Array(128 * 128);
   private scoutQueue: { x: number; z: number }[] = [];
@@ -140,6 +143,10 @@ export class AIPlayer implements GameSystem {
 
   setSpawnCallback(cb: (eid: number, typeName: string, owner: number, x: number, z: number) => void): void {
     this.spawnCallback = cb;
+  }
+
+  setTickOffset(offset: number): void {
+    this.tickOffset = offset;
   }
 
   setMapDimensions(w: number, h: number): void {
@@ -226,6 +233,9 @@ export class AIPlayer implements GameSystem {
     this.tickCounter++;
     this.currentWorld = world;
 
+    // Staggered tick for scheduling — distributes AI computation across frames
+    const t = this.tickCounter + this.tickOffset;
+
     // One-time role classification (deferred until first update so all pools are set)
     if (!this.rolesClassified) {
       this.classifyUnitRoles();
@@ -243,39 +253,39 @@ export class AIPlayer implements GameSystem {
 
     // Train units continuously (faster as difficulty rises)
     const trainInterval = Math.max(75, Math.floor(150 / this.difficulty));
-    if (this.tickCounter % trainInterval === 0 && this.production && this.harvestSystem) {
+    if (t % trainInterval === 0 && this.production && this.harvestSystem) {
       this.trainUnits();
     }
 
     // Detect base attacks: check if AI buildings are taking damage
-    if (this.tickCounter % 25 === 0) {
+    if (t % 25 === 0) {
       this.checkBaseDefense(world);
     }
 
     // Spawn wave (fallback if production system isn't connected)
-    if (!this.production && this.tickCounter % this.waveInterval === 0) {
+    if (!this.production && t % this.waveInterval === 0) {
       this.spawnWave(world);
       if (this.waveSize < 10) this.waveSize++;
       if (this.waveInterval > 375) this.waveInterval -= 25;
     }
 
     // Manage army every 3 seconds
-    if (this.tickCounter % 75 === 0) {
+    if (t % 75 === 0) {
       this.manageArmy(world);
     }
 
     // Retreat wounded units every 2 seconds
-    if (this.tickCounter % 50 === 0) {
+    if (t % 50 === 0) {
       this.retreatWounded(world);
     }
 
     // Hunt player harvesters occasionally (every ~30 seconds)
-    if (this.tickCounter % 750 === 0 && this.difficulty > 1.5) {
+    if (t % 750 === 0 && this.difficulty > 1.5) {
       this.huntHarvesters(world);
     }
 
     // Update target to player's most valuable cluster (every ~20 seconds)
-    if (this.tickCounter % 500 === 250) {
+    if (t % 500 === 250) {
       this.updateAttackTarget(world);
     }
 
@@ -286,22 +296,22 @@ export class AIPlayer implements GameSystem {
 
     if (this.tickCounter >= scoutStartTick) {
       // Manage scouting every ~100 ticks (4 seconds)
-      if (this.tickCounter % 100 === 0) {
+      if (t % 100 === 0) {
         this.manageScouting(world);
       }
       // Update scout knowledge every ~50 ticks (2 seconds)
-      if (this.tickCounter % 50 === 10) {
+      if (t % 50 === 10) {
         this.updateScoutKnowledge(world);
       }
     }
 
     // --- Composition counter-adjustment every ~200 ticks (8 seconds) ---
-    if (this.tickCounter % 200 === 100) {
+    if (t % 200 === 100) {
       this.adjustCompositionForCounters();
     }
 
     // --- Economy management every ~150 ticks (6 seconds) ---
-    if (this.tickCounter % 150 === 75 && this.production && this.harvestSystem) {
+    if (t % 150 === 75 && this.production && this.harvestSystem) {
       this.manageEconomy(world);
     }
   }

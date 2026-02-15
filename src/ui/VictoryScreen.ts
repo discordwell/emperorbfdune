@@ -6,35 +6,75 @@ export type GameOutcome = 'playing' | 'victory' | 'defeat';
 
 /** Tracks per-player game statistics */
 export class GameStats {
-  // Per-player stats: [player0, player1]
-  unitsBuilt = [0, 0];
-  unitsLost = [0, 0];
-  buildingsBuilt = [0, 0];
-  buildingsLost = [0, 0];
-  creditsEarned = [0, 0];
-  creditsSpent = [0, 0];
-  damageDealt = [0, 0];
+  private playerCount: number;
+  // Per-player stats arrays (dynamic length)
+  unitsBuilt: number[];
+  unitsLost: number[];
+  buildingsBuilt: number[];
+  buildingsLost: number[];
+  creditsEarned: number[];
+  creditsSpent: number[];
+  damageDealt: number[];
 
   // Time-series data for graphs (sampled every ~10 seconds / 250 ticks)
-  creditHistory: [number[], number[]] = [[], []]; // per-player credit balance over time
-  unitCountHistory: [number[], number[]] = [[], []]; // per-player unit count over time
+  creditHistory: number[][]; // per-player credit balance over time
+  unitCountHistory: number[][]; // per-player unit count over time
   timestamps: number[] = []; // tick values for x-axis
 
-  recordUnitBuilt(owner: number): void { if (owner < 2) this.unitsBuilt[owner]++; }
-  recordUnitLost(owner: number): void { if (owner < 2) this.unitsLost[owner]++; }
-  recordBuildingBuilt(owner: number): void { if (owner < 2) this.buildingsBuilt[owner]++; }
-  recordBuildingLost(owner: number): void { if (owner < 2) this.buildingsLost[owner]++; }
-  recordCreditsEarned(owner: number, amount: number): void { if (owner < 2) this.creditsEarned[owner] += amount; }
-  recordCreditsSpent(owner: number, amount: number): void { if (owner < 2) this.creditsSpent[owner] += amount; }
-  recordDamage(owner: number, amount: number): void { if (owner < 2) this.damageDealt[owner] += amount; }
+  constructor(playerCount = 2) {
+    this.playerCount = playerCount;
+    this.unitsBuilt = new Array(playerCount).fill(0);
+    this.unitsLost = new Array(playerCount).fill(0);
+    this.buildingsBuilt = new Array(playerCount).fill(0);
+    this.buildingsLost = new Array(playerCount).fill(0);
+    this.creditsEarned = new Array(playerCount).fill(0);
+    this.creditsSpent = new Array(playerCount).fill(0);
+    this.damageDealt = new Array(playerCount).fill(0);
+    this.creditHistory = Array.from({ length: playerCount }, () => []);
+    this.unitCountHistory = Array.from({ length: playerCount }, () => []);
+  }
+
+  recordUnitBuilt(owner: number): void { if (owner < this.playerCount) this.unitsBuilt[owner]++; }
+  recordUnitLost(owner: number): void { if (owner < this.playerCount) this.unitsLost[owner]++; }
+  recordBuildingBuilt(owner: number): void { if (owner < this.playerCount) this.buildingsBuilt[owner]++; }
+  recordBuildingLost(owner: number): void { if (owner < this.playerCount) this.buildingsLost[owner]++; }
+  recordCreditsEarned(owner: number, amount: number): void { if (owner < this.playerCount) this.creditsEarned[owner] += amount; }
+  recordCreditsSpent(owner: number, amount: number): void { if (owner < this.playerCount) this.creditsSpent[owner] += amount; }
+  recordDamage(owner: number, amount: number): void { if (owner < this.playerCount) this.damageDealt[owner] += amount; }
 
   /** Call every 250 ticks to sample time-series data */
-  sample(tick: number, credits: [number, number], unitCounts: [number, number]): void {
+  sample(tick: number, credits: number[], unitCounts: number[]): void {
     this.timestamps.push(tick);
-    this.creditHistory[0].push(credits[0]);
-    this.creditHistory[1].push(credits[1]);
-    this.unitCountHistory[0].push(unitCounts[0]);
-    this.unitCountHistory[1].push(unitCounts[1]);
+    for (let i = 0; i < this.playerCount; i++) {
+      this.creditHistory[i].push(credits[i] ?? 0);
+      this.unitCountHistory[i].push(unitCounts[i] ?? 0);
+    }
+  }
+
+  /** Get aggregated stats for all enemy players (everyone except player 0) */
+  getEnemyAggregate(): { unitsBuilt: number; unitsLost: number; buildingsBuilt: number; buildingsLost: number; creditsEarned: number; creditsSpent: number; damageDealt: number; creditHistory: number[]; unitCountHistory: number[] } {
+    const agg = { unitsBuilt: 0, unitsLost: 0, buildingsBuilt: 0, buildingsLost: 0, creditsEarned: 0, creditsSpent: 0, damageDealt: 0, creditHistory: [] as number[], unitCountHistory: [] as number[] };
+    for (let i = 1; i < this.playerCount; i++) {
+      agg.unitsBuilt += this.unitsBuilt[i];
+      agg.unitsLost += this.unitsLost[i];
+      agg.buildingsBuilt += this.buildingsBuilt[i];
+      agg.buildingsLost += this.buildingsLost[i];
+      agg.creditsEarned += this.creditsEarned[i];
+      agg.creditsSpent += this.creditsSpent[i];
+      agg.damageDealt += this.damageDealt[i];
+    }
+    // Aggregate time-series: sum all enemy histories
+    const len = this.timestamps.length;
+    for (let t = 0; t < len; t++) {
+      let creditSum = 0, unitSum = 0;
+      for (let i = 1; i < this.playerCount; i++) {
+        creditSum += this.creditHistory[i][t] ?? 0;
+        unitSum += this.unitCountHistory[i][t] ?? 0;
+      }
+      agg.creditHistory.push(creditSum);
+      agg.unitCountHistory.push(unitSum);
+    }
+    return agg;
   }
 }
 
@@ -192,14 +232,13 @@ export class VictorySystem {
     if (this.stats) {
       const s = this.stats;
       const p = this.localPlayerId;
-      const e = 1 - p;
 
-      // Stats table with bar visualization
-      container.appendChild(this.createStatsSection(s, p, e));
+      // Stats table with bar visualization (aggregated enemies)
+      container.appendChild(this.createStatsSection(s, p));
 
       // Graphs
       if (s.timestamps.length > 2) {
-        container.appendChild(this.createGraphSection(s, p, e));
+        container.appendChild(this.createGraphSection(s, p));
       }
     }
 
@@ -251,24 +290,25 @@ export class VictorySystem {
     document.body.appendChild(this.overlay);
   }
 
-  private createStatsSection(s: GameStats, p: number, e: number): HTMLElement {
+  private createStatsSection(s: GameStats, p: number): HTMLElement {
     const section = document.createElement('div');
     section.style.cssText = 'width:100%;margin-bottom:20px;';
 
+    const eAgg = s.getEnemyAggregate();
     const rows = [
-      { label: 'Units Built', pVal: s.unitsBuilt[p], eVal: s.unitsBuilt[e] },
-      { label: 'Units Lost', pVal: s.unitsLost[p], eVal: s.unitsLost[e] },
-      { label: 'Buildings Built', pVal: s.buildingsBuilt[p], eVal: s.buildingsBuilt[e] },
-      { label: 'Buildings Lost', pVal: s.buildingsLost[p], eVal: s.buildingsLost[e] },
-      { label: 'Credits Earned', pVal: s.creditsEarned[p], eVal: s.creditsEarned[e] },
-      { label: 'Credits Spent', pVal: s.creditsSpent[p], eVal: s.creditsSpent[e] },
-      { label: 'Damage Dealt', pVal: s.damageDealt[p], eVal: s.damageDealt[e] },
+      { label: 'Units Built', pVal: s.unitsBuilt[p], eVal: eAgg.unitsBuilt },
+      { label: 'Units Lost', pVal: s.unitsLost[p], eVal: eAgg.unitsLost },
+      { label: 'Buildings Built', pVal: s.buildingsBuilt[p], eVal: eAgg.buildingsBuilt },
+      { label: 'Buildings Lost', pVal: s.buildingsLost[p], eVal: eAgg.buildingsLost },
+      { label: 'Credits Earned', pVal: s.creditsEarned[p], eVal: eAgg.creditsEarned },
+      { label: 'Credits Spent', pVal: s.creditsSpent[p], eVal: eAgg.creditsSpent },
+      { label: 'Damage Dealt', pVal: s.damageDealt[p], eVal: eAgg.damageDealt },
     ];
 
     // Header
     const header = document.createElement('div');
     header.style.cssText = 'display:grid;grid-template-columns:1fr 60px 1fr 60px;gap:4px;font-size:12px;color:#666;margin-bottom:6px;padding:0 4px;';
-    header.innerHTML = '<div style="text-align:right;color:#4cf;">You</div><div></div><div></div><div style="color:#f88;">Enemy</div>';
+    header.innerHTML = '<div style="text-align:right;color:#4cf;">You</div><div></div><div></div><div style="color:#f88;">Enemies</div>';
     section.appendChild(header);
 
     for (const row of rows) {
@@ -309,16 +349,18 @@ export class VictorySystem {
     return section;
   }
 
-  private createGraphSection(s: GameStats, p: number, e: number): HTMLElement {
+  private createGraphSection(s: GameStats, p: number): HTMLElement {
     const section = document.createElement('div');
     section.style.cssText = 'width:100%;';
+
+    const eAgg = s.getEnemyAggregate();
 
     // Credits over time graph
     section.appendChild(this.createGraph(
       'Credits Over Time',
       s.timestamps,
       s.creditHistory[p],
-      s.creditHistory[e],
+      eAgg.creditHistory,
       260, 120
     ));
 
@@ -327,7 +369,7 @@ export class VictorySystem {
       'Army Size Over Time',
       s.timestamps,
       s.unitCountHistory[p],
-      s.unitCountHistory[e],
+      eAgg.unitCountHistory,
       260, 120
     ));
 

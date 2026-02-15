@@ -23,7 +23,7 @@ import { AudioManager } from './audio/AudioManager';
 import { FogOfWar } from './rendering/FogOfWar';
 import { BuildingPlacement } from './input/BuildingPlacement';
 import { VictorySystem, GameStats } from './ui/VictoryScreen';
-import { HouseSelect, type HouseChoice, type SubhouseChoice, type Difficulty, type MapChoice, type GameMode, type SkirmishOptions } from './ui/HouseSelect';
+import { HouseSelect, type HouseChoice, type SubhouseChoice, type Difficulty, type MapChoice, type GameMode, type SkirmishOptions, type OpponentConfig } from './ui/HouseSelect';
 import { loadMap, getCampaignMapId } from './config/MapLoader';
 import { CampaignMap } from './ui/CampaignMap';
 import { SelectionPanel } from './ui/SelectionPanel';
@@ -68,7 +68,7 @@ interface SaveData {
   enemyPrefix: string;
   houseName: string;
   enemyName: string;
-  solaris: [number, number];
+  solaris: number[];
   entities: SavedEntity[];
   spice: number[][]; // [row][col]
 }
@@ -79,6 +79,48 @@ const unitTypeNames: string[] = [];
 const buildingTypeIdMap = new Map<string, number>();
 const buildingTypeNames: string[] = [];
 const armourIdMap = new Map<string, number>();
+
+/** Distribute N spawn positions evenly around an ellipse inscribed in the map */
+function getSpawnPositions(mapW: number, mapH: number, count: number): { x: number; z: number }[] {
+  const TILE_SZ = 2; // TILE_SIZE from MathUtils
+  const centerX = (mapW / 2) * TILE_SZ;
+  const centerZ = (mapH / 2) * TILE_SZ;
+  const radiusX = mapW * 0.35 * TILE_SZ;
+  const radiusZ = mapH * 0.35 * TILE_SZ;
+  const margin = 20 * TILE_SZ; // 20 tiles from edge minimum
+  const maxX = mapW * TILE_SZ - margin;
+  const maxZ = mapH * TILE_SZ - margin;
+
+  const positions: { x: number; z: number }[] = [];
+
+  if (count === 2) {
+    // Classic 2-player: opposite corners (preserves original behavior)
+    const minPos = Math.max(margin, 50);
+    const corners = [
+      { x: minPos, z: minPos },   // Top-left
+      { x: maxX, z: minPos },     // Top-right
+      { x: minPos, z: maxZ },     // Bottom-left
+      { x: maxX, z: maxZ },       // Bottom-right
+    ];
+    const playerIdx = Math.floor(Math.random() * 4);
+    const enemyIdx = 3 - playerIdx; // Opposite corner
+    positions.push(corners[playerIdx], corners[enemyIdx]);
+  } else {
+    // N players: evenly spaced around ellipse, starting from random angle
+    const startAngle = Math.random() * Math.PI * 2;
+    for (let i = 0; i < count; i++) {
+      const angle = startAngle + (i * Math.PI * 2) / count;
+      let x = centerX + Math.cos(angle) * radiusX;
+      let z = centerZ + Math.sin(angle) * radiusZ;
+      // Clamp to map bounds with margin
+      x = Math.max(margin, Math.min(maxX, x));
+      z = Math.max(margin, Math.min(maxZ, z));
+      positions.push({ x, z });
+    }
+  }
+
+  return positions;
+}
 
 function updateLoading(pct: number, text: string) {
   const bar = document.getElementById('loading-bar');
@@ -295,10 +337,10 @@ async function main() {
   commandManager.setCombatSystem(combatSystem);
   const harvestSystem = new HarvestSystem(terrain);
   const productionSystem = new ProductionSystem(gameRules, harvestSystem);
-  // Apply difficulty-based cost/time scaling
+  // Apply difficulty-based cost/time scaling (additional AI players registered after opponents array is created)
   const playerDifficulty = house.difficulty ?? 'normal';
   productionSystem.setDifficulty(0, playerDifficulty, false);  // Human player
-  productionSystem.setDifficulty(1, playerDifficulty, true);   // AI gets inverse scaling
+  productionSystem.setDifficulty(1, playerDifficulty, true);   // AI player 1 gets inverse scaling
   const minimapRenderer = new MinimapRenderer(terrain, scene);
   minimapRenderer.setRightClickCallback((worldX, worldZ) => {
     const selected = selectionManager.getSelectedEntities();
@@ -330,7 +372,7 @@ async function main() {
   });
   combatSystem.setFogOfWar(fogOfWar, 0);
   combatSystem.setPlayerFaction(0, house.prefix);
-  combatSystem.setPlayerFaction(1, house.enemyPrefix);
+  combatSystem.setPlayerFaction(1, house.enemyPrefix);  // AI player 1 (additional AIs registered below)
 
   // Unit population cap
   productionSystem.setUnitCountCallback((playerId: number) => {
@@ -345,7 +387,9 @@ async function main() {
     return count;
   });
   const effectsManager = new EffectsManager(scene);
-  const gameStats = new GameStats();
+  const opponentCount = house.opponents?.length ?? 1;
+  const totalPlayers = 1 + opponentCount;
+  const gameStats = new GameStats(totalPlayers);
   const victorySystem = new VictorySystem(audioManager, 0);
   victorySystem.setStats(gameStats);
   victorySystem.setBuildingTypeNames(buildingTypeNames);
@@ -470,18 +514,33 @@ async function main() {
 
   const sandwormSystem = new SandwormSystem(terrain, effectsManager);
 
-  // AI setup based on enemy faction
-  const aiPlayer = new AIPlayer(gameRules, combatSystem, 1, 200, 200, 60, 60);
-  // Override AI unit pool for the enemy faction
-  aiPlayer.setUnitPool(house.enemyPrefix);
-  aiPlayer.setDifficulty(house.difficulty ?? 'normal');
-  // Give AI a random sub-house (different from player's if possible)
+  // AI setup — support multiple opponents
+  const opponents: OpponentConfig[] = house.opponents ?? [{ prefix: house.enemyPrefix, difficulty: house.difficulty ?? 'normal' }];
   const aiSubhousePrefixes = ['FR', 'IM', 'IX', 'TL', 'GU'];
   const playerSubPrefix = house.subhouse?.prefix ?? '';
-  const available = aiSubhousePrefixes.filter(p => p !== playerSubPrefix);
-  const aiSubPrefix = available[Math.floor(Math.random() * available.length)];
-  aiPlayer.setSubhousePrefix(aiSubPrefix);
-  console.log(`AI sub-house: ${aiSubPrefix}`);
+  const availableSubhouses = aiSubhousePrefixes.filter(p => p !== playerSubPrefix);
+
+  const aiPlayers: AIPlayer[] = [];
+  for (let i = 0; i < opponents.length; i++) {
+    const playerId = i + 1;
+    // Positions will be set after terrain loads (in FRESH GAME section)
+    const ai = new AIPlayer(gameRules, combatSystem, playerId, 200, 200, 60, 60);
+    ai.setUnitPool(opponents[i].prefix);
+    ai.setDifficulty(opponents[i].difficulty);
+    ai.setSubhousePrefix(availableSubhouses[i % availableSubhouses.length]);
+    ai.setProductionSystem(productionSystem, harvestSystem);
+    ai.setBuildingTypeNames(buildingTypeNames);
+    // Stagger tick offsets to spread CPU load across frames
+    ai.setTickOffset(Math.floor((i * 10) / opponents.length));
+    aiPlayers.push(ai);
+    // Register faction and difficulty for additional AI players (player 1 already registered above)
+    if (playerId > 1) {
+      combatSystem.setPlayerFaction(playerId, opponents[i].prefix);
+      productionSystem.setDifficulty(playerId, opponents[i].difficulty, true);
+    }
+    console.log(`AI ${playerId}: ${opponents[i].prefix}, sub-house: ${availableSubhouses[i % availableSubhouses.length]}, difficulty: ${opponents[i].difficulty}`);
+  }
+
   // Apply skirmish options
   if (house.skirmishOptions) {
     const opts = house.skirmishOptions;
@@ -489,32 +548,37 @@ async function main() {
     const extraCredits = opts.startingCredits - 5000;
     if (extraCredits !== 0) {
       harvestSystem.addSolaris(0, extraCredits);
-      harvestSystem.addSolaris(1, extraCredits);
+      for (let i = 0; i < opponents.length; i++) {
+        harvestSystem.addSolaris(i + 1, extraCredits);
+      }
     }
     // Apply unit cap
     productionSystem.setMaxUnits(opts.unitCap);
   }
 
   // Hard difficulty: AI gets resource bonus
-  if (house.difficulty === 'hard') {
-    harvestSystem.addSolaris(1, 3000);
+  for (let i = 0; i < opponents.length; i++) {
+    if (opponents[i].difficulty === 'hard') {
+      harvestSystem.addSolaris(i + 1, 3000);
+    }
   }
-  // Connect AI to production/economy systems
-  aiPlayer.setProductionSystem(productionSystem, harvestSystem);
-  aiPlayer.setBuildingTypeNames(buildingTypeNames);
 
   // Register systems
   game.addSystem(input);
   game.addSystem(movement);
   game.addSystem(combatSystem);
   game.addSystem(harvestSystem);
-  game.addSystem(aiPlayer);
+  for (const ai of aiPlayers) game.addSystem(ai);
   game.addSystem(sandwormSystem);
   game.addRenderSystem(scene);
 
   // Initialize
   updateLoading(30, 'Initializing game systems...');
   game.init();
+  // Initialize solaris for additional AI players (game.init calls harvestSystem.init with default=2 players)
+  for (let i = 2; i < totalPlayers; i++) {
+    harvestSystem.addSolaris(i, 5000);
+  }
   updateLoading(40, 'Loading terrain...');
   // Determine which map to load
   let realMapId: string | undefined;
@@ -544,7 +608,7 @@ async function main() {
   }
 
   // Update systems with actual map dimensions after terrain is ready
-  aiPlayer.setMapDimensions(terrain.getMapWidth(), terrain.getMapHeight());
+  for (const ai of aiPlayers) ai.setMapDimensions(terrain.getMapWidth(), terrain.getMapHeight());
   fogOfWar.reinitialize(); // Re-create fog buffers/mesh for actual map dimensions
   minimapRenderer.renderTerrain(); // Re-render minimap with actual terrain data
 
@@ -868,11 +932,13 @@ async function main() {
 
   // --- AI SPAWN CALLBACK ---
 
-  aiPlayer.setSpawnCallback((eid, typeName, owner, x, z) => {
-    const world = game.getWorld();
-    removeEntity(world, eid);
-    spawnUnit(world, typeName, owner, x, z);
-  });
+  for (const ai of aiPlayers) {
+    ai.setSpawnCallback((eid, typeName, owner, x, z) => {
+      const world = game.getWorld();
+      removeEntity(world, eid);
+      spawnUnit(world, typeName, owner, x, z);
+    });
+  }
 
   // --- EVENTS ---
 
@@ -1200,8 +1266,9 @@ async function main() {
       } else {
         // AI strategically places buildings based on type
         const bDef = gameRules.buildings.get(unitType);
-        if (bDef) {
-          const pos = aiPlayer.getNextBuildingPlacement(unitType, bDef);
+        const ownerAi = aiPlayers[owner - 1];
+        if (bDef && ownerAi) {
+          const pos = ownerAi.getNextBuildingPlacement(unitType, bDef);
           spawnBuilding(world, unitType, owner, pos.x, pos.z);
         }
       }
@@ -1260,9 +1327,15 @@ async function main() {
         }
       }
       if (!found) {
-        const aiBase = aiPlayer.getBasePosition();
-        baseX = owner === 0 ? 55 : aiBase.x;
-        baseZ = owner === 0 ? 55 : aiBase.z;
+        if (owner === 0) {
+          baseX = 55;
+          baseZ = 55;
+        } else {
+          const ownerAi = aiPlayers[owner - 1];
+          const aiBase = ownerAi ? ownerAi.getBasePosition() : { x: 200, z: 200 };
+          baseX = aiBase.x;
+          baseZ = aiBase.z;
+        }
       }
       const x = baseX! + (Math.random() - 0.5) * 10;
       const z = baseZ! + (Math.random() - 0.5) * 10;
@@ -1294,7 +1367,7 @@ async function main() {
 
       // Atreides veterancy bonus: infantry from upgraded barracks start at rank 1
       if (eid >= 0) {
-        const ownerPrefix = owner === 0 ? house.prefix : house.enemyPrefix;
+        const ownerPrefix = owner === 0 ? house.prefix : (opponents[owner - 1]?.prefix ?? house.enemyPrefix);
         if (ownerPrefix === 'AT') {
           const uDef = gameRules.units.get(unitType);
           if (uDef?.infantry && productionSystem.isUpgraded(owner, `${ownerPrefix}Barracks`)) {
@@ -1322,7 +1395,8 @@ async function main() {
         const conYardName = `${prefix}ConYard`;
         if (gameRules.buildings.has(conYardName)) {
           // Deploy near current base with some offset
-          const aiBase = aiPlayer.getBasePosition();
+          const ownerAi = aiPlayers[owner - 1];
+          const aiBase = ownerAi ? ownerAi.getBasePosition() : { x: 200, z: 200 };
           const deployX = aiBase.x + (Math.random() - 0.5) * 10;
           const deployZ = aiBase.z + (Math.random() - 0.5) * 10;
           Health.current[eid] = 0;
@@ -1953,17 +2027,15 @@ async function main() {
     // Sample stats for post-game graphs every 250 ticks (~10 seconds)
     if (game.getTickCount() % 250 === 0) {
       const allU = unitQuery(world);
-      let p0units = 0, p1units = 0;
+      const unitCounts = new Array(totalPlayers).fill(0);
       for (const uid of allU) {
         if (Health.current[uid] <= 0) continue;
-        if (Owner.playerId[uid] === 0) p0units++;
-        else if (Owner.playerId[uid] === 1) p1units++;
+        const o = Owner.playerId[uid];
+        if (o < totalPlayers) unitCounts[o]++;
       }
-      gameStats.sample(
-        game.getTickCount(),
-        [harvestSystem.getSolaris(0), harvestSystem.getSolaris(1)],
-        [p0units, p1units],
-      );
+      const credits = [];
+      for (let i = 0; i < totalPlayers; i++) credits.push(harvestSystem.getSolaris(i));
+      gameStats.sample(game.getTickCount(), credits, unitCounts);
     }
 
     // Autosave every 2 minutes (3000 ticks at 25 TPS)
@@ -2197,7 +2269,7 @@ async function main() {
       enemyPrefix: house.enemyPrefix,
       houseName: house.name,
       enemyName: house.enemyName,
-      solaris: [harvestSystem.getSolaris(0), harvestSystem.getSolaris(1)],
+      solaris: Array.from({ length: totalPlayers }, (_, i) => harvestSystem.getSolaris(i)),
       entities,
       spice,
     };
@@ -2477,8 +2549,9 @@ async function main() {
   if (savedGame) {
     // --- RESTORE FROM SAVE ---
     game.setTickCount(savedGame.tick);
-    harvestSystem.addSolaris(0, savedGame.solaris[0] - harvestSystem.getSolaris(0));
-    harvestSystem.addSolaris(1, savedGame.solaris[1] - harvestSystem.getSolaris(1));
+    for (let i = 0; i < savedGame.solaris.length; i++) {
+      harvestSystem.addSolaris(i, savedGame.solaris[i] - harvestSystem.getSolaris(i));
+    }
 
     // Restore spice
     for (let tz = 0; tz < savedGame.spice.length && tz < 128; tz++) {
@@ -2550,21 +2623,16 @@ async function main() {
     console.log(`Restored ${savedGame.entities.length} entities from save (tick ${savedGame.tick})`);
   } else {
     // --- FRESH GAME ---
-    // Randomize starting positions: pick 2 opposite corners
-    const corners = [
-      { x: 50, z: 50 },   // Top-left
-      { x: 200, z: 50 },  // Top-right
-      { x: 50, z: 200 },  // Bottom-left
-      { x: 200, z: 200 }, // Bottom-right
-    ];
-    const playerCornerIdx = Math.floor(Math.random() * 4);
-    const enemyCornerIdx = 3 - playerCornerIdx; // Opposite corner
-    const playerBase = corners[playerCornerIdx];
-    const enemyBase = corners[enemyCornerIdx];
+    // Distribute spawn positions for all players
+    const spawnPositions = getSpawnPositions(terrain.getMapWidth(), terrain.getMapHeight(), totalPlayers);
+    const playerBase = spawnPositions[0];
 
-    // Update AI target/base to match randomized positions
-    aiPlayer.setBasePosition(enemyBase.x, enemyBase.z);
-    aiPlayer.setTargetPosition(playerBase.x, playerBase.z);
+    // Update all AI targets/bases to match spawn positions
+    for (let i = 0; i < aiPlayers.length; i++) {
+      const aiBase = spawnPositions[i + 1];
+      aiPlayers[i].setBasePosition(aiBase.x, aiBase.z);
+      aiPlayers[i].setTargetPosition(playerBase.x, playerBase.z);
+    }
 
     // Player base
     const px = house.prefix;
@@ -2606,30 +2674,35 @@ async function main() {
       }
     }
 
-    // Enemy base
-    const ex = house.enemyPrefix;
-    spawnBuilding(world, `${ex}ConYard`, 1, enemyBase.x, enemyBase.z);
-    spawnBuilding(world, `${ex}SmWindtrap`, 1, enemyBase.x + 6, enemyBase.z);
-    spawnBuilding(world, `${ex}Barracks`, 1, enemyBase.x - 6, enemyBase.z);
-    spawnBuilding(world, `${ex}Factory`, 1, enemyBase.x, enemyBase.z + 6);
-    spawnBuilding(world, `${ex}SmWindtrap`, 1, enemyBase.x + 6, enemyBase.z + 6);
-    spawnBuilding(world, `${ex}Refinery`, 1, enemyBase.x - 6, enemyBase.z + 6);
+    // AI bases — spawn for each opponent
+    for (let i = 0; i < opponents.length; i++) {
+      const aiBase = spawnPositions[i + 1];
+      const ex = opponents[i].prefix;
+      const owner = i + 1;
 
-    // Enemy starting units
-    const enemyInfantry = [...gameRules.units.keys()].filter(n => n.startsWith(ex) && gameRules.units.get(n)?.infantry);
-    const enemyVehicles = [...gameRules.units.keys()].filter(n => n.startsWith(ex) && !gameRules.units.get(n)?.infantry && gameRules.units.get(n)!.cost > 0 && !gameRules.units.get(n)!.canFly);
+      spawnBuilding(world, `${ex}ConYard`, owner, aiBase.x, aiBase.z);
+      spawnBuilding(world, `${ex}SmWindtrap`, owner, aiBase.x + 6, aiBase.z);
+      spawnBuilding(world, `${ex}Barracks`, owner, aiBase.x - 6, aiBase.z);
+      spawnBuilding(world, `${ex}Factory`, owner, aiBase.x, aiBase.z + 6);
+      spawnBuilding(world, `${ex}SmWindtrap`, owner, aiBase.x + 6, aiBase.z + 6);
+      spawnBuilding(world, `${ex}Refinery`, owner, aiBase.x - 6, aiBase.z + 6);
 
-    for (let i = 0; i < 3 && i < enemyInfantry.length; i++) {
-      spawnUnit(world, enemyInfantry[i], 1, enemyBase.x - 5 + i * 2, enemyBase.z + 10);
-    }
-    for (let i = 0; i < 3 && i < enemyVehicles.length; i++) {
-      spawnUnit(world, enemyVehicles[i], 1, enemyBase.x + 1 + i * 2, enemyBase.z + 12);
-    }
+      // Enemy starting units
+      const enemyInfantry = [...gameRules.units.keys()].filter(n => n.startsWith(ex) && gameRules.units.get(n)?.infantry);
+      const enemyVehicles = [...gameRules.units.keys()].filter(n => n.startsWith(ex) && !gameRules.units.get(n)?.infantry && gameRules.units.get(n)!.cost > 0 && !gameRules.units.get(n)!.canFly);
 
-    // Enemy harvester
-    const enemyHarvTypes = [...gameRules.units.keys()].filter(n => n.startsWith(ex) && (n.includes('Harv') || n.includes('harvester')));
-    if (enemyHarvTypes.length > 0) {
-      spawnUnit(world, enemyHarvTypes[0], 1, enemyBase.x - 5, enemyBase.z + 12);
+      for (let j = 0; j < 3 && j < enemyInfantry.length; j++) {
+        spawnUnit(world, enemyInfantry[j], owner, aiBase.x - 5 + j * 2, aiBase.z + 10);
+      }
+      for (let j = 0; j < 3 && j < enemyVehicles.length; j++) {
+        spawnUnit(world, enemyVehicles[j], owner, aiBase.x + 1 + j * 2, aiBase.z + 12);
+      }
+
+      // Enemy harvester
+      const enemyHarvTypes = [...gameRules.units.keys()].filter(n => n.startsWith(ex) && (n.includes('Harv') || n.includes('harvester')));
+      if (enemyHarvTypes.length > 0) {
+        spawnUnit(world, enemyHarvTypes[0], owner, aiBase.x - 5, aiBase.z + 12);
+      }
     }
 
     // Camera starts at player base
