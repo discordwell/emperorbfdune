@@ -2,25 +2,35 @@ import * as THREE from 'three';
 import { MenuSceneManager } from './MenuSceneManager';
 import { MenuTextOverlay } from './MenuTextOverlay';
 import type { Territory, CampaignState } from './CampaignMap';
+import { JUMP_POINTS, type HousePrefix } from '../campaign/CampaignData';
 
-// Map game territory IDs (0-8) to glTF face mesh names
-const TERRITORY_MESH_MAP: Record<number, string> = {
-  0: 'F03',  // Carthag Basin
-  1: 'F07',  // Habbanya Ridge
-  2: 'F12',  // Wind Pass
-  3: 'F15',  // Arrakeen Flats
-  4: 'F17',  // Sietch Tabr
-  5: 'F22',  // Shield Wall
-  6: 'F25',  // Spice Fields
-  7: 'F28',  // Old Gap
-  8: 'F33',  // Enemy Capital
-};
-
-const MAPPED_FACE_NAMES = new Set(Object.values(TERRITORY_MESH_MAP));
+/**
+ * Map territory ID N to mesh name F{N.toString().padStart(2,'0')}.
+ * All 33 Arrakis territories (1-33) are present in CAMPAIGN.gltf.
+ * Homeworlds (34-36) may or may not have meshes.
+ */
+function territoryToMeshName(id: number): string {
+  return `F${id.toString().padStart(2, '0')}`;
+}
 
 // Camera for viewing the campaign map — territory faces centered at (106.5, 48.7, 544.9)
 const CAM_POS = new THREE.Vector3(106, 49, 100);
 const CAM_TARGET = new THREE.Vector3(106, 49, 545);
+
+// House colors for 3D rendering
+const HOUSE_FACE_COLORS: Record<string, { color: number; emissive: number }> = {
+  player:  { color: 0x2244aa, emissive: 0x0033aa },
+  enemy:   { color: 0xaa2222, emissive: 0xaa1111 },
+  enemy2:  { color: 0x22aa44, emissive: 0x11aa33 },
+  neutral: { color: 0x666666, emissive: 0x222222 },
+};
+
+const HOUSE_EDGE_COLORS: Record<string, { color: number; emissive: number }> = {
+  player:  { color: 0x3366cc, emissive: 0x0044cc },
+  enemy:   { color: 0xcc3333, emissive: 0xcc1111 },
+  enemy2:  { color: 0x33cc55, emissive: 0x11cc33 },
+  neutral: { color: 0x888888, emissive: 0x333333 },
+};
 
 interface TerritoryEntry {
   id: number;
@@ -44,7 +54,7 @@ export class CampaignMap3D {
   private planet: THREE.Object3D | null = null;
   private elapsed = 0;
 
-  // DOM buttons (Attack/Exit) — XBF mesh buttons don't raycast reliably
+  // DOM buttons
   private buttonOverlay: HTMLDivElement | null = null;
 
   constructor(
@@ -89,6 +99,9 @@ export class CampaignMap3D {
     // Show Exit button as DOM overlay
     this.showExitButton();
 
+    // Info overlay with phase/act info
+    this.showInfoOverlay();
+
     // Animation loop
     this.menuScene.addAnimation((dt) => this.animate(dt));
     this.menuScene.startRenderLoop();
@@ -100,50 +113,54 @@ export class CampaignMap3D {
 
   private setupTerritories(): void {
     const root = this.root!;
-    // Ensure world matrices are current before reading positions for proxy creation
     root.updateMatrixWorld(true);
 
-    for (const [gameId, meshName] of Object.entries(TERRITORY_MESH_MAP)) {
-      const id = parseInt(gameId);
+    // Determine which territory IDs to show
+    const phase = this.state.phaseState?.currentPhase ?? 1;
+    const maxId = phase >= 3 ? 36 : 33; // Show homeworlds in Phase 3+
+
+    // Build set of all mesh names we'll map
+    const mappedFaces = new Set<string>();
+
+    for (let id = 1; id <= maxId; id++) {
+      const meshName = territoryToMeshName(id);
       const face = this.menuScene.findMesh(root, meshName);
+      if (!face || !(face instanceof THREE.Mesh)) continue;
+
+      mappedFaces.add(meshName);
+
       const edge = this.menuScene.findMesh(root, meshName.replace('F', 'E'));
       const select = this.menuScene.findMesh(root, `${meshName}select`);
 
-      if (face && face instanceof THREE.Mesh) {
-        // Create invisible proxy plane from the face's bounding box
-        const geo = face.geometry;
-        geo.computeBoundingBox();
-        const bb = geo.boundingBox!;
-        const w = bb.max.x - bb.min.x;
-        const h = bb.max.y - bb.min.y;
-        const cx = (bb.min.x + bb.max.x) / 2;
-        const cy = (bb.min.y + bb.max.y) / 2;
-        const cz = (bb.min.z + bb.max.z) / 2;
+      // Create invisible proxy plane from the face's bounding box
+      const geo = face.geometry;
+      geo.computeBoundingBox();
+      const bb = geo.boundingBox!;
+      const w = bb.max.x - bb.min.x;
+      const h = bb.max.y - bb.min.y;
+      const cx = (bb.min.x + bb.max.x) / 2;
+      const cy = (bb.min.y + bb.max.y) / 2;
+      const cz = (bb.min.z + bb.max.z) / 2;
 
-        // Compute world position of geometry center
-        const m = face.matrixWorld.elements;
-        const wx = cx * m[0] + cy * m[4] + cz * m[8] + m[12];
-        const wy = cx * m[1] + cy * m[5] + cz * m[9] + m[13];
-        const wz = cx * m[2] + cy * m[6] + cz * m[10] + m[14];
+      // Compute world position of geometry center
+      const m = face.matrixWorld.elements;
+      const wx = cx * m[0] + cy * m[4] + cz * m[8] + m[12];
+      const wy = cx * m[1] + cy * m[5] + cz * m[9] + m[13];
+      const wz = cx * m[2] + cy * m[6] + cz * m[10] + m[14];
 
-        // Create proxy plane in XY plane, facing -Z (toward camera)
-        const proxyGeo = new THREE.PlaneGeometry(w, h);
-        const proxyMat = new THREE.MeshBasicMaterial({
-          visible: false,
-          side: THREE.DoubleSide,
-        });
-        const proxy = new THREE.Mesh(proxyGeo, proxyMat);
-        proxy.name = `proxy_${meshName}`;
-        proxy.position.set(wx, wy, wz);
-        this.menuScene.scene.add(proxy);
+      const proxyGeo = new THREE.PlaneGeometry(w, h);
+      const proxyMat = new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide });
+      const proxy = new THREE.Mesh(proxyGeo, proxyMat);
+      proxy.name = `proxy_${meshName}`;
+      proxy.position.set(wx, wy, wz);
+      this.menuScene.scene.add(proxy);
 
-        this.territories.push({ id, face, edge, select, proxy });
-      }
+      this.territories.push({ id, face, edge, select, proxy });
     }
 
     // Make unmapped territory faces neutral gray
     root.traverse((child) => {
-      if (child instanceof THREE.Mesh && child.name.match(/^F\d+$/) && !MAPPED_FACE_NAMES.has(child.name)) {
+      if (child instanceof THREE.Mesh && child.name.match(/^F\d+$/) && !mappedFaces.has(child.name)) {
         const mat = child.material;
         if (mat instanceof THREE.MeshStandardMaterial) {
           mat.color.setHex(0x444444);
@@ -164,13 +181,11 @@ export class CampaignMap3D {
       if (child instanceof THREE.Mesh) {
         const name = child.name.toLowerCase();
 
-        // Hide container meshes
         if (name.startsWith('~~')) {
           child.visible = false;
           return;
         }
 
-        // Glow/effect materials: additive blending
         if (name.includes('glow') || name.includes('nebula') || name.includes('flash') || name.includes('zipzap') || name.includes('jump') || name.includes('boom') || name.includes('bang')) {
           const mats = Array.isArray(child.material) ? child.material : [child.material];
           for (const m of mats) {
@@ -182,7 +197,6 @@ export class CampaignMap3D {
           }
         }
 
-        // Double-sided rendering
         const mats = Array.isArray(child.material) ? child.material : [child.material];
         for (const m of mats) {
           if (m && 'side' in m) {
@@ -198,6 +212,10 @@ export class CampaignMap3D {
       const entry = this.territories.find(t => t.id === territory.id);
       if (!entry) continue;
 
+      const ownerKey = territory.owner; // 'player' | 'enemy' | 'enemy2' | 'neutral'
+      const faceColors = HOUSE_FACE_COLORS[ownerKey] ?? HOUSE_FACE_COLORS.neutral;
+      const edgeColors = HOUSE_EDGE_COLORS[ownerKey] ?? HOUSE_EDGE_COLORS.neutral;
+
       const setColor = (obj: THREE.Object3D, color: number, emissive: number) => {
         obj.traverse((child) => {
           if (child instanceof THREE.Mesh) {
@@ -211,24 +229,29 @@ export class CampaignMap3D {
         });
       };
 
-      if (territory.owner === 'player') {
-        setColor(entry.face, 0x2244aa, 0x0033aa);
-        if (entry.edge) setColor(entry.edge, 0x3366cc, 0x0044cc);
-      } else if (territory.owner === 'enemy') {
-        setColor(entry.face, 0xaa2222, 0xaa1111);
-        if (entry.edge) setColor(entry.edge, 0xcc3333, 0xcc1111);
-      } else {
-        setColor(entry.face, 0x666666, 0x222222);
-        if (entry.edge) setColor(entry.edge, 0x888888, 0x333333);
+      setColor(entry.face, faceColors.color, faceColors.emissive);
+      if (entry.edge) setColor(entry.edge, edgeColors.color, edgeColors.emissive);
+
+      // Jump point overlay: make it brighter in Phase 3+
+      const phase = this.state.phaseState?.currentPhase ?? 1;
+      if (phase >= 3) {
+        const isJumpPoint = Object.values(JUMP_POINTS).includes(territory.id) &&
+          territory.id !== JUMP_POINTS[this.state.housePrefix];
+        if (isJumpPoint && territory.owner !== 'player') {
+          // Highlight with gold tint
+          setColor(entry.face, 0xaa8833, 0x886622);
+          if (entry.edge) setColor(entry.edge, 0xccaa44, 0xaa8833);
+        }
       }
     }
   }
 
   private getAttackableTerritoryIds(): number[] {
     return this.state.territories
-      .filter(t => t.owner !== 'player' && t.adjacent.some(
-        adjId => this.state.territories.find(a => a.id === adjId)?.owner === 'player'
-      ))
+      .filter(t => t.owner !== 'player' && !t.isHomeworld &&
+        t.adjacent.some(adjId =>
+          this.state.territories.find(a => a.id === adjId)?.owner === 'player'
+        ))
       .map(t => t.id);
   }
 
@@ -273,11 +296,11 @@ export class CampaignMap3D {
     if (entry.select) entry.select.visible = true;
     document.body.style.cursor = 'pointer';
 
-    // Show territory name label
     const territory = this.state.territories.find(t => t.id === entry.id);
     if (territory) {
       this.textOverlay.removeLabel('territory-hover');
-      this.textOverlay.addLabel('territory-hover', `${territory.name} [${territory.difficulty.toUpperCase()}]`, entry.proxy.position, {
+      const ownerLabel = territory.ownerHouse !== 'neutral' ? ` (${territory.ownerHouse})` : '';
+      this.textOverlay.addLabel('territory-hover', `${territory.name}${ownerLabel} [${territory.difficulty.toUpperCase()}]`, entry.proxy.position, {
         fontSize: '16px',
         color: '#ffcc44',
         fontWeight: 'bold',
@@ -294,7 +317,6 @@ export class CampaignMap3D {
     this.selectedTerritoryId = entry.id;
     const territory = this.state.territories.find(t => t.id === entry.id);
 
-    // Show Attack/Cancel DOM buttons
     this.showAttackButtons(territory?.name ?? 'Territory');
   }
 
@@ -324,6 +346,27 @@ export class CampaignMap3D {
     overlay.appendChild(exitBtn);
     document.body.appendChild(overlay);
     this.buttonOverlay = overlay;
+  }
+
+  private showInfoOverlay(): void {
+    if (!this.buttonOverlay) return;
+    const phase = this.state.phaseState?.currentPhase ?? 1;
+    const act = phase <= 1 || phase === 10 ? 1 : phase === 2 || phase === 11 || phase === 14 || phase === 15 ? 2 : 3;
+    const techLevel = this.state.phaseState?.techLevel ?? 1;
+    const playerCount = this.state.territories.filter(t => t.owner === 'player').length;
+
+    const info = document.createElement('div');
+    info.style.cssText = `
+      position:fixed; top:20px; right:20px;
+      z-index:2002; pointer-events:none;
+      text-align:right; font-family:'Segoe UI',Tahoma,sans-serif;
+    `;
+    info.innerHTML = `
+      <div style="color:#d4a840;font-size:16px;font-weight:bold;">${this.state.house}</div>
+      <div style="color:#888;font-size:12px;">Act ${act} | Phase ${phase} | Tech ${techLevel}</div>
+      <div style="color:#888;font-size:12px;">Territories: ${playerCount}/33</div>
+    `;
+    this.buttonOverlay.appendChild(info);
   }
 
   private showAttackButtons(territoryName: string): void {
@@ -373,7 +416,6 @@ export class CampaignMap3D {
 
     overlay.appendChild(btnRow);
 
-    // Store reference so we can find and remove it
     overlay.dataset.attackButtons = 'true';
     document.body.appendChild(overlay);
   }

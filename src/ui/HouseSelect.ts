@@ -245,12 +245,22 @@ export class HouseSelect {
     const grid = document.createElement('div');
     grid.style.cssText = 'display:flex; gap:24px;';
 
-    const campaignCard = this.createCard('Campaign', '', 'Conquer Arrakis territory by territory. 9 missions with increasing difficulty.', '#d4a840', 220);
+    const campaignCard = this.createCard('Campaign', '', 'Conquer 33 Arrakis territories across 3 acts. Earn sub-house alliances through missions.', '#d4a840', 220);
     campaignCard.onclick = () => {
       this.audioManager.playSfx('select');
       this.overlay.remove();
       house.gameMode = 'campaign';
-      this.showSubhouseSelect(house, resolve);
+      // Campaign mode: skip sub-house selection (alliances earned in-game)
+      // Auto-assign both enemies based on player house
+      const enemies: Record<string, { prefix: string; name: string; prefix2: string; name2: string }> = {
+        AT: { prefix: 'HK', name: 'Harkonnen', prefix2: 'OR', name2: 'Ordos' },
+        HK: { prefix: 'AT', name: 'Atreides', prefix2: 'OR', name2: 'Ordos' },
+        OR: { prefix: 'HK', name: 'Harkonnen', prefix2: 'AT', name2: 'Atreides' },
+      };
+      const e = enemies[house.prefix] ?? enemies.AT;
+      house.enemyPrefix = e.prefix;
+      house.enemyName = e.name;
+      this.showDifficultySelect(house, resolve);
     };
     grid.appendChild(campaignCard);
 

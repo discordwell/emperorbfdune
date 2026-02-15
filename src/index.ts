@@ -30,6 +30,10 @@ import { EffectsManager } from './rendering/EffectsManager';
 import { SandwormSystem } from './simulation/SandwormSystem';
 import { AbilitySystem } from './simulation/AbilitySystem';
 import { showMissionBriefing } from './ui/MissionBriefing';
+import { loadCampaignStrings, type HousePrefix, JUMP_POINTS } from './campaign/CampaignData';
+import { CampaignPhaseManager } from './campaign/CampaignPhaseManager';
+import { SubHouseSystem } from './campaign/SubHouseSystem';
+import { generateMissionConfig, type MissionConfigData } from './campaign/MissionConfig';
 import {
   addEntity, addComponent, removeEntity, hasComponent,
   Position, Velocity, Rotation, Health, Owner, UnitType, Selectable,
@@ -178,26 +182,57 @@ async function main() {
     house = await houseSelect.show();
     if (uiOverlay) uiOverlay.style.display = '';
 
+    // Load campaign strings for briefing text
+    if (house.gameMode === 'campaign') {
+      await loadCampaignStrings();
+    }
+
     // Show mission briefing for campaign mode BEFORE restoring loading screen
     if (house.gameMode === 'campaign' && house.campaignTerritoryId !== undefined) {
-      const TERRITORY_DATA: Record<number, { name: string; description: string; difficulty: 'easy' | 'normal' | 'hard' }> = {
-        0: { name: 'Carthag Basin', description: 'A wide desert basin near the Carthag spaceport. Light enemy presence.', difficulty: 'easy' },
-        1: { name: 'Habbanya Ridge', description: 'Rocky ridge with scattered spice fields. Good defensive terrain.', difficulty: 'easy' },
-        2: { name: 'Wind Pass', description: 'A narrow canyon pass battered by constant sandstorms.', difficulty: 'normal' },
-        3: { name: 'Arrakeen Flats', description: 'Open desert near the capital. Rich spice deposits attract worms.', difficulty: 'normal' },
-        4: { name: 'Sietch Tabr', description: 'Central crossroads territory. Controls access to the deep desert.', difficulty: 'normal' },
-        5: { name: 'Shield Wall', description: 'Mountainous terrain near the Shield Wall. Heavily defended.', difficulty: 'normal' },
-        6: { name: 'Spice Fields', description: 'The richest spice fields on Arrakis. A strategic prize.', difficulty: 'hard' },
-        7: { name: 'Old Gap', description: 'Ancient rock formations hide enemy strongholds.', difficulty: 'hard' },
-        8: { name: 'Enemy Capital', description: "The enemy's main base of operations. Final battle.", difficulty: 'hard' },
-      };
-      const tData = TERRITORY_DATA[house.campaignTerritoryId];
+      // Retrieve campaign state to build mission config
+      const savedCampaign = localStorage.getItem('ebfd_campaign');
+      let missionConfig: MissionConfigData | undefined;
+      if (savedCampaign) {
+        try {
+          const cState = JSON.parse(savedCampaign);
+          const phaseManager = CampaignPhaseManager.deserialize(cState.phaseState);
+          const territory = cState.territories?.find((t: { id: number }) => t.id === house.campaignTerritoryId);
+          if (territory) {
+            const playerCount = cState.territories.filter((t: { owner: string }) => t.owner === 'player').length;
+            const enemyCount = cState.territories.filter((t: { owner: string }) => t.owner === 'enemy' || t.owner === 'enemy2').length;
+            const enemyHouse = territory.ownerHouse !== 'neutral' && territory.ownerHouse !== cState.housePrefix
+              ? territory.ownerHouse as HousePrefix : cState.enemyPrefix as HousePrefix;
+            missionConfig = generateMissionConfig({
+              playerHouse: cState.housePrefix as HousePrefix,
+              phase: phaseManager.getCurrentPhase(),
+              phaseType: phaseManager.getPhaseType(),
+              territoryId: house.campaignTerritoryId,
+              territoryName: territory.name,
+              enemyHouse,
+              isAttack: true,
+              territoryDiff: playerCount - enemyCount,
+              subHousePresent: null,
+            });
+            // Override enemy for this mission based on territory owner
+            house.enemyPrefix = enemyHouse;
+            const enemyNames: Record<string, string> = { AT: 'Atreides', HK: 'Harkonnen', OR: 'Ordos' };
+            house.enemyName = enemyNames[enemyHouse] ?? house.enemyName;
+          }
+        } catch { /* use defaults */ }
+      }
+
+      // Build territory data from campaign state or fall back
+      const campaignState = savedCampaign ? JSON.parse(savedCampaign) : null;
+      const tData = campaignState?.territories?.find((t: { id: number }) => t.id === house.campaignTerritoryId);
       if (tData) {
-        const objectiveOverride = house.campaignTerritoryId === 3 ? 'Survive for 8 minutes against enemy assault' : undefined;
-        await showMissionBriefing(
-          { id: house.campaignTerritoryId, name: tData.name, description: tData.description, difficulty: tData.difficulty, x: 0, y: 0, adjacent: [], mapSeed: 0, owner: 'enemy' },
-          house.name, house.prefix, house.enemyName, objectiveOverride
+        const briefingResult = await showMissionBriefing(
+          { id: house.campaignTerritoryId, name: tData.name, description: tData.description ?? '', difficulty: tData.difficulty ?? 'normal', x: 0, y: 0, adjacent: [], mapSeed: 0, owner: 'enemy', ownerHouse: tData.ownerHouse ?? 'neutral', isHomeworld: false },
+          house.name, house.prefix, house.enemyName, undefined, missionConfig
         );
+        if (briefingResult === 'resign') {
+          window.location.reload();
+          return;
+        }
       }
     }
 
@@ -319,35 +354,69 @@ async function main() {
 
   // Campaign progress tracking
   if (house.gameMode === 'campaign' && house.campaignTerritoryId !== undefined) {
-    // Territory-specific victory conditions
-    const tId = house.campaignTerritoryId;
-    if (tId <= 1) {
-      // Easy territories: destroy conyard only
-      victorySystem.setVictoryCondition('conyard');
-      victorySystem.setObjectiveLabel('Destroy the enemy Construction Yard');
-    } else if (tId === 3) {
-      // Arrakeen Flats: survival mission - survive 8 minutes
-      victorySystem.setVictoryCondition('survival');
-      victorySystem.setSurvivalTicks(25 * 60 * 8); // 8 minutes
-      victorySystem.setObjectiveLabel('Survive for 8 minutes');
-    } else if (tId >= 7) {
-      // Hard territories: total annihilation
-      victorySystem.setVictoryCondition('annihilate');
-      victorySystem.setObjectiveLabel('Destroy all enemy structures');
+    const campaign = new CampaignMap(audioManager, house.prefix, house.name, house.enemyPrefix, house.enemyName);
+    const phaseManager = campaign.getPhaseManager();
+    const subHouseSystem = campaign.getSubHouseSystem();
+
+    // Apply victory condition from phase state machine
+    const phaseType = phaseManager.getPhaseType();
+    const phase = phaseManager.getCurrentPhase();
+    const victoryObjectives: Record<string, { condition: string; label: string }> = {
+      heighliner: { condition: 'survival', label: 'Survive the Heighliner mission' },
+      homeDefense: { condition: 'survival', label: 'Defend your homeworld' },
+      homeAttack: { condition: 'annihilate', label: 'Destroy all enemy structures' },
+      civilWar: { condition: 'annihilate', label: 'Win the civil war' },
+      final: { condition: 'annihilate', label: 'Defeat the Emperor Worm' },
+    };
+
+    const specialObj = victoryObjectives[phaseType];
+    if (specialObj) {
+      victorySystem.setVictoryCondition(specialObj.condition as 'conyard' | 'annihilate' | 'survival');
+      victorySystem.setObjectiveLabel(specialObj.label);
+      if (specialObj.condition === 'survival') {
+        victorySystem.setSurvivalTicks(25 * 60 * 8); // 8 minutes
+      }
     } else {
-      // Normal territories: destroy conyard
-      victorySystem.setVictoryCondition('conyard');
-      victorySystem.setObjectiveLabel('Destroy the enemy Construction Yard');
+      // Standard missions: conyard for early phases, annihilate for Phase 3+
+      const vc = phase >= 3 ? 'annihilate' : 'conyard';
+      victorySystem.setVictoryCondition(vc);
+      victorySystem.setObjectiveLabel(
+        vc === 'annihilate' ? 'Destroy all enemy structures' : 'Destroy the enemy Construction Yard'
+      );
     }
 
-    const campaign = new CampaignMap(audioManager, house.prefix, house.name, house.enemyPrefix, house.enemyName);
+    // Tech level override for production
+    const techLevel = phaseManager.getCurrentTechLevel();
+    productionSystem.setOverrideTechLevel(0, techLevel);
+
     victorySystem.setVictoryCallback(() => {
+      // Record victory in campaign state
       campaign.recordVictory(house.campaignTerritoryId!);
+
+      // Determine if this was a territory capture (attack on enemy territory)
+      const targetTerritory = campaign.getState().territories.find(t => t.id === house.campaignTerritoryId);
+      const capturedTerritory = targetTerritory ? targetTerritory.owner !== 'player' : true;
+
+      // Check if captured territory is an enemy jump point (not our own)
+      const playerJP = JUMP_POINTS[house.prefix as HousePrefix];
+      const isJumpPoint = Object.values(JUMP_POINTS).some(jp => jp === house.campaignTerritoryId && jp !== playerJP);
+
+      phaseManager.recordBattleResult(true, capturedTerritory, isJumpPoint);
+      campaign.saveCampaign();
     });
+
+    victorySystem.setDefeatCallback(() => {
+      // Record defeat in phase manager (no territory captured)
+      phaseManager.recordBattleResult(false, false, false);
+      campaign.saveCampaign();
+    });
+
     victorySystem.setCampaignContinue(async () => {
-      // Check if campaign is won (all territories captured)
-      if (campaign.isVictory()) {
-        // Show campaign victory message then return to menu
+      // Check phase transitions
+      const phState = phaseManager.getState();
+
+      if (phState.isVictory) {
+        // Campaign complete!
         const overlay = document.createElement('div');
         overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.95);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:3000;font-family:inherit;';
         overlay.innerHTML = `
@@ -363,10 +432,29 @@ async function main() {
         document.body.appendChild(overlay);
         return;
       }
+
+      if (phState.isLost) {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.95);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:3000;font-family:inherit;';
+        overlay.innerHTML = `
+          <div style="color:#cc4444;font-size:48px;font-weight:bold;margin-bottom:12px;">CAMPAIGN LOST</div>
+          <div style="color:#ccc;font-size:18px;margin-bottom:24px;">House ${house.name} has fallen on Arrakis.</div>
+        `;
+        const menuBtn = document.createElement('button');
+        menuBtn.textContent = 'Return to Menu';
+        menuBtn.style.cssText = 'padding:12px 36px;font-size:16px;background:#cc444422;border:2px solid #cc4444;color:#fff;cursor:pointer;';
+        menuBtn.onclick = () => {
+          localStorage.removeItem('ebfd_campaign');
+          window.location.reload();
+        };
+        overlay.appendChild(menuBtn);
+        document.body.appendChild(overlay);
+        return;
+      }
+
       // Show campaign map for next territory selection
       const choice = await campaign.show();
       if (choice) {
-        // Save selected territory and reload to start new mission
         localStorage.setItem('ebfd_campaign_next', JSON.stringify({
           territoryId: choice.territory.id,
           difficulty: choice.difficulty,
@@ -374,7 +462,7 @@ async function main() {
         }));
         window.location.reload();
       } else {
-        window.location.reload(); // Back to main menu
+        window.location.reload();
       }
     });
   }

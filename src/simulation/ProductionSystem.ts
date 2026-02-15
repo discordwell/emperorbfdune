@@ -41,6 +41,8 @@ export class ProductionSystem {
   // Difficulty-based cost/time multipliers per player
   private costMultipliers = new Map<number, number>();   // playerId -> multiplier
   private timeMultipliers = new Map<number, number>();   // playerId -> multiplier
+  // Campaign tech level cap override per player (limits max tech level)
+  private techLevelOverrides = new Map<number, number>(); // playerId -> max tech level
 
   constructor(rules: GameRules, harvestSystem: HarvestSystem) {
     this.rules = rules;
@@ -224,7 +226,18 @@ export class ProductionSystem {
     // Owning any building gives at least tech 1
     if (owned && owned.size > 0 && maxTech < 1) maxTech = 1;
 
+    // Campaign tech level cap
+    const override = this.techLevelOverrides.get(playerId);
+    if (override !== undefined && maxTech > override) {
+      maxTech = override;
+    }
+
     return maxTech;
+  }
+
+  /** Set a campaign tech level cap for a player. Tech level from buildings will not exceed this value. */
+  setOverrideTechLevel(playerId: number, maxTechLevel: number): void {
+    this.techLevelOverrides.set(playerId, maxTechLevel);
   }
 
   canBuild(playerId: number, typeName: string, isBuilding: boolean): boolean {

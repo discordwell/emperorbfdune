@@ -50,6 +50,7 @@ export class VictorySystem {
   private stats: GameStats | null = null;
   private startTime = Date.now();
   private onVictoryCallback: (() => void) | null = null;
+  private onDefeatCallback: (() => void) | null = null;
   private onCampaignContinue: (() => void) | null = null;
   private victoryCondition: VictoryCondition = 'annihilate';
   // Building type names for ConYard check (set externally)
@@ -65,6 +66,7 @@ export class VictorySystem {
 
   setStats(stats: GameStats): void { this.stats = stats; }
   setVictoryCallback(cb: () => void): void { this.onVictoryCallback = cb; }
+  setDefeatCallback(cb: () => void): void { this.onDefeatCallback = cb; }
   setVictoryCondition(cond: VictoryCondition): void { this.victoryCondition = cond; }
   setCampaignContinue(cb: () => void): void { this.onCampaignContinue = cb; }
   setBuildingTypeNames(names: string[]): void { this.buildingTypeNames = names; }
@@ -143,6 +145,7 @@ export class VictorySystem {
     this.outcome = 'defeat';
     this.audioManager.playSfx('defeat');
     this.audioManager.getDialogManager()?.trigger('defeat');
+    if (this.onDefeatCallback) this.onDefeatCallback();
     this.showScreen('DEFEAT', 'Your base has been destroyed.', '#ff2222');
   }
 
@@ -204,8 +207,8 @@ export class VictorySystem {
     const btnRow = document.createElement('div');
     btnRow.style.cssText = 'display:flex;gap:16px;margin-top:24px;';
 
-    // Campaign continue button (only on victory in campaign mode)
-    if (this.onCampaignContinue && title === 'VICTORY') {
+    // Campaign continue button (on victory or defeat in campaign mode)
+    if (this.onCampaignContinue) {
       const campaignBtn = document.createElement('button');
       campaignBtn.style.cssText = `
         padding:14px 48px;font-size:18px;
