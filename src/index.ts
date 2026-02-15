@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Game } from './core/Game';
 import { SceneManager } from './rendering/SceneManager';
-import { TerrainRenderer, MAP_SIZE } from './rendering/TerrainRenderer';
+import { TerrainRenderer } from './rendering/TerrainRenderer';
 import { InputManager } from './input/InputManager';
 import { parseRules, type GameRules } from './config/RulesParser';
 import { parseArtIni, type ArtEntry } from './config/ArtIniParser';
@@ -24,6 +24,7 @@ import { FogOfWar } from './rendering/FogOfWar';
 import { BuildingPlacement } from './input/BuildingPlacement';
 import { VictorySystem, GameStats } from './ui/VictoryScreen';
 import { HouseSelect, type HouseChoice, type SubhouseChoice, type Difficulty, type MapChoice, type GameMode, type SkirmishOptions } from './ui/HouseSelect';
+import { loadMap, getCampaignMapId } from './config/MapLoader';
 import { CampaignMap } from './ui/CampaignMap';
 import { SelectionPanel } from './ui/SelectionPanel';
 import { EffectsManager } from './rendering/EffectsManager';
@@ -312,7 +313,7 @@ async function main() {
     audioManager.playSfx('move');
     EventBus.emit('unit:move', { entityIds: selected, x: worldX, z: worldZ });
   });
-  const fogOfWar = new FogOfWar(scene, 0);
+  const fogOfWar = new FogOfWar(scene, terrain, 0);
   minimapRenderer.setFogOfWar(fogOfWar);
   unitRenderer.setFogOfWar(fogOfWar, 0);
   unitRenderer.setUnitCategoryFn((eid: number): 'infantry' | 'vehicle' | 'aircraft' | 'building' => {
@@ -514,11 +515,38 @@ async function main() {
   // Initialize
   updateLoading(30, 'Initializing game systems...');
   game.init();
-  updateLoading(40, 'Generating terrain...');
-  if (house.mapChoice) {
-    terrain.setMapSeed(house.mapChoice.seed);
+  updateLoading(40, 'Loading terrain...');
+  // Determine which map to load
+  let realMapId: string | undefined;
+  if (house.mapChoice?.mapId) {
+    // Skirmish: real map selected from manifest
+    realMapId = house.mapChoice.mapId;
+  } else if (house.gameMode === 'campaign' && house.campaignTerritoryId) {
+    // Campaign: derive map ID from territory
+    realMapId = getCampaignMapId(house.campaignTerritoryId, house.prefix) ?? undefined;
   }
-  await terrain.generate();
+
+  let mapLoaded = false;
+  if (realMapId) {
+    const mapData = await loadMap(realMapId);
+    if (mapData) {
+      await terrain.loadFromMapData(mapData);
+      mapLoaded = true;
+      console.log(`Loaded real map: ${realMapId} (${mapData.width}×${mapData.height})`);
+    }
+  }
+  if (!mapLoaded) {
+    // Fallback to procedural generation
+    if (house.mapChoice) {
+      terrain.setMapSeed(house.mapChoice.seed);
+    }
+    await terrain.generate();
+  }
+
+  // Update systems with actual map dimensions after terrain is ready
+  aiPlayer.setMapDimensions(terrain.getMapWidth(), terrain.getMapHeight());
+  fogOfWar.reinitialize(); // Re-create fog buffers/mesh for actual map dimensions
+  minimapRenderer.renderTerrain(); // Re-render minimap with actual terrain data
 
   // Load model manifest for case-insensitive lookups
   updateLoading(45, 'Loading model manifest...');
@@ -1836,8 +1864,8 @@ async function main() {
     if (game.getTickCount() % 1000 === 500 && activeCrates.size < 3) {
       const crateTypes = ['credits', 'veterancy', 'heal'];
       const type = crateTypes[Math.floor(Math.random() * crateTypes.length)];
-      const cx = 20 + Math.random() * (MAP_SIZE * 2 - 40);
-      const cz = 20 + Math.random() * (MAP_SIZE * 2 - 40);
+      const cx = 20 + Math.random() * (terrain.getMapWidth() * 2 - 40);
+      const cz = 20 + Math.random() * (terrain.getMapHeight() * 2 - 40);
       const crateId = nextCrateId++;
       activeCrates.set(crateId, { x: cx, z: cz, type });
       effectsManager.spawnCrate(crateId, cx, cz, type);

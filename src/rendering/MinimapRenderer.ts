@@ -1,10 +1,10 @@
 import type { TerrainRenderer } from './TerrainRenderer';
-import { TerrainType, MAP_SIZE } from './TerrainRenderer';
+import { TerrainType } from './TerrainRenderer';
 import type { SceneManager } from './SceneManager';
 import type { FogOfWar } from './FogOfWar';
 import { FOG_VISIBLE, FOG_EXPLORED } from './FogOfWar';
 import { Position, Owner, Health, unitQuery, buildingQuery, type World } from '../core/ECS';
-import { worldToTile } from '../utils/MathUtils';
+import { worldToTile, TILE_SIZE } from '../utils/MathUtils';
 
 const MINIMAP_COLORS: Record<TerrainType, string> = {
   [TerrainType.Sand]: '#C2A54F',
@@ -67,19 +67,21 @@ export class MinimapRenderer {
 
   /** Flash a colored ping on the minimap at a world position */
   flashPing(worldX: number, worldZ: number, color: string): void {
-    const TILE_SIZE = 2;
     this.attackPings.push({ x: worldX / TILE_SIZE, z: worldZ / TILE_SIZE, color, age: 0 });
   }
 
-  private renderTerrain(): void {
-    const scale = 200 / MAP_SIZE;
+  renderTerrain(): void {
+    const mapW = this.terrain.getMapWidth();
+    const mapH = this.terrain.getMapHeight();
+    const scaleX = 200 / mapW;
+    const scaleZ = 200 / mapH;
     this.ctx.clearRect(0, 0, 200, 200);
 
-    for (let tz = 0; tz < MAP_SIZE; tz++) {
-      for (let tx = 0; tx < MAP_SIZE; tx++) {
+    for (let tz = 0; tz < mapH; tz++) {
+      for (let tx = 0; tx < mapW; tx++) {
         const type = this.terrain.getTerrainType(tx, tz);
         this.ctx.fillStyle = MINIMAP_COLORS[type] ?? '#000';
-        this.ctx.fillRect(tx * scale, tz * scale, Math.ceil(scale), Math.ceil(scale));
+        this.ctx.fillRect(tx * scaleX, tz * scaleZ, Math.ceil(scaleX), Math.ceil(scaleZ));
       }
     }
 
@@ -92,27 +94,36 @@ export class MinimapRenderer {
       this.ctx.putImageData(this.terrainImageData, 0, 0);
     }
 
+    const mapW = this.terrain.getMapWidth();
+    const mapH = this.terrain.getMapHeight();
+
     // Apply fog of war overlay
     if (this.fogOfWar && this.fogOfWar.isEnabled()) {
       const vis = this.fogOfWar.getVisibility();
-      const tileScale = 200 / MAP_SIZE;
+      const fogW = this.fogOfWar.getMapWidth();
+      const tileScaleX = 200 / mapW;
+      const tileScaleZ = 200 / mapH;
       this.ctx.fillStyle = 'rgba(0,0,0,0.7)';
-      for (let tz = 0; tz < MAP_SIZE; tz++) {
-        for (let tx = 0; tx < MAP_SIZE; tx++) {
-          const v = vis[tz * MAP_SIZE + tx];
+      for (let tz = 0; tz < mapH; tz++) {
+        for (let tx = 0; tx < mapW; tx++) {
+          const v = vis[tz * fogW + tx];
           if (v === FOG_VISIBLE) continue; // Fully visible
           if (v === FOG_EXPLORED) {
             this.ctx.globalAlpha = 0.4;
           } else {
             this.ctx.globalAlpha = 0.85;
           }
-          this.ctx.fillRect(tx * tileScale, tz * tileScale, Math.ceil(tileScale), Math.ceil(tileScale));
+          this.ctx.fillRect(tx * tileScaleX, tz * tileScaleZ, Math.ceil(tileScaleX), Math.ceil(tileScaleZ));
         }
       }
       this.ctx.globalAlpha = 1.0;
     }
 
-    const scale = 200 / (MAP_SIZE * 2); // World units to minimap pixels
+    // World units to minimap pixels
+    const worldW = mapW * TILE_SIZE;
+    const worldH = mapH * TILE_SIZE;
+    const scaleWx = 200 / worldW;
+    const scaleWz = 200 / worldH;
 
     // Draw units
     const units = unitQuery(world);
@@ -124,8 +135,8 @@ export class MinimapRenderer {
         const tile = worldToTile(Position.x[eid], Position.z[eid]);
         if (!this.fogOfWar.isTileVisible(tile.tx, tile.tz)) continue;
       }
-      const px = Position.x[eid] * scale;
-      const pz = Position.z[eid] * scale;
+      const px = Position.x[eid] * scaleWx;
+      const pz = Position.z[eid] * scaleWz;
       this.ctx.fillStyle = PLAYER_COLORS[owner] ?? '#fff';
       this.ctx.fillRect(px - 1, pz - 1, 3, 3);
     }
@@ -139,8 +150,8 @@ export class MinimapRenderer {
         const tile = worldToTile(Position.x[eid], Position.z[eid]);
         if (!this.fogOfWar.isTileVisible(tile.tx, tile.tz)) continue;
       }
-      const px = Position.x[eid] * scale;
-      const pz = Position.z[eid] * scale;
+      const px = Position.x[eid] * scaleWx;
+      const pz = Position.z[eid] * scaleWz;
       this.ctx.fillStyle = PLAYER_COLORS[owner] ?? '#fff';
       this.ctx.fillRect(px - 2, pz - 2, 5, 5);
     }
@@ -148,10 +159,10 @@ export class MinimapRenderer {
     // Draw camera viewport
     const target = this.sceneManager.cameraTarget;
     const zoom = this.sceneManager.getZoom();
-    const viewW = zoom * 1.5 * scale;
-    const viewH = zoom * scale;
-    const cx = target.x * scale;
-    const cz = target.z * scale;
+    const viewW = zoom * 1.5 * scaleWx;
+    const viewH = zoom * scaleWz;
+    const cx = target.x * scaleWx;
+    const cz = target.z * scaleWz;
 
     this.ctx.strokeStyle = '#fff';
     this.ctx.lineWidth = 1;
@@ -159,8 +170,8 @@ export class MinimapRenderer {
 
     // Draw rally point flag
     if (this.rallyPoint) {
-      const rx = this.rallyPoint.x * scale;
-      const rz = this.rallyPoint.z * scale;
+      const rx = this.rallyPoint.x * scaleWx;
+      const rz = this.rallyPoint.z * scaleWz;
       // Pulsing yellow circle
       const pulse = 0.5 + Math.sin(Date.now() * 0.005) * 0.3;
       this.ctx.fillStyle = `rgba(255, 200, 0, ${pulse})`;
@@ -189,7 +200,9 @@ export class MinimapRenderer {
       }
     }
 
-    // Draw attack pings (expanding red rings)
+    // Draw attack pings (expanding colored rings)
+    const tileScaleXPings = 200 / mapW;
+    const tileScaleZPings = 200 / mapH;
     for (let i = this.attackPings.length - 1; i >= 0; i--) {
       const ping = this.attackPings[i];
       ping.age++;
@@ -197,11 +210,10 @@ export class MinimapRenderer {
       if (t >= 1) {
         this.attackPings.splice(i, 1);
       } else {
-        const px = ping.x * scale;
-        const pz = ping.z * scale;
+        const px = ping.x * tileScaleXPings;
+        const pz = ping.z * tileScaleZPings;
         const radius = 2 + t * 12;
         const alpha = (1 - t) * 0.8;
-        // Convert hex color to rgba
         const hex = ping.color;
         const r = parseInt(hex.slice(1, 3), 16);
         const g = parseInt(hex.slice(3, 5), 16);
@@ -234,9 +246,12 @@ export class MinimapRenderer {
     const rect = this.canvas.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
-    const scale = (MAP_SIZE * 2) / 200;
-    const worldX = mx * scale;
-    const worldZ = my * scale;
+    const mapW = this.terrain.getMapWidth();
+    const mapH = this.terrain.getMapHeight();
+    const worldW = mapW * TILE_SIZE;
+    const worldH = mapH * TILE_SIZE;
+    const worldX = (mx / 200) * worldW;
+    const worldZ = (my / 200) * worldH;
 
     // Use smooth pan for single clicks, instant for drag
     if (this.isDragging && e.type === 'mousemove') {
@@ -257,7 +272,10 @@ export class MinimapRenderer {
     const rect = this.canvas.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
-    const scale = (MAP_SIZE * 2) / 200;
-    this.onRightClick(mx * scale, my * scale);
+    const mapW = this.terrain.getMapWidth();
+    const mapH = this.terrain.getMapHeight();
+    const worldW = mapW * TILE_SIZE;
+    const worldH = mapH * TILE_SIZE;
+    this.onRightClick((mx / 200) * worldW, (my / 200) * worldH);
   };
 }

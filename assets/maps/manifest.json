@@ -1,0 +1,740 @@
+{
+  "A1": {
+    "binSize": 147468,
+    "h": 192,
+    "hasThumb": false,
+    "name": "Caladan Capital",
+    "players": 2,
+    "type": "attack",
+    "w": 256
+  },
+  "A2": {
+    "binSize": 159756,
+    "h": 208,
+    "hasThumb": false,
+    "name": "Draconis IV HW",
+    "players": 2,
+    "type": "attack",
+    "w": 256
+  },
+  "A3": {
+    "binSize": 161484,
+    "h": 232,
+    "hasThumb": false,
+    "name": "Harkonnen Capital M",
+    "players": 2,
+    "type": "attack",
+    "w": 232
+  },
+  "C1": {
+    "binSize": 196620,
+    "h": 256,
+    "hasThumb": false,
+    "name": "Harkonnen Civil War Attack",
+    "players": 2,
+    "type": "civilwar",
+    "w": 256
+  },
+  "D1": {
+    "binSize": 87564,
+    "h": 192,
+    "hasThumb": false,
+    "name": "Atreides Homeworld Defence",
+    "players": 2,
+    "type": "defense",
+    "w": 152
+  },
+  "D2": {
+    "binSize": 64524,
+    "h": 96,
+    "hasThumb": false,
+    "name": "Ordos Homeworld Defense",
+    "players": 2,
+    "type": "defense",
+    "w": 224
+  },
+  "E1": {
+    "binSize": 122892,
+    "h": 160,
+    "hasThumb": false,
+    "name": "End Mission Emperor Worm",
+    "players": 2,
+    "type": "final",
+    "w": 256
+  },
+  "H1": {
+    "binSize": 82956,
+    "h": 144,
+    "hasThumb": false,
+    "name": "Atreides Heighliner",
+    "players": 2,
+    "type": "heighliner",
+    "w": 192
+  },
+  "H2": {
+    "binSize": 67596,
+    "h": 176,
+    "hasThumb": false,
+    "name": "Ordos Heighliner",
+    "players": 2,
+    "type": "heighliner",
+    "w": 128
+  },
+  "H3": {
+    "binSize": 101580,
+    "h": 184,
+    "hasThumb": false,
+    "name": "Heighliner Mission JF",
+    "players": 2,
+    "type": "heighliner",
+    "w": 184
+  },
+  "M1": {
+    "binSize": 62220,
+    "h": 144,
+    "hasThumb": true,
+    "name": "KOTH1",
+    "players": 2,
+    "type": "skirmish",
+    "w": 144
+  },
+  "M11": {
+    "binSize": 61452,
+    "h": 128,
+    "hasThumb": true,
+    "name": "Ruins of Calea Berm",
+    "players": 2,
+    "type": "skirmish",
+    "w": 160
+  },
+  "M12": {
+    "binSize": 49164,
+    "h": 128,
+    "hasThumb": true,
+    "name": "_JF_S_2-4p",
+    "players": 2,
+    "type": "skirmish",
+    "w": 128
+  },
+  "M13": {
+    "binSize": 101580,
+    "h": 184,
+    "hasThumb": true,
+    "name": "Worm Garden",
+    "players": 2,
+    "type": "skirmish",
+    "w": 184
+  },
+  "M14": {
+    "binSize": 79500,
+    "h": 144,
+    "hasThumb": true,
+    "name": "Spice Bowl2",
+    "players": 2,
+    "type": "skirmish",
+    "w": 184
+  },
+  "M15": {
+    "binSize": 101580,
+    "h": 184,
+    "hasThumb": true,
+    "name": "Crunch",
+    "players": 2,
+    "type": "skirmish",
+    "w": 184
+  },
+  "M16": {
+    "binSize": 120012,
+    "h": 200,
+    "hasThumb": true,
+    "name": "Divided Country",
+    "players": 2,
+    "type": "skirmish",
+    "w": 200
+  },
+  "M17": {
+    "binSize": 101580,
+    "h": 184,
+    "hasThumb": true,
+    "name": "Sihaya 2000",
+    "players": 2,
+    "type": "skirmish",
+    "w": 184
+  },
+  "M18": {
+    "binSize": 49164,
+    "h": 128,
+    "hasThumb": true,
+    "name": "S",
+    "players": 2,
+    "type": "skirmish",
+    "w": 128
+  },
+  "M19": {
+    "binSize": 79500,
+    "h": 184,
+    "hasThumb": true,
+    "name": "Toe 2 Toe",
+    "players": 2,
+    "type": "skirmish",
+    "w": 144
+  },
+  "M2": {
+    "binSize": 79500,
+    "h": 184,
+    "hasThumb": true,
+    "name": "CTF1",
+    "players": 2,
+    "type": "skirmish",
+    "w": 144
+  },
+  "M21": {
+    "binSize": 70668,
+    "h": 128,
+    "hasThumb": true,
+    "name": "Patchwork Mesa",
+    "players": 6,
+    "type": "skirmish",
+    "w": 184
+  },
+  "M22": {
+    "binSize": 79500,
+    "h": 144,
+    "hasThumb": true,
+    "name": "Canyon Channel",
+    "players": 4,
+    "type": "skirmish",
+    "w": 184
+  },
+  "M24": {
+    "binSize": 79500,
+    "h": 184,
+    "hasThumb": true,
+    "name": "Arged Desert",
+    "players": 4,
+    "type": "skirmish",
+    "w": 144
+  },
+  "M25": {
+    "binSize": 62220,
+    "h": 144,
+    "hasThumb": true,
+    "name": "Aprit Chard",
+    "players": 2,
+    "type": "skirmish",
+    "w": 144
+  },
+  "M26": {
+    "binSize": 76812,
+    "h": 160,
+    "hasThumb": true,
+    "name": "New S'Tan Cliffs",
+    "players": 2,
+    "type": "skirmish",
+    "w": 160
+  },
+  "M28": {
+    "binSize": 76044,
+    "h": 176,
+    "hasThumb": true,
+    "name": "To Nimila",
+    "players": 4,
+    "type": "skirmish",
+    "w": 144
+  },
+  "M29": {
+    "binSize": 172812,
+    "h": 240,
+    "hasThumb": true,
+    "name": "Fishes Plain",
+    "players": 8,
+    "type": "skirmish",
+    "w": 240
+  },
+  "M3": {
+    "binSize": 49164,
+    "h": 128,
+    "hasThumb": true,
+    "name": "Knifefight1",
+    "players": 2,
+    "type": "skirmish",
+    "w": 128
+  },
+  "M30": {
+    "binSize": 49164,
+    "h": 128,
+    "hasThumb": true,
+    "name": "Da'Ja Sada",
+    "players": 2,
+    "type": "skirmish",
+    "w": 128
+  },
+  "M31": {
+    "binSize": 196620,
+    "h": 256,
+    "hasThumb": true,
+    "name": "_JF_S_8P",
+    "players": 8,
+    "type": "skirmish",
+    "w": 256
+  },
+  "M41": {
+    "binSize": 69324,
+    "h": 152,
+    "hasThumb": true,
+    "name": "Triskele",
+    "players": 3,
+    "type": "skirmish",
+    "w": 152
+  },
+  "M42": {
+    "binSize": 59916,
+    "h": 96,
+    "hasThumb": true,
+    "name": "twin capitals",
+    "players": 2,
+    "type": "skirmish",
+    "w": 208
+  },
+  "M43": {
+    "binSize": 62220,
+    "h": 144,
+    "hasThumb": true,
+    "name": "besieged",
+    "players": 2,
+    "type": "skirmish",
+    "w": 144
+  },
+  "M44": {
+    "binSize": 55308,
+    "h": 96,
+    "hasThumb": true,
+    "name": "streetfight",
+    "players": 2,
+    "type": "skirmish",
+    "w": 192
+  },
+  "M45": {
+    "binSize": 82956,
+    "h": 144,
+    "hasThumb": true,
+    "name": "Geidi",
+    "players": 2,
+    "type": "skirmish",
+    "w": 192
+  },
+  "M46": {
+    "binSize": 82956,
+    "h": 144,
+    "hasThumb": true,
+    "name": "Geidi2",
+    "players": 2,
+    "type": "skirmish",
+    "w": 192
+  },
+  "M47": {
+    "binSize": 82956,
+    "h": 144,
+    "hasThumb": true,
+    "name": "Caladan",
+    "players": 2,
+    "type": "skirmish",
+    "w": 192
+  },
+  "M48": {
+    "binSize": 82956,
+    "h": 144,
+    "hasThumb": true,
+    "name": "Caladan2",
+    "players": 2,
+    "type": "skirmish",
+    "w": 192
+  },
+  "M50": {
+    "binSize": 99852,
+    "h": 208,
+    "hasThumb": true,
+    "name": "Draconis plains",
+    "players": 2,
+    "type": "skirmish",
+    "w": 160
+  },
+  "M51": {
+    "binSize": 86028,
+    "h": 128,
+    "hasThumb": true,
+    "name": "draconis coastline",
+    "players": 2,
+    "type": "skirmish",
+    "w": 224
+  },
+  "M56": {
+    "binSize": 110604,
+    "h": 192,
+    "hasThumb": true,
+    "name": "Temple Valley",
+    "players": 2,
+    "type": "skirmish",
+    "w": 192
+  },
+  "M6": {
+    "binSize": 55308,
+    "h": 192,
+    "hasThumb": true,
+    "name": "Sandy Pass",
+    "players": 2,
+    "type": "skirmish",
+    "w": 96
+  },
+  "M8": {
+    "binSize": 82956,
+    "h": 144,
+    "hasThumb": true,
+    "name": "Three-way",
+    "players": 3,
+    "type": "skirmish",
+    "w": 192
+  },
+  "T1": {
+    "binSize": 120012,
+    "h": 200,
+    "hasThumb": false,
+    "name": "Harkonnen Jump Point",
+    "players": 2,
+    "type": "territory",
+    "w": 200
+  },
+  "T10": {
+    "binSize": 105612,
+    "h": 176,
+    "hasThumb": false,
+    "name": "Tsimpo Rise",
+    "players": 2,
+    "type": "territory",
+    "w": 200
+  },
+  "T11": {
+    "binSize": 96012,
+    "h": 160,
+    "hasThumb": false,
+    "name": "Qanat Pass",
+    "players": 2,
+    "type": "territory",
+    "w": 200
+  },
+  "T12": {
+    "binSize": 92940,
+    "h": 176,
+    "hasThumb": false,
+    "name": "Harg Plateau",
+    "players": 2,
+    "type": "territory",
+    "w": 176
+  },
+  "T13": {
+    "binSize": 76812,
+    "h": 160,
+    "hasThumb": false,
+    "name": "Horseshoe Temple",
+    "players": 2,
+    "type": "territory",
+    "w": 160
+  },
+  "T14": {
+    "binSize": 150540,
+    "h": 224,
+    "hasThumb": false,
+    "name": "Huanui Basin",
+    "players": 2,
+    "type": "territory",
+    "w": 224
+  },
+  "T15": {
+    "binSize": 91212,
+    "h": 200,
+    "hasThumb": false,
+    "name": "Fred's House",
+    "players": 2,
+    "type": "territory",
+    "w": 152
+  },
+  "T16": {
+    "binSize": 93324,
+    "h": 144,
+    "hasThumb": false,
+    "name": "Canyonlands",
+    "players": 2,
+    "type": "territory",
+    "w": 216
+  },
+  "T17": {
+    "binSize": 64524,
+    "h": 128,
+    "hasThumb": false,
+    "name": "Chin Rock",
+    "players": 2,
+    "type": "territory",
+    "w": 168
+  },
+  "T18": {
+    "binSize": 132492,
+    "h": 184,
+    "hasThumb": false,
+    "name": "Hajra Plains",
+    "players": 2,
+    "type": "territory",
+    "w": 240
+  },
+  "T19": {
+    "binSize": 91212,
+    "h": 200,
+    "hasThumb": false,
+    "name": "The Green Place",
+    "players": 2,
+    "type": "territory",
+    "w": 152
+  },
+  "T2": {
+    "binSize": 129804,
+    "h": 208,
+    "hasThumb": false,
+    "name": "Shield Wall",
+    "players": 2,
+    "type": "territory",
+    "w": 208
+  },
+  "T20": {
+    "binSize": 105612,
+    "h": 200,
+    "hasThumb": false,
+    "name": "Plaster Basin",
+    "players": 2,
+    "type": "territory",
+    "w": 176
+  },
+  "T21": {
+    "binSize": 76812,
+    "h": 160,
+    "hasThumb": false,
+    "name": "Hole-in-the-Rock",
+    "players": 2,
+    "type": "territory",
+    "w": 160
+  },
+  "T22": {
+    "binSize": 98508,
+    "h": 152,
+    "hasThumb": false,
+    "name": "Habbanya Erg",
+    "players": 2,
+    "type": "territory",
+    "w": 216
+  },
+  "T23": {
+    "binSize": 75084,
+    "h": 136,
+    "hasThumb": false,
+    "name": "3 Sisters Pass s",
+    "players": 2,
+    "type": "territory",
+    "w": 184
+  },
+  "T24": {
+    "binSize": 104844,
+    "h": 208,
+    "hasThumb": false,
+    "name": "Sihaya Ridge",
+    "players": 2,
+    "type": "territory",
+    "w": 168
+  },
+  "T25": {
+    "binSize": 114060,
+    "h": 216,
+    "hasThumb": false,
+    "name": "Tsimpo Heights",
+    "players": 2,
+    "type": "territory",
+    "w": 176
+  },
+  "T26": {
+    "binSize": 110604,
+    "h": 192,
+    "hasThumb": false,
+    "name": "Bidriyah Sink",
+    "players": 2,
+    "type": "territory",
+    "w": 192
+  },
+  "T27": {
+    "binSize": 72972,
+    "h": 160,
+    "hasThumb": false,
+    "name": "G'albana Valley",
+    "players": 2,
+    "type": "territory",
+    "w": 152
+  },
+  "T28": {
+    "binSize": 100812,
+    "h": 200,
+    "hasThumb": false,
+    "name": "Galbana Depression",
+    "players": 2,
+    "type": "territory",
+    "w": 168
+  },
+  "T29": {
+    "binSize": 92940,
+    "h": 176,
+    "hasThumb": false,
+    "name": "Hajj Plateau",
+    "players": 2,
+    "type": "territory",
+    "w": 176
+  },
+  "T3": {
+    "binSize": 86412,
+    "h": 144,
+    "hasThumb": false,
+    "name": "Dragons Nest",
+    "players": 2,
+    "type": "territory",
+    "w": 200
+  },
+  "T30": {
+    "binSize": 116748,
+    "h": 152,
+    "hasThumb": false,
+    "name": "Rock Valley",
+    "players": 2,
+    "type": "territory",
+    "w": 256
+  },
+  "T31": {
+    "binSize": 141324,
+    "h": 184,
+    "hasThumb": false,
+    "name": "Ordos Jump Point",
+    "players": 2,
+    "type": "territory",
+    "w": 256
+  },
+  "T32": {
+    "binSize": 87564,
+    "h": 192,
+    "hasThumb": false,
+    "name": "Bled El-Hajra",
+    "players": 2,
+    "type": "territory",
+    "w": 152
+  },
+  "T33": {
+    "binSize": 120012,
+    "h": 200,
+    "hasThumb": false,
+    "name": "Atreides Jump Point",
+    "players": 2,
+    "type": "territory",
+    "w": 200
+  },
+  "T4": {
+    "binSize": 69132,
+    "h": 144,
+    "hasThumb": false,
+    "name": "Bled Al-Hazrad",
+    "players": 2,
+    "type": "territory",
+    "w": 160
+  },
+  "T5": {
+    "binSize": 120012,
+    "h": 200,
+    "hasThumb": false,
+    "name": "The Cauldron",
+    "players": 2,
+    "type": "territory",
+    "w": 200
+  },
+  "T6": {
+    "binSize": 123660,
+    "h": 184,
+    "hasThumb": false,
+    "name": "Alazor Steppe",
+    "players": 2,
+    "type": "territory",
+    "w": 224
+  },
+  "T7": {
+    "binSize": 76812,
+    "h": 160,
+    "hasThumb": false,
+    "name": "Bilar Slopes",
+    "players": 2,
+    "type": "territory",
+    "w": 160
+  },
+  "T8": {
+    "binSize": 86412,
+    "h": 144,
+    "hasThumb": true,
+    "name": "Baklawa Flats",
+    "players": 2,
+    "type": "territory",
+    "w": 200
+  },
+  "T9": {
+    "binSize": 92172,
+    "h": 192,
+    "hasThumb": false,
+    "name": "Arrakeen Spice Field",
+    "players": 2,
+    "type": "territory",
+    "w": 160
+  },
+  "U1": {
+    "binSize": 55308,
+    "h": 96,
+    "hasThumb": false,
+    "name": "Start",
+    "players": 2,
+    "type": "tutorial",
+    "w": 192
+  },
+  "U2": {
+    "binSize": 55308,
+    "h": 96,
+    "hasThumb": false,
+    "name": "Start",
+    "players": 2,
+    "type": "tutorial",
+    "w": 192
+  },
+  "U3": {
+    "binSize": 55308,
+    "h": 96,
+    "hasThumb": false,
+    "name": "Start",
+    "players": 2,
+    "type": "tutorial",
+    "w": 192
+  },
+  "V1": {
+    "binSize": 196620,
+    "h": 256,
+    "hasThumb": false,
+    "name": "Harkonnen Homeworld Defence",
+    "players": 2,
+    "type": "defense",
+    "w": 256
+  },
+  "X1": {
+    "binSize": 21516,
+    "h": 112,
+    "hasThumb": false,
+    "name": "Player Tutorial",
+    "players": 1,
+    "type": "tutorial",
+    "w": 64
+  }
+}

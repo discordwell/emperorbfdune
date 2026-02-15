@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { AudioManager } from '../audio/AudioManager';
 import { CampaignMap } from './CampaignMap';
 import { HouseSelect3D } from './HouseSelect3D';
+import { loadMapManifest, getSkirmishMaps } from '../config/MapLoader';
 
 export interface SubhouseChoice {
   id: string;
@@ -18,6 +19,10 @@ export interface MapChoice {
   name: string;
   seed: number;
   description: string;
+  /** Real map ID from manifest (e.g. 'M29', 'T5') — if set, loads .bin map data */
+  mapId?: string;
+  /** Player count (for display) */
+  players?: number;
 }
 
 export type GameMode = 'skirmish' | 'campaign';
@@ -524,7 +529,7 @@ export class HouseSelect {
     document.body.appendChild(this.overlay);
   }
 
-  private showMapSelect(house: HouseChoice, resolve: (house: HouseChoice) => void): void {
+  private async showMapSelect(house: HouseChoice, resolve: (house: HouseChoice) => void): Promise<void> {
     this.overlay = document.createElement('div');
     this.overlay.style.cssText = `
       position: fixed; top: 0; left: 0; right: 0; bottom: 0;
@@ -545,32 +550,73 @@ export class HouseSelect {
     chooseText.textContent = 'Select Battlefield';
     this.overlay.appendChild(chooseText);
 
-    const maps: MapChoice[] = [
-      { id: 'desert', name: 'Open Desert', seed: 1000, description: 'Wide open terrain with scattered rock outcrops. Classic Arrakis warfare.' },
-      { id: 'canyon', name: 'Canyon Pass', seed: 1001, description: 'Narrow canyon passages between towering cliffs. Ideal for ambushes.' },
-      { id: 'plateau', name: 'Rocky Plateau', seed: 1002, description: 'Elevated rocky terrain with limited sand. Defensible positions.' },
-      { id: 'ridge', name: 'Spice Ridge', seed: 1003, description: 'A central rock ridge divides the map. Control the high ground.' },
-      { id: 'random', name: 'Random', seed: Math.floor(Math.random() * 10000), description: 'A randomly generated battlefield. Every battle is unique.' },
-    ];
+    // Load real maps from manifest, fall back to proc-gen presets
+    const maps: MapChoice[] = [];
+    try {
+      const manifest = await loadMapManifest();
+      const skirmishMaps = getSkirmishMaps(manifest);
+      for (const [mapId, entry] of skirmishMaps) {
+        maps.push({
+          id: mapId,
+          name: entry.name,
+          seed: 0,
+          description: `${entry.w}×${entry.h} — ${entry.players} players`,
+          mapId: mapId,
+          players: entry.players,
+        });
+      }
+    } catch (e) {
+      console.warn('Failed to load map manifest, using proc-gen fallback:', e);
+    }
+
+    // Always add a random proc-gen option at the end
+    maps.push({
+      id: 'random',
+      name: 'Random (Procedural)',
+      seed: Math.floor(Math.random() * 10000),
+      description: 'A randomly generated battlefield. Every battle is unique.',
+    });
 
     const grid = document.createElement('div');
-    grid.style.cssText = 'display:flex; gap:16px; flex-wrap:wrap; justify-content:center; max-width:900px;';
+    grid.style.cssText = 'display:flex; gap:12px; flex-wrap:wrap; justify-content:center; max-width:1000px; max-height:60vh; overflow-y:auto; padding:8px;';
 
-    const mapColors: Record<string, string> = {
-      desert: '#D4A840', canyon: '#8B6B3E', plateau: '#6B7B5B', ridge: '#A08050', random: '#888888',
-    };
+    // Group maps by player count
+    const playerCounts = [...new Set(maps.filter(m => m.players).map(m => m.players!))].sort();
 
-    for (const map of maps) {
-      const color = mapColors[map.id] ?? '#888';
-      const card = this.createCard(map.name, '', map.description, color, 160);
-      card.onclick = () => {
-        this.audioManager.playSfx('select');
-        house.mapChoice = map;
-        this.overlay.remove();
-        resolve(house);
-      };
-      grid.appendChild(card);
+    for (const count of playerCounts) {
+      const groupLabel = document.createElement('div');
+      groupLabel.style.cssText = 'width:100%; color:#C4A44A; font-size:14px; font-weight:bold; margin-top:8px; border-bottom:1px solid #333; padding-bottom:4px;';
+      groupLabel.textContent = `${count}-Player Maps`;
+      grid.appendChild(groupLabel);
+
+      const groupMaps = maps.filter(m => m.players === count);
+      for (const map of groupMaps) {
+        const card = this.createCard(map.name, '', map.description, '#A08050', 150);
+        card.onclick = () => {
+          this.audioManager.playSfx('select');
+          house.mapChoice = map;
+          this.overlay.remove();
+          resolve(house);
+        };
+        grid.appendChild(card);
+      }
     }
+
+    // Add random/proc-gen option
+    const randomMap = maps.find(m => m.id === 'random')!;
+    const randomLabel = document.createElement('div');
+    randomLabel.style.cssText = 'width:100%; color:#888; font-size:14px; font-weight:bold; margin-top:8px; border-bottom:1px solid #333; padding-bottom:4px;';
+    randomLabel.textContent = 'Procedural Generation';
+    grid.appendChild(randomLabel);
+
+    const randomCard = this.createCard(randomMap.name, '', randomMap.description, '#888888', 150);
+    randomCard.onclick = () => {
+      this.audioManager.playSfx('select');
+      house.mapChoice = randomMap;
+      this.overlay.remove();
+      resolve(house);
+    };
+    grid.appendChild(randomCard);
 
     this.overlay.appendChild(grid);
     document.body.appendChild(this.overlay);

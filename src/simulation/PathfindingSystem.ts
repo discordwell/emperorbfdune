@@ -1,5 +1,4 @@
 import type { TerrainRenderer } from '../rendering/TerrainRenderer';
-import { MAP_SIZE } from '../rendering/TerrainRenderer';
 
 interface PathNode {
   tx: number;
@@ -12,7 +11,7 @@ interface PathNode {
 
 export class PathfindingSystem {
   private terrain: TerrainRenderer;
-  private blockedTiles = new Set<number>(); // key = tz * MAP_SIZE + tx
+  private blockedTiles = new Set<number>(); // key = tz * mapW + tx
 
   constructor(terrain: TerrainRenderer) {
     this.terrain = terrain;
@@ -20,9 +19,10 @@ export class PathfindingSystem {
 
   updateBlockedTiles(occupied: Set<string>): void {
     this.blockedTiles.clear();
+    const mapW = this.terrain.getMapWidth();
     for (const key of occupied) {
       const [tx, tz] = key.split(',').map(Number);
-      this.blockedTiles.add(tz * MAP_SIZE + tx);
+      this.blockedTiles.add(tz * mapW + tx);
     }
   }
 
@@ -33,9 +33,11 @@ export class PathfindingSystem {
     maxNodes: number = 1000
   ): { x: number; z: number }[] | null {
     // A* pathfinding on terrain grid
+    const mapW = this.terrain.getMapWidth();
+    const mapH = this.terrain.getMapHeight();
     const passable = isVehicle
-      ? (tx: number, tz: number) => this.terrain.isPassableVehicle(tx, tz) && !this.blockedTiles.has(tz * MAP_SIZE + tx)
-      : (tx: number, tz: number) => this.terrain.isPassable(tx, tz) && !this.blockedTiles.has(tz * MAP_SIZE + tx);
+      ? (tx: number, tz: number) => this.terrain.isPassableVehicle(tx, tz) && !this.blockedTiles.has(tz * mapW + tx)
+      : (tx: number, tz: number) => this.terrain.isPassable(tx, tz) && !this.blockedTiles.has(tz * mapW + tx);
 
     if (!passable(endTx, endTz)) {
       // Find nearest passable tile to target
@@ -75,7 +77,7 @@ export class PathfindingSystem {
         return this.reconstructPath(current);
       }
 
-      const key = current.tz * MAP_SIZE + current.tx;
+      const key = current.tz * mapW + current.tx;
       if (closedSet.has(key)) continue;
       closedSet.add(key);
 
@@ -86,8 +88,8 @@ export class PathfindingSystem {
           const ntx = current.tx + dx;
           const ntz = current.tz + dz;
 
-          if (ntx < 0 || ntx >= MAP_SIZE || ntz < 0 || ntz >= MAP_SIZE) continue;
-          const nkey = ntz * MAP_SIZE + ntx;
+          if (ntx < 0 || ntx >= mapW || ntz < 0 || ntz >= mapH) continue;
+          const nkey = ntz * mapW + ntx;
           if (closedSet.has(nkey)) continue;
           if (!passable(ntx, ntz)) continue;
 
@@ -154,13 +156,15 @@ export class PathfindingSystem {
   }
 
   private findNearestPassable(tx: number, tz: number, passable: (tx: number, tz: number) => boolean): { tx: number; tz: number } | null {
+    const mapW = this.terrain.getMapWidth();
+    const mapH = this.terrain.getMapHeight();
     for (let r = 1; r < 10; r++) {
       for (let dz = -r; dz <= r; dz++) {
         for (let dx = -r; dx <= r; dx++) {
           if (Math.abs(dx) !== r && Math.abs(dz) !== r) continue;
           const ntx = tx + dx;
           const ntz = tz + dz;
-          if (ntx >= 0 && ntx < MAP_SIZE && ntz >= 0 && ntz < MAP_SIZE && passable(ntx, ntz)) {
+          if (ntx >= 0 && ntx < mapW && ntz >= 0 && ntz < mapH && passable(ntx, ntz)) {
             return { tx: ntx, tz: ntz };
           }
         }

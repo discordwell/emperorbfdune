@@ -13,8 +13,6 @@ import type { HarvestSystem } from '../simulation/HarvestSystem';
 import { randomFloat, distance2D, worldToTile, TILE_SIZE } from '../utils/MathUtils';
 import { EventBus } from '../core/EventBus';
 
-const MAP_SIZE = 128;
-
 // Unit combat role classification
 type UnitRole = 'antiInf' | 'antiVeh' | 'antiBldg' | 'scout';
 
@@ -66,8 +64,12 @@ export class AIPlayer implements GameSystem {
   private difficultyLevel: 'easy' | 'normal' | 'hard' = 'normal';
   private maxAttackFronts = 2; // Multi-front: easy=1, normal=2, hard=3
 
+  // Map dimensions (configurable for variable-size maps)
+  private mapWidth = 128;
+  private mapHeight = 128;
+
   // --- Scouting System ---
-  private scoutMap: Uint8Array = new Uint8Array(MAP_SIZE * MAP_SIZE);
+  private scoutMap: Uint8Array = new Uint8Array(128 * 128);
   private scoutQueue: { x: number; z: number }[] = [];
   private scoutEntities = new Set<number>();
   private knownEnemyPositions = new Map<number, { x: number; z: number; typeName: string; tick: number }>();
@@ -138,6 +140,14 @@ export class AIPlayer implements GameSystem {
 
   setSpawnCallback(cb: (eid: number, typeName: string, owner: number, x: number, z: number) => void): void {
     this.spawnCallback = cb;
+  }
+
+  setMapDimensions(w: number, h: number): void {
+    this.mapWidth = w;
+    this.mapHeight = h;
+    this.scoutMap = new Uint8Array(w * h);
+    this.scoutInitialized = false;
+    this.scoutQueue = [];
   }
 
   setBasePosition(x: number, z: number): void {
@@ -305,7 +315,8 @@ export class AIPlayer implements GameSystem {
     if (this.scoutInitialized) return;
     this.scoutInitialized = true;
 
-    const worldMax = MAP_SIZE * TILE_SIZE; // 256 world units
+    const worldMaxX = this.mapWidth * TILE_SIZE;
+    const worldMaxZ = this.mapHeight * TILE_SIZE;
     const margin = 10;
 
     // On hard difficulty, bias toward the player's side of map first
@@ -314,22 +325,22 @@ export class AIPlayer implements GameSystem {
     // Strategic exploration points: center, edge midpoints, corners
     const points: { x: number; z: number; priority: number }[] = [
       // Map center
-      { x: worldMax / 2, z: worldMax / 2, priority: 1 },
+      { x: worldMaxX / 2, z: worldMaxZ / 2, priority: 1 },
       // Edge midpoints
-      { x: worldMax / 2, z: margin, priority: 2 },
-      { x: worldMax / 2, z: worldMax - margin, priority: 2 },
-      { x: margin, z: worldMax / 2, priority: 2 },
-      { x: worldMax - margin, z: worldMax / 2, priority: 2 },
+      { x: worldMaxX / 2, z: margin, priority: 2 },
+      { x: worldMaxX / 2, z: worldMaxZ - margin, priority: 2 },
+      { x: margin, z: worldMaxZ / 2, priority: 2 },
+      { x: worldMaxX - margin, z: worldMaxZ / 2, priority: 2 },
       // Corners
       { x: margin, z: margin, priority: 3 },
-      { x: worldMax - margin, z: margin, priority: 3 },
-      { x: margin, z: worldMax - margin, priority: 3 },
-      { x: worldMax - margin, z: worldMax - margin, priority: 3 },
+      { x: worldMaxX - margin, z: margin, priority: 3 },
+      { x: margin, z: worldMaxZ - margin, priority: 3 },
+      { x: worldMaxX - margin, z: worldMaxZ - margin, priority: 3 },
       // Quarter points for additional coverage
-      { x: worldMax / 4, z: worldMax / 4, priority: 4 },
-      { x: worldMax * 3 / 4, z: worldMax / 4, priority: 4 },
-      { x: worldMax / 4, z: worldMax * 3 / 4, priority: 4 },
-      { x: worldMax * 3 / 4, z: worldMax * 3 / 4, priority: 4 },
+      { x: worldMaxX / 4, z: worldMaxZ / 4, priority: 4 },
+      { x: worldMaxX * 3 / 4, z: worldMaxZ / 4, priority: 4 },
+      { x: worldMaxX / 4, z: worldMaxZ * 3 / 4, priority: 4 },
+      { x: worldMaxX * 3 / 4, z: worldMaxZ * 3 / 4, priority: 4 },
     ];
 
     if (playerSideFirst) {
@@ -426,8 +437,8 @@ export class AIPlayer implements GameSystem {
     while (this.scoutQueue.length > 0) {
       const target = this.scoutQueue[0];
       const tile = worldToTile(target.x, target.z);
-      if (tile.tx >= 0 && tile.tx < MAP_SIZE && tile.tz >= 0 && tile.tz < MAP_SIZE) {
-        if (this.scoutMap[tile.tz * MAP_SIZE + tile.tx] === 0) {
+      if (tile.tx >= 0 && tile.tx < this.mapWidth && tile.tz >= 0 && tile.tz < this.mapHeight) {
+        if (this.scoutMap[tile.tz * this.mapWidth + tile.tx] === 0) {
           // This tile is unexplored, send scout there
           MoveTarget.x[eid] = target.x;
           MoveTarget.z[eid] = target.z;
@@ -442,13 +453,14 @@ export class AIPlayer implements GameSystem {
     }
 
     // All queued targets explored - generate random unexplored location
-    const worldMax = MAP_SIZE * TILE_SIZE;
+    const worldMaxX = this.mapWidth * TILE_SIZE;
+    const worldMaxZ = this.mapHeight * TILE_SIZE;
     for (let attempt = 0; attempt < 10; attempt++) {
-      const rx = randomFloat(10, worldMax - 10);
-      const rz = randomFloat(10, worldMax - 10);
+      const rx = randomFloat(10, worldMaxX - 10);
+      const rz = randomFloat(10, worldMaxZ - 10);
       const tile = worldToTile(rx, rz);
-      if (tile.tx >= 0 && tile.tx < MAP_SIZE && tile.tz >= 0 && tile.tz < MAP_SIZE) {
-        if (this.scoutMap[tile.tz * MAP_SIZE + tile.tx] === 0) {
+      if (tile.tx >= 0 && tile.tx < this.mapWidth && tile.tz >= 0 && tile.tz < this.mapHeight) {
+        if (this.scoutMap[tile.tz * this.mapWidth + tile.tx] === 0) {
           MoveTarget.x[eid] = rx;
           MoveTarget.z[eid] = rz;
           MoveTarget.active[eid] = 1;
@@ -475,8 +487,8 @@ export class AIPlayer implements GameSystem {
         if (dx * dx + dz * dz > radiusTiles * radiusTiles) continue;
         const tx = center.tx + dx;
         const tz = center.tz + dz;
-        if (tx >= 0 && tx < MAP_SIZE && tz >= 0 && tz < MAP_SIZE) {
-          this.scoutMap[tz * MAP_SIZE + tx] = 1;
+        if (tx >= 0 && tx < this.mapWidth && tz >= 0 && tz < this.mapHeight) {
+          this.scoutMap[tz * this.mapWidth + tx] = 1;
         }
       }
     }
@@ -858,7 +870,8 @@ export class AIPlayer implements GameSystem {
 
   /** Find a valid placement near the ideal position using spiral search */
   private findValidPlacement(idealX: number, idealZ: number): { x: number; z: number } {
-    const worldMax = MAP_SIZE * TILE_SIZE; // 256 world units
+    const worldMaxX = this.mapWidth * TILE_SIZE;
+    const worldMaxZ = this.mapHeight * TILE_SIZE;
     const margin = 4; // Keep buildings away from map edges
     const minSpacing = 4; // Minimum distance between AI buildings (world units)
 
@@ -880,8 +893,8 @@ export class AIPlayer implements GameSystem {
         }
 
         // Clamp to map boundaries with margin
-        tryX = Math.max(margin, Math.min(worldMax - margin, tryX));
-        tryZ = Math.max(margin, Math.min(worldMax - margin, tryZ));
+        tryX = Math.max(margin, Math.min(worldMaxX - margin, tryX));
+        tryZ = Math.max(margin, Math.min(worldMaxZ - margin, tryZ));
 
         // Check minimum spacing against all existing AI buildings
         let tooClose = false;
@@ -902,8 +915,8 @@ export class AIPlayer implements GameSystem {
 
     // Fallback: return ideal position clamped to map bounds
     return {
-      x: Math.max(margin, Math.min(worldMax - margin, idealX)),
-      z: Math.max(margin, Math.min(worldMax - margin, idealZ)),
+      x: Math.max(margin, Math.min(worldMaxX - margin, idealX)),
+      z: Math.max(margin, Math.min(worldMaxZ - margin, idealZ)),
     };
   }
 

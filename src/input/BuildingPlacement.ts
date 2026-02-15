@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { SceneManager } from '../rendering/SceneManager';
 import type { TerrainRenderer } from '../rendering/TerrainRenderer';
-import { TerrainType, MAP_SIZE } from '../rendering/TerrainRenderer';
+import { TerrainType } from '../rendering/TerrainRenderer';
 import { Position, BuildingType, buildingQuery, type World } from '../core/ECS';
 import { worldToTile, tileToWorld, TILE_SIZE } from '../utils/MathUtils';
 import { GameConstants } from '../utils/Constants';
@@ -156,7 +156,7 @@ export class BuildingPlacement {
         const checkZ = tz + dz;
 
         // Bounds check
-        if (checkX < 2 || checkX >= MAP_SIZE - 2 || checkZ < 2 || checkZ >= MAP_SIZE - 2) {
+        if (checkX < 2 || checkX >= this.terrain.getMapWidth() - 2 || checkZ < 2 || checkZ >= this.terrain.getMapHeight() - 2) {
           return false;
         }
 
@@ -305,7 +305,7 @@ export class BuildingPlacement {
   }
 
   private checkConcreteValidity(tx: number, tz: number): boolean {
-    if (tx < 2 || tx >= MAP_SIZE - 2 || tz < 2 || tz >= MAP_SIZE - 2) return false;
+    if (tx < 2 || tx >= this.terrain.getMapWidth() - 2 || tz < 2 || tz >= this.terrain.getMapHeight() - 2) return false;
     const t = this.terrain.getTerrainType(tx, tz);
     // Can place on sand, dunes — not on rock, cliff, spice, or existing concrete
     return t === TerrainType.Sand || t === TerrainType.Dunes;
