@@ -29,6 +29,13 @@ export class SceneManager implements RenderSystem {
   private sandParticles: THREE.Points | null = null;
   private sandParticlePositions: Float32Array | null = null;
 
+  // Sun light for shadow tracking
+  private sunLight: THREE.DirectionalLight | null = null;
+
+  // Map bounds for camera clamping (world units)
+  private mapBoundsX = 128 * 2;
+  private mapBoundsZ = 128 * 2;
+
   // Whether this instance created the renderer (vs receiving an external one)
   private ownsRenderer: boolean;
 
@@ -84,17 +91,17 @@ export class SceneManager implements RenderSystem {
     const ambientLight = new THREE.AmbientLight(0xffe4b5, 0.4);
     this.scene.add(ambientLight);
 
-    const sunLight = new THREE.DirectionalLight(0xffeedd, 1.2);
-    sunLight.position.set(100, 150, 80);
-    sunLight.castShadow = true;
-    sunLight.shadow.mapSize.set(2048, 2048);
-    sunLight.shadow.camera.left = -200;
-    sunLight.shadow.camera.right = 200;
-    sunLight.shadow.camera.top = 200;
-    sunLight.shadow.camera.bottom = -200;
-    sunLight.shadow.camera.near = 1;
-    sunLight.shadow.camera.far = 500;
-    this.scene.add(sunLight);
+    this.sunLight = new THREE.DirectionalLight(0xffeedd, 1.2);
+    this.sunLight.position.set(100, 150, 80);
+    this.sunLight.castShadow = true;
+    this.sunLight.shadow.mapSize.set(2048, 2048);
+    this.sunLight.shadow.camera.left = -120;
+    this.sunLight.shadow.camera.right = 120;
+    this.sunLight.shadow.camera.top = 120;
+    this.sunLight.shadow.camera.bottom = -120;
+    this.sunLight.shadow.camera.near = 1;
+    this.sunLight.shadow.camera.far = 500;
+    this.scene.add(this.sunLight);
 
     // Hemisphere light for ambient sky/ground color
     const hemiLight = new THREE.HemisphereLight(0x87CEEB, 0xC2B280, 0.3);
@@ -161,7 +168,21 @@ export class SceneManager implements RenderSystem {
       this.sandParticles!.geometry.attributes.position.needsUpdate = true;
     }
 
+    // Move shadow-casting sun to follow camera so shadows stay sharp
+    if (this.sunLight) {
+      const ct = this.cameraTarget;
+      this.sunLight.position.set(ct.x + 100, 150, ct.z + 80);
+      this.sunLight.target.position.copy(ct);
+      this.sunLight.target.updateMatrixWorld();
+    }
+
     this.renderer.render(this.scene, this.camera);
+  }
+
+  /** Set map bounds for camera clamping (in world units) */
+  setMapBounds(worldW: number, worldH: number): void {
+    this.mapBoundsX = worldW;
+    this.mapBoundsZ = worldH;
   }
 
   /** Smoothly pan the camera to a world position */
@@ -185,9 +206,8 @@ export class SceneManager implements RenderSystem {
     this.cameraTarget.z += dx * sin + dz * cos;
 
     // Clamp to map bounds (with some padding)
-    const mapSize = 128 * 2; // tiles * tile size
-    this.cameraTarget.x = Math.max(-20, Math.min(mapSize + 20, this.cameraTarget.x));
-    this.cameraTarget.z = Math.max(-20, Math.min(mapSize + 20, this.cameraTarget.z));
+    this.cameraTarget.x = Math.max(-20, Math.min(this.mapBoundsX + 20, this.cameraTarget.x));
+    this.cameraTarget.z = Math.max(-20, Math.min(this.mapBoundsZ + 20, this.cameraTarget.z));
 
     this.updateCameraPosition();
   }

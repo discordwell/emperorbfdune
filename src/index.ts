@@ -611,9 +611,11 @@ async function main() {
   }
 
   // Update systems with actual map dimensions after terrain is ready
-  for (const ai of aiPlayers) ai.setMapDimensions(terrain.getMapWidth(), terrain.getMapHeight());
+  const mapW = terrain.getMapWidth(), mapH = terrain.getMapHeight();
+  for (const ai of aiPlayers) ai.setMapDimensions(mapW, mapH);
   fogOfWar.reinitialize(); // Re-create fog buffers/mesh for actual map dimensions
   minimapRenderer.renderTerrain(); // Re-render minimap with actual terrain data
+  scene.setMapBounds(mapW * 2, mapH * 2); // TILE_SIZE = 2
 
   // Load model manifest for case-insensitive lookups
   updateLoading(45, 'Loading model manifest...');
@@ -1032,8 +1034,8 @@ async function main() {
       if (bDef && bDef.numInfantryWhenGone > 0) {
         const FACTION_INFANTRY: Record<string, string> = {
           'AT': 'ATInfantry', 'HK': 'HKLightInf', 'OR': 'ORChemical',
-          'FR': 'FRFremen', 'IM': 'IMSardaukar', 'IX': 'ATInfantry',
-          'TL': 'HKLightInf', 'GU': 'ATInfantry'
+          'FR': 'FRFremen', 'IM': 'IMSardaukar', 'IX': 'IXSlave',
+          'TL': 'TLContaminator', 'GU': 'GUMaker'
         };
         const prefix = typeName.substring(0, 2);
         const infantryType = FACTION_INFANTRY[prefix];
@@ -1774,9 +1776,9 @@ async function main() {
     pathfinder.updateBlockedTiles(buildingPlacement.getOccupiedTiles());
     selectionPanel.setWorld(world);
 
-    // Command mode indicator
+    // Command mode indicator (don't overwrite superweapon targeting)
     const mode = commandManager.getCommandMode();
-    if (commandModeEl) {
+    if (commandModeEl && !superweaponTargetMode) {
       if (mode === 'attack-move') {
         commandModeEl.style.display = 'block';
         commandModeEl.textContent = 'ATTACK-MOVE — Right-click destination';
