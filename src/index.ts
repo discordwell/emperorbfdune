@@ -255,7 +255,7 @@ async function main() {
               territoryId: house.campaignTerritoryId,
               territoryName: territory.name,
               enemyHouse,
-              isAttack: true,
+              isAttack: territory.owner !== 'player',
               territoryDiff: playerCount - enemyCount,
               subHousePresent: null,
             });
@@ -1180,7 +1180,9 @@ async function main() {
     } else if (wt.includes('mortar') || wt.includes('inkvine')) {
       color = 0x88ff44; speed = 15; style = 'mortar';
     }
-    effectsManager.spawnProjectile(attackerX, 0, attackerZ, targetX, 0, targetZ, color, speed, undefined, style);
+    const attackerY = attackerEntity !== undefined ? (Position.y[attackerEntity] ?? 0) : 0;
+    const targetY = targetEntity !== undefined ? (Position.y[targetEntity] ?? 0) : 0;
+    effectsManager.spawnProjectile(attackerX, attackerY, attackerZ, targetX, targetY, targetZ, color, speed, undefined, style);
 
     // Decrement ammo for ornithopters/gunships
     if (attackerEntity !== undefined && aircraftAmmo.has(attackerEntity)) {
@@ -1399,7 +1401,7 @@ async function main() {
       }
 
       // AI auto-deploys MCVs into ConYards
-      if (owner !== 0 && eid >= 0 && unitType === 'MCV') {
+      if (owner !== 0 && eid >= 0 && unitType.endsWith('MCV')) {
         const prefix = unitType.substring(0, 2);
         const conYardName = `${prefix}ConYard`;
         if (gameRules.buildings.has(conYardName)) {
@@ -2262,11 +2264,12 @@ async function main() {
       });
     }
 
-    // Save spice map
+    // Save spice map (use actual map dimensions)
     const spice: number[][] = [];
-    for (let tz = 0; tz < 128; tz++) {
+    const saveW = terrain.getMapWidth(), saveH = terrain.getMapHeight();
+    for (let tz = 0; tz < saveH; tz++) {
       const row: number[] = [];
-      for (let tx = 0; tx < 128; tx++) {
+      for (let tx = 0; tx < saveW; tx++) {
         const s = terrain.getSpice(tx, tz);
         row.push(s > 0 ? Math.round(s * 100) / 100 : 0);
       }
@@ -2595,9 +2598,10 @@ async function main() {
       harvestSystem.addSolaris(i, savedGame.solaris[i] - harvestSystem.getSolaris(i));
     }
 
-    // Restore spice
-    for (let tz = 0; tz < savedGame.spice.length && tz < 128; tz++) {
-      for (let tx = 0; tx < savedGame.spice[tz].length && tx < 128; tx++) {
+    // Restore spice (use actual map dimensions)
+    const loadW = terrain.getMapWidth(), loadH = terrain.getMapHeight();
+    for (let tz = 0; tz < savedGame.spice.length && tz < loadH; tz++) {
+      for (let tx = 0; tx < savedGame.spice[tz].length && tx < loadW; tx++) {
         terrain.setSpice(tx, tz, savedGame.spice[tz][tx]);
       }
     }

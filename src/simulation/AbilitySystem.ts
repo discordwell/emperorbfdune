@@ -912,7 +912,7 @@ export class AbilitySystem {
       const def = typeName ? rules.units.get(typeName) : null;
 
       // MCV deployment
-      if (typeName === 'MCV') {
+      if (typeName?.endsWith('MCV')) {
         const conYardName = `${housePrefix}ConYard`;
         const bDef = rules.buildings.get(conYardName);
         if (!bDef) continue;

@@ -394,9 +394,13 @@ export class UnitRenderer {
     const ownerId = Owner.playerId[eid];
     const color = HOUSE_COLORS[ownerId] ?? HOUSE_COLORS[0];
     clone.traverse(child => {
-      if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshStandardMaterial) {
-        // Tint the model slightly with team color
-        child.material.color.lerp(color, 0.3);
+      if (child instanceof THREE.Mesh) {
+        child.castShadow = true;
+        child.receiveShadow = true;
+        if (child.material instanceof THREE.MeshStandardMaterial) {
+          // Tint the model slightly with team color
+          child.material.color.lerp(color, 0.3);
+        }
       }
     });
   }

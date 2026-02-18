@@ -155,7 +155,7 @@ export class Sidebar {
     if (def.refinery || name.includes('Silo') || name.includes('Refinery')) return 'economy';
     if (def.aiDefence || def.turretAttach) return 'defense';
     if (name.includes('Barracks') || name.includes('Factory') || name.includes('HiTech') ||
-        name.includes('Starport') || name.includes('Palace') || name.includes('Hangar')) return 'production';
+        name.includes('Starport') || name.includes('Palace') || name.includes('Hanger')) return 'production';
     if (name.includes('Research') || name.includes('Outpost') || name.includes('Radar') ||
         name.includes('IX') || name.includes('Upgrade')) return 'tech';
     return 'misc';
