@@ -153,18 +153,31 @@ export class UnitRenderer {
     }
   }
 
-  async preloadModels(unitTypeNames: string[]): Promise<void> {
+  async preloadModels(unitTypeNames: string[], onProgress?: (loaded: number, total: number, name: string) => void): Promise<void> {
     const promises: Promise<void>[] = [];
     const loaded = new Set<string>();
+    let doneCount = 0;
 
     for (const typeName of unitTypeNames) {
       const art = this.artMap.get(typeName);
       if (!art?.xaf || loaded.has(art.xaf)) continue;
       loaded.add(art.xaf);
+    }
+
+    const total = loaded.size;
+    loaded.clear();
+
+    for (const typeName of unitTypeNames) {
+      const art = this.artMap.get(typeName);
+      if (!art?.xaf || loaded.has(art.xaf)) continue;
+      loaded.add(art.xaf);
+      const displayName = typeName;
 
       promises.push(
         this.modelManager.loadModel(art.xaf, 'H0').then(model => {
           if (model) this.modelTemplates.set(art.xaf, model);
+          doneCount++;
+          onProgress?.(doneCount, total, displayName);
         })
       );
     }
@@ -173,18 +186,31 @@ export class UnitRenderer {
     console.log(`Preloaded ${this.modelTemplates.size} unit model templates`);
   }
 
-  async preloadBuildingModels(buildingTypeNames: string[]): Promise<void> {
+  async preloadBuildingModels(buildingTypeNames: string[], onProgress?: (loaded: number, total: number, name: string) => void): Promise<void> {
     const promises: Promise<void>[] = [];
     const loaded = new Set<string>();
+    let doneCount = 0;
 
     for (const typeName of buildingTypeNames) {
       const art = this.artMap.get(typeName);
       if (!art?.xaf || loaded.has(art.xaf)) continue;
       loaded.add(art.xaf);
+    }
+
+    const total = loaded.size;
+    loaded.clear();
+
+    for (const typeName of buildingTypeNames) {
+      const art = this.artMap.get(typeName);
+      if (!art?.xaf || loaded.has(art.xaf)) continue;
+      loaded.add(art.xaf);
+      const displayName = typeName;
 
       promises.push(
         this.modelManager.loadModel(art.xaf, 'H0').then(model => {
           if (model) this.modelTemplates.set(art.xaf, model);
+          doneCount++;
+          onProgress?.(doneCount, total, displayName);
         })
       );
     }

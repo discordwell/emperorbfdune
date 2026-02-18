@@ -106,6 +106,138 @@ export class HouseSelect {
     this.renderer = renderer ?? null;
   }
 
+  private showTitleScreen(): Promise<void> {
+    return new Promise((resolve) => {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = `
+        position:fixed;top:0;left:0;right:0;bottom:0;z-index:2000;
+        background:radial-gradient(ellipse at center, #1a0f00 0%, #000 80%);
+        display:flex;flex-direction:column;align-items:center;justify-content:center;
+        font-family:'Segoe UI',Tahoma,sans-serif;
+        cursor:pointer;
+      `;
+
+      // Sand particle canvas background (DPI-aware)
+      const dpr = window.devicePixelRatio || 1;
+      const bgCanvas = document.createElement('canvas');
+      bgCanvas.width = window.innerWidth * dpr;
+      bgCanvas.height = window.innerHeight * dpr;
+      bgCanvas.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;opacity:0.3;';
+      overlay.appendChild(bgCanvas);
+      const bgCtx = bgCanvas.getContext('2d')!;
+      bgCtx.scale(dpr, dpr);
+
+      // Floating sand particles (use CSS pixel coordinates)
+      const cssW = window.innerWidth, cssH = window.innerHeight;
+      const particles: { x: number; y: number; vx: number; vy: number; size: number; alpha: number }[] = [];
+      for (let i = 0; i < 80; i++) {
+        particles.push({
+          x: Math.random() * cssW,
+          y: Math.random() * cssH,
+          vx: 0.5 + Math.random() * 1.5,
+          vy: (Math.random() - 0.5) * 0.3,
+          size: 1 + Math.random() * 3,
+          alpha: 0.2 + Math.random() * 0.4,
+        });
+      }
+
+      let animating = true;
+      const animateParticles = () => {
+        if (!animating) return;
+        bgCtx.clearRect(0, 0, cssW, cssH);
+        for (const p of particles) {
+          p.x += p.vx;
+          p.y += p.vy + Math.sin(p.x * 0.01) * 0.2;
+          if (p.x > cssW) { p.x = -p.size; p.y = Math.random() * cssH; }
+          bgCtx.beginPath();
+          bgCtx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+          bgCtx.fillStyle = `rgba(212, 168, 64, ${p.alpha})`;
+          bgCtx.fill();
+        }
+        requestAnimationFrame(animateParticles);
+      };
+      animateParticles();
+
+      // Content container (above particles)
+      const content = document.createElement('div');
+      content.style.cssText = 'position:relative;z-index:1;text-align:center;';
+
+      // Title
+      const title = document.createElement('div');
+      title.style.cssText = `
+        font-size:64px;font-weight:bold;color:#f0c040;
+        letter-spacing:8px;text-shadow:0 0 30px #f0c04040, 0 4px 8px rgba(0,0,0,0.5);
+        margin-bottom:8px;
+      `;
+      title.textContent = 'EMPEROR';
+      content.appendChild(title);
+
+      const subtitle = document.createElement('div');
+      subtitle.style.cssText = `
+        font-size:22px;color:#c08020;letter-spacing:10px;margin-bottom:48px;
+        text-shadow:0 0 15px #c0802040;
+      `;
+      subtitle.textContent = 'BATTLE FOR DUNE';
+      content.appendChild(subtitle);
+
+      // Version line
+      const version = document.createElement('div');
+      version.style.cssText = 'font-size:11px;color:#555;margin-bottom:32px;';
+      version.textContent = 'Web Remake';
+      content.appendChild(version);
+
+      // Play button
+      const playBtn = document.createElement('div');
+      playBtn.style.cssText = `
+        display:inline-block;padding:14px 48px;
+        border:2px solid #d4a840;color:#d4a840;
+        font-size:18px;letter-spacing:4px;cursor:pointer;
+        transition:all 0.3s;background:transparent;
+      `;
+      playBtn.textContent = 'PLAY';
+      playBtn.onmouseenter = () => {
+        playBtn.style.background = '#d4a84022';
+        playBtn.style.borderColor = '#f0c040';
+        playBtn.style.color = '#f0c040';
+        playBtn.style.transform = 'scale(1.05)';
+      };
+      playBtn.onmouseleave = () => {
+        playBtn.style.background = 'transparent';
+        playBtn.style.borderColor = '#d4a840';
+        playBtn.style.color = '#d4a840';
+        playBtn.style.transform = 'scale(1)';
+      };
+      content.appendChild(playBtn);
+
+      // Click-to-play hint
+      const hint = document.createElement('div');
+      hint.style.cssText = 'font-size:11px;color:#444;margin-top:16px;';
+      hint.textContent = 'Click anywhere to continue';
+      content.appendChild(hint);
+
+      // Pulsing animation on hint text
+      const hintAnim = hint.animate([
+        { opacity: 0.3 },
+        { opacity: 0.8 },
+        { opacity: 0.3 },
+      ], { duration: 2000, iterations: Infinity });
+
+      overlay.appendChild(content);
+      document.body.appendChild(overlay);
+
+      const proceed = () => {
+        animating = false;
+        hintAnim.cancel();
+        this.audioManager.playSfx('select');
+        overlay.style.transition = 'opacity 0.5s';
+        overlay.style.opacity = '0';
+        setTimeout(() => { overlay.remove(); resolve(); }, 500);
+      };
+
+      overlay.onclick = proceed;
+    });
+  }
+
   async show(): Promise<HouseChoice> {
     // Check for campaign continuation (auto-start next mission)
     const nextMission = localStorage.getItem('ebfd_campaign_next');
@@ -138,6 +270,9 @@ export class HouseSelect {
     }
 
     this.audioManager.playMenuMusic();
+
+    // Title screen
+    await this.showTitleScreen();
 
     // Use 3D house selection if canvas and renderer are available
     let selectedHouseId: string;
@@ -597,7 +732,7 @@ export class HouseSelect {
 
       const groupMaps = maps.filter(m => m.players === count);
       for (const map of groupMaps) {
-        const card = this.createCard(map.name, '', map.description, '#A08050', 150);
+        const card = this.createMapCard(map, '#A08050');
         card.onclick = () => {
           this.audioManager.playSfx('select');
           house.mapChoice = map;
@@ -688,6 +823,38 @@ export class HouseSelect {
 
     this.overlay.appendChild(grid);
     document.body.appendChild(this.overlay);
+  }
+
+  private createMapCard(map: MapChoice, color: string): HTMLDivElement {
+    const card = document.createElement('div');
+    card.style.cssText = `
+      width: 150px; padding: 8px; text-align: center;
+      background: ${color}15;
+      border: 2px solid ${color}44;
+      cursor: pointer;
+      transition: all 0.3s;
+    `;
+    // Thumbnail
+    const thumbUrl = map.mapId ? `/assets/maps/${map.mapId}.thumb.png` : null;
+    const thumbHtml = thumbUrl
+      ? `<img src="${thumbUrl}" width="128" height="128" style="display:block;margin:0 auto 6px;image-rendering:pixelated;border:1px solid ${color}44;background:#111;" onerror="this.style.display='none'" />`
+      : `<div style="width:128px;height:128px;margin:0 auto 6px;background:#111;border:1px solid ${color}44;display:flex;align-items:center;justify-content:center;color:#555;font-size:32px;">?</div>`;
+    card.innerHTML = `
+      ${thumbHtml}
+      <div style="font-size:13px; font-weight:bold; color:${color}; margin-bottom:4px;">${map.name}</div>
+      <div style="font-size:11px; color:#999;">${map.description}</div>
+    `;
+    card.onmouseenter = () => {
+      card.style.borderColor = color;
+      card.style.background = `${color}25`;
+      card.style.transform = 'translateY(-4px)';
+    };
+    card.onmouseleave = () => {
+      card.style.borderColor = `${color}44`;
+      card.style.background = `${color}15`;
+      card.style.transform = 'translateY(0)';
+    };
+    return card;
   }
 
   private createCard(title: string, subtitle: string, desc: string, color: string, width: number): HTMLDivElement {

@@ -34,6 +34,7 @@ import { showMissionBriefing } from './ui/MissionBriefing';
 import { loadCampaignStrings, type HousePrefix, JUMP_POINTS } from './campaign/CampaignData';
 import { CampaignPhaseManager } from './campaign/CampaignPhaseManager';
 import { SubHouseSystem } from './campaign/SubHouseSystem';
+import { MentatScreen } from './ui/MentatScreen';
 import { generateMissionConfig, type MissionConfigData } from './campaign/MissionConfig';
 import {
   addEntity, addComponent, removeEntity, hasComponent,
@@ -122,11 +123,13 @@ function getSpawnPositions(mapW: number, mapH: number, count: number): { x: numb
   return positions;
 }
 
-function updateLoading(pct: number, text: string) {
+function updateLoading(pct: number, text: string, detail?: string) {
   const bar = document.getElementById('loading-bar');
   const label = document.getElementById('loading-text');
+  const detailEl = document.getElementById('loading-detail');
   if (bar) bar.style.width = `${pct}%`;
   if (label) label.textContent = text;
+  if (detailEl) detailEl.textContent = detail ?? '';
 }
 
 async function main() {
@@ -619,7 +622,10 @@ async function main() {
   // Preload all models
   updateLoading(50, 'Loading unit models...');
   const allUnitNames = [...gameRules.units.keys()];
-  await unitRenderer.preloadModels(allUnitNames);
+  await unitRenderer.preloadModels(allUnitNames, (done, total, name) => {
+    const pct = 50 + Math.round((done / total) * 25);
+    updateLoading(pct, `Loading unit models... (${done}/${total})`, name);
+  });
   updateLoading(75, 'Loading building models...');
   // Filter out decorative/environmental buildings (birds, whales, etc.) — only preload faction buildings with cost > 0
   const factionPrefixes = ['AT', 'HK', 'OR', 'FR', 'IM', 'IX', 'TL', 'GU', 'IN'];
@@ -628,24 +634,27 @@ async function main() {
     const art = artMap.get(name);
     return art?.xaf && def.cost > 0 && factionPrefixes.some(p => name.startsWith(p));
   });
-  await unitRenderer.preloadBuildingModels(allBuildingNames);
+  await unitRenderer.preloadBuildingModels(allBuildingNames, (done, total, name) => {
+    const pct = 75 + Math.round((done / total) * 13);
+    updateLoading(pct, `Loading building models... (${done}/${total})`, name);
+  });
   // Retry any pending model assignments that were deferred during preload
   unitRenderer.resolvePendingModels();
 
   // Preload priority SFX samples (non-blocking, runs in parallel with spawn)
-  updateLoading(88, 'Loading audio samples...');
+  updateLoading(88, 'Loading audio samples...', 'Sound effects');
   await audioManager.preloadSfx();
 
   // Preload voice lines for the player's faction
-  updateLoading(89, 'Loading voice lines...');
+  updateLoading(89, 'Loading voice lines...', house.name + ' faction voices');
   await audioManager.preloadVoices(house.prefix);
 
   // Preload spoken dialog lines (advisor/mentat callouts)
-  updateLoading(89, 'Loading dialog lines...');
+  updateLoading(90, 'Loading dialog lines...', 'Advisor callouts');
   audioManager.initDialog();
   await audioManager.preloadDialog(house.prefix);
 
-  updateLoading(90, 'Spawning bases...');
+  updateLoading(92, 'Spawning bases...', 'Placing starting structures');
 
   // --- SPAWN HELPERS ---
 
@@ -1628,7 +1637,7 @@ async function main() {
 
     // --- Superweapon charge ---
     if (game.getTickCount() % 25 === 0) { // Check every second
-      for (let pid = 0; pid <= 1; pid++) {
+      for (let pid = 0; pid < totalPlayers; pid++) {
         // Check if player owns a Palace
         const blds = buildingQuery(world);
         let palaceType: string | null = null;
@@ -1692,28 +1701,30 @@ async function main() {
         swButton.style.display = 'none';
       }
 
-      // AI fires superweapon at player base when ready
-      const aiSw = superweaponState.get(1);
-      if (aiSw?.ready) {
-        // Target player's building cluster
-        const playerBlds = buildingQuery(world);
-        let bestX = 100, bestZ = 100, bestCount = 0;
-        for (const bid of playerBlds) {
-          if (Owner.playerId[bid] !== 0 || Health.current[bid] <= 0) continue;
-          const bx = Position.x[bid], bz = Position.z[bid];
-          let count = 0;
-          for (const bid2 of playerBlds) {
-            if (Owner.playerId[bid2] !== 0 || Health.current[bid2] <= 0) continue;
-            const dx = Position.x[bid2] - bx, dz = Position.z[bid2] - bz;
-            if (dx * dx + dz * dz < 225) count++; // 15 unit radius
+      // AI fires superweapon at player base when ready (check all AI players)
+      const aiSwBlds = buildingQuery(world);
+      for (let aiPid = 1; aiPid < totalPlayers; aiPid++) {
+        const aiSw = superweaponState.get(aiPid);
+        if (aiSw?.ready) {
+          // Target player's building cluster
+          const playerBlds = aiSwBlds;
+          let bestX = 100, bestZ = 100, bestCount = 0;
+          for (const bid of playerBlds) {
+            if (Owner.playerId[bid] !== 0 || Health.current[bid] <= 0) continue;
+            const bx = Position.x[bid], bz = Position.z[bid];
+            let count = 0;
+            for (const bid2 of playerBlds) {
+              if (Owner.playerId[bid2] !== 0 || Health.current[bid2] <= 0) continue;
+              const dx = Position.x[bid2] - bx, dz = Position.z[bid2] - bz;
+              if (dx * dx + dz * dz < 225) count++; // 15 unit radius
+            }
+            if (count > bestCount) { bestCount = count; bestX = bx; bestZ = bz; }
           }
-          if (count > bestCount) { bestCount = count; bestX = bx; bestZ = bz; }
-        }
-        if (bestCount > 0) {
-          // Add some inaccuracy
-          bestX += (Math.random() - 0.5) * 6;
-          bestZ += (Math.random() - 0.5) * 6;
-          fireSuperweapon(1, bestX, bestZ);
+          if (bestCount > 0) {
+            bestX += (Math.random() - 0.5) * 6;
+            bestZ += (Math.random() - 0.5) * 6;
+            fireSuperweapon(aiPid, bestX, bestZ);
+          }
         }
       }
     }
@@ -2314,6 +2325,7 @@ async function main() {
 
     const buttons = [
       { label: 'Resume', action: () => { pauseMenu?.remove(); pauseMenu = null; game.pause(); } },
+      { label: 'Mentat', action: () => { showMentatPanel(); } },
       { label: 'Settings', action: () => { showSettingsPanel(); } },
       { label: 'Save / Load', action: () => { showSaveLoadPanel(); } },
       { label: 'Restart Mission', action: () => { window.location.reload(); } },
@@ -2440,6 +2452,36 @@ async function main() {
       showPauseMenu();
     };
     panel.appendChild(backBtn);
+
+    pauseMenu.appendChild(panel);
+  }
+
+  function showMentatPanel(): void {
+    if (!pauseMenu) return;
+    pauseMenu.innerHTML = '';
+
+    const panel = document.createElement('div');
+    panel.style.cssText = 'background:#1a1a2e;border:1px solid #555;border-radius:4px;width:640px;height:480px;display:flex;flex-direction:column;';
+
+    // Back button
+    const backRow = document.createElement('div');
+    backRow.style.cssText = 'display:flex;justify-content:flex-end;padding:4px 8px;';
+    const backBtn = document.createElement('button');
+    backBtn.textContent = 'Back';
+    backBtn.style.cssText = 'padding:4px 12px;background:#1a1a3e;border:1px solid #444;color:#ccc;cursor:pointer;font-size:11px;';
+    backBtn.onmouseenter = () => { backBtn.style.borderColor = '#88f'; };
+    backBtn.onmouseleave = () => { backBtn.style.borderColor = '#444'; };
+    backBtn.onclick = () => { pauseMenu?.remove(); pauseMenu = null; showPauseMenu(); };
+    backRow.appendChild(backBtn);
+    panel.appendChild(backRow);
+
+    // Mentat content container
+    const contentDiv = document.createElement('div');
+    contentDiv.style.cssText = 'flex:1;overflow:hidden;';
+    panel.appendChild(contentDiv);
+
+    const mentat = new MentatScreen(gameRules);
+    mentat.show(contentDiv);
 
     pauseMenu.appendChild(panel);
   }

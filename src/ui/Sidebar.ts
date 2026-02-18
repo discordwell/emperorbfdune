@@ -3,6 +3,7 @@ import type { ProductionSystem } from '../simulation/ProductionSystem';
 import type { ArtEntry } from '../config/ArtIniParser';
 import type { UnitDef } from '../config/UnitDefs';
 import type { BuildingDef } from '../config/BuildingDefs';
+import { DISPLAY_NAMES, getDisplayName } from '../config/DisplayNames';
 
 type BuildCallback = (typeName: string, isBuilding: boolean) => void;
 type ConcreteCallback = () => void;
@@ -133,7 +134,7 @@ export class Sidebar {
 
     for (const item of allItems) {
       const chip = document.createElement('div');
-      const displayName = item.typeName.replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, '');
+      const displayName = getDisplayName(item.typeName);
       const pct = item.progress > 0 ? ` ${Math.floor(item.progress * 100)}%` : '';
       chip.textContent = `${displayName}${pct}`;
       chip.title = 'Right-click to cancel';
@@ -177,9 +178,11 @@ export class Sidebar {
     power: 0, economy: 1, production: 2, tech: 3, defense: 4, misc: 5,
   };
 
-  private static readonly TIER_LABELS: Record<number, string> = {
-    0: 'Basic', 1: 'Basic', 2: 'Tier 2', 3: 'Tier 3', 4: 'Tier 4',
-  };
+  /** Convert raw tech levels to sequential tier labels (no gaps) */
+  private static getTierLabel(tierIndex: number): string {
+    if (tierIndex <= 1) return 'Basic';
+    return `Tier ${tierIndex}`;
+  }
 
   private renderBuildingItems(grid: HTMLElement): void {
     const prefix = this.factionPrefix;
@@ -203,6 +206,11 @@ export class Sidebar {
       const validPrefix = name.startsWith(prefix) || (subPrefix && name.startsWith(subPrefix));
       if (!validPrefix) continue;
       if (name.startsWith('IN')) continue;
+      // Filter out civilian/decorative buildings (IN-prefix after faction prefix)
+      const strippedCheck = name.replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, '');
+      if (strippedCheck.startsWith('IN')) continue;
+      // Filter out campaign-only structures and auto-placed sub-buildings
+      if (strippedCheck === 'FactoryFrigate' || strippedCheck === 'RefineryDock') continue;
       if (def.cost <= 0) continue;
       buildings.push({ name, def });
     }
@@ -217,14 +225,20 @@ export class Sidebar {
       return a.def.cost - b.def.cost;
     });
 
+    // Compute sequential tier indices (collapse gaps in tech levels)
+    const rawTiers = [...new Set(buildings.map(b => Math.max(b.def.techLevel, 1)))].sort((a, b) => a - b);
+    const tierIndexMap = new Map<number, number>();
+    rawTiers.forEach((t, i) => tierIndexMap.set(t, i + 1));
+
     // Render with tier separators
     let lastTier = -1;
     for (const { name, def } of buildings) {
-      const tier = Math.max(def.techLevel, 1);
-      if (tier !== lastTier) {
-        lastTier = tier;
+      const rawTier = Math.max(def.techLevel, 1);
+      const tier = tierIndexMap.get(rawTier) ?? rawTier;
+      if (rawTier !== lastTier) {
+        lastTier = rawTier;
         const sep = document.createElement('div');
-        const label = Sidebar.TIER_LABELS[tier] ?? `Tier ${tier}`;
+        const label = Sidebar.getTierLabel(tier);
         sep.style.cssText = 'grid-column:1/-1;padding:3px 4px;font-size:9px;color:#888;border-bottom:1px solid #333;text-transform:uppercase;letter-spacing:1px;margin-top:2px;';
         sep.textContent = label;
         grid.appendChild(sep);
@@ -287,7 +301,7 @@ export class Sidebar {
       const def = this.rules.units.get(name);
       if (!def) continue;
       const canAfford = this.production.canBuild(this.playerId, name, false);
-      const displayName = name.replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, '');
+      const displayName = getDisplayName(name);
       const baseCost = def.cost;
       const priceDelta = price - baseCost;
       const priceColor = priceDelta <= 0 ? '#4f4' : priceDelta > baseCost * 0.3 ? '#f44' : '#ff8';
@@ -332,7 +346,7 @@ export class Sidebar {
     `;
 
     // Short display name (strip house prefix)
-    const displayName = name.replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, '');
+    const displayName = getDisplayName(name);
 
     // Colored role indicator bar + content
     const iconOpacity = enabled ? '1' : '0.4';
@@ -343,8 +357,9 @@ export class Sidebar {
 
     // Lock icon for prereq/tech blocks
     const lockIcon = isPrereqBlock ? '<span style="font-size:10px;color:#f44;margin-right:2px;">&#x1F512;</span>' : '';
-    const blockDetail = (isPrereqBlock && blockReason?.detail)
-      ? `<div style="font-size:8px;color:#a44;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Need: ${blockReason.detail}</div>` : '';
+    const blockDetailName = blockReason?.detail ? (DISPLAY_NAMES[blockReason.detail] ?? blockReason.detail) : '';
+    const blockDetail = (isPrereqBlock && blockDetailName)
+      ? `<div style="font-size:8px;color:#a44;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Need: ${blockDetailName}</div>` : '';
 
     item.innerHTML = `
       <div style="width:6px;background:${roleColor};opacity:${iconOpacity};flex-shrink:0;"></div>
@@ -400,7 +415,7 @@ export class Sidebar {
       : this.rules.units.get(name);
     if (!def) return;
 
-    const displayName = name.replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, '');
+    const displayName = getDisplayName(name);
     const hotkeyHint = hotkey ? ` <span style="color:#8cf;font-size:10px;">[${hotkey.toUpperCase()}]</span>` : '';
     let html = `<div style="font-weight:bold;color:#fff;margin-bottom:4px;">${displayName}${hotkeyHint}</div>`;
 
@@ -444,7 +459,7 @@ export class Sidebar {
       if (bDef.powerGenerated > 0) html += `<div style="color:#4f4;">Power: +${bDef.powerGenerated}</div>`;
       if (bDef.powerUsed > 0) html += `<div style="color:#f66;">Power: -${bDef.powerUsed}</div>`;
       if (bDef.getUnitWhenBuilt) {
-        const unitName = bDef.getUnitWhenBuilt.replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, '');
+        const unitName = getDisplayName(bDef.getUnitWhenBuilt);
         html += `<div style="color:#8cf;font-size:10px;">Spawns: ${unitName}</div>`;
       }
       if (bDef.upgradable) {
@@ -456,12 +471,12 @@ export class Sidebar {
     // Requirements
     const reqs: string[] = [];
     if (def.primaryBuilding) {
-      const reqName = def.primaryBuilding.replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, '');
+      const reqName = getDisplayName(def.primaryBuilding);
       reqs.push(reqName);
     }
     if (def.secondaryBuildings) {
       for (const sb of def.secondaryBuildings) {
-        reqs.push(sb.replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, ''));
+        reqs.push(getDisplayName(sb));
       }
     }
     if (reqs.length > 0) {
@@ -504,7 +519,7 @@ export class Sidebar {
     }
     if (label) {
       if (prog) {
-        const displayName = prog.typeName.replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, '');
+        const displayName = getDisplayName(prog.typeName);
         label.textContent = `${displayName} ${Math.floor(prog.progress * 100)}%`;
       } else {
         label.textContent = '';
