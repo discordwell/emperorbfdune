@@ -2592,6 +2592,7 @@ async function main() {
 
   // --- SPAWN INITIAL ENTITIES ---
   const world = game.getWorld();
+  harvestSystem.setBuildingContext(world, buildingTypeNames);
 
   if (savedGame) {
     // --- RESTORE FROM SAVE ---

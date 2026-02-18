@@ -1,8 +1,8 @@
 import type { GameSystem } from '../core/Game';
 import type { World } from '../core/ECS';
 import {
-  Position, Harvester, MoveTarget, Owner,
-  harvestQuery,
+  Position, Harvester, MoveTarget, Owner, Health, BuildingType,
+  harvestQuery, buildingQuery,
 } from '../core/ECS';
 import type { TerrainRenderer } from '../rendering/TerrainRenderer';
 import { TerrainType } from '../rendering/TerrainRenderer';
@@ -37,6 +37,9 @@ export class HarvestSystem implements GameSystem {
   private knownHarvesters = new Set<number>();
   // Harvesters that recently took damage - flee to refinery
   private fleeing = new Set<number>();
+  // Building lookup for refinery reassignment
+  private world: World | null = null;
+  private buildingTypeNames: string[] = [];
 
   constructor(terrain: TerrainRenderer) {
     this.terrain = terrain;
@@ -55,6 +58,12 @@ export class HarvestSystem implements GameSystem {
         }, 10000);
       }
     });
+  }
+
+  /** Provide building context for refinery reassignment when a refinery is destroyed */
+  setBuildingContext(world: World, buildingTypeNames: string[]): void {
+    this.world = world;
+    this.buildingTypeNames = buildingTypeNames;
   }
 
   /** Mark a player as having carryall support (owns a Hanger) */
@@ -189,9 +198,10 @@ export class HarvestSystem implements GameSystem {
 
   private scheduleBloom(): void {
     // Count current spice tiles
+    const mw = this.terrain.getMapWidth(), mh = this.terrain.getMapHeight();
     let spiceTileCount = 0;
-    for (let tz = 0; tz < 128; tz++) {
-      for (let tx = 0; tx < 128; tx++) {
+    for (let tz = 0; tz < mh; tz++) {
+      for (let tx = 0; tx < mw; tx++) {
         if (this.terrain.getSpice(tx, tz) > 0) spiceTileCount++;
       }
     }
@@ -200,8 +210,8 @@ export class HarvestSystem implements GameSystem {
 
     // Find a valid sand tile for the bloom
     for (let attempt = 0; attempt < 50; attempt++) {
-      const tx = 10 + Math.floor(Math.random() * 108);
-      const tz = 10 + Math.floor(Math.random() * 108);
+      const tx = 10 + Math.floor(Math.random() * Math.max(1, mw - 20));
+      const tz = 10 + Math.floor(Math.random() * Math.max(1, mh - 20));
       const type = this.terrain.getTerrainType(tx, tz);
       if (type === TerrainType.Sand) {
         // Schedule bloom with 5-second warning (125 ticks)
@@ -220,7 +230,7 @@ export class HarvestSystem implements GameSystem {
       for (let dx = -radius; dx <= radius; dx++) {
         const stx = tx + dx;
         const stz = tz + dz;
-        if (stx < 0 || stx >= 128 || stz < 0 || stz >= 128) continue;
+        if (stx < 0 || stx >= this.terrain.getMapWidth() || stz < 0 || stz >= this.terrain.getMapHeight()) continue;
         if (this.terrain.getTerrainType(stx, stz) !== TerrainType.Sand) continue;
         const amount = 0.3 + Math.random() * 0.7;
         this.terrain.setSpice(stx, stz, amount);
@@ -333,16 +343,42 @@ export class HarvestSystem implements GameSystem {
   }
 
   private returnToRefinery(eid: number): void {
-    // Find nearest refinery (for now, go to a fixed position near start base)
-    // In full implementation, look up refinery entities
     const refineryEntity = Harvester.refineryEntity[eid];
-    if (refineryEntity > 0) {
+    // Validate refinery is alive
+    if (refineryEntity > 0 && Health.current[refineryEntity] > 0) {
       MoveTarget.x[eid] = Position.x[refineryEntity];
       MoveTarget.z[eid] = Position.z[refineryEntity];
     } else {
-      // Fallback: return to map center-ish
-      MoveTarget.x[eid] = 60;
-      MoveTarget.z[eid] = 60;
+      // Refinery destroyed — try to find another refinery owned by same player
+      const owner = Owner.playerId[eid];
+      if (this.world) {
+        const blds = buildingQuery(this.world);
+        let bestDist = Infinity;
+        let bestRef = -1;
+        for (const bid of blds) {
+          if (Owner.playerId[bid] !== owner || Health.current[bid] <= 0) continue;
+          const bTypeId = BuildingType.id[bid];
+          const bName = this.buildingTypeNames[bTypeId] ?? '';
+          if (!bName.includes('Refinery')) continue;
+          const dx = Position.x[bid] - Position.x[eid];
+          const dz = Position.z[bid] - Position.z[eid];
+          const dist = dx * dx + dz * dz;
+          if (dist < bestDist) { bestDist = dist; bestRef = bid; }
+        }
+        if (bestRef >= 0) {
+          Harvester.refineryEntity[eid] = bestRef;
+          MoveTarget.x[eid] = Position.x[bestRef];
+          MoveTarget.z[eid] = Position.z[bestRef];
+        } else {
+          // No refineries at all — go idle
+          Harvester.state[eid] = IDLE;
+          return;
+        }
+      } else {
+        // Fallback: return to map center
+        MoveTarget.x[eid] = 60;
+        MoveTarget.z[eid] = 60;
+      }
     }
     MoveTarget.active[eid] = 1;
   }
