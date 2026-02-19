@@ -98,6 +98,11 @@ export class CommandManager {
   // Check and advance waypoints for entities that have stopped
   updateWaypoints(): void {
     for (const [eid, queue] of this.waypointQueues) {
+      // Clean up dead entities
+      if (Health.current[eid] <= 0) {
+        this.waypointQueues.delete(eid);
+        continue;
+      }
       if (queue.length === 0) {
         this.waypointQueues.delete(eid);
         continue;
@@ -112,6 +117,11 @@ export class CommandManager {
 
     // Handle patrol: when unit reaches patrol endpoint, swap direction
     for (const [eid, patrol] of this.patrolEntities) {
+      // Clean up dead entities
+      if (Health.current[eid] <= 0) {
+        this.patrolEntities.delete(eid);
+        continue;
+      }
       if (MoveTarget.active[eid] === 0) {
         // At destination — swap start and end
         const temp = { startX: patrol.endX, startZ: patrol.endZ, endX: patrol.startX, endZ: patrol.startZ };

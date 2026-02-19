@@ -864,6 +864,7 @@ export class UnitRenderer {
     this.rearmBars.delete(eid);
     this.rankSprites.delete(eid);
     this.pendingModels.delete(eid);
+    this.constructing.delete(eid);
     this.deconstructing.delete(eid);
     this.turretNodes.delete(eid);
     // Clean up animation mixer — uncacheRoot releases PropertyBinding cache
@@ -892,8 +893,15 @@ export class UnitRenderer {
       if (state.opacity <= 0) {
         obj.traverse(child => {
           if (child instanceof THREE.Mesh) {
-            child.geometry?.dispose();
-            if (child.material) (child.material as THREE.Material).dispose();
+            // Don't dispose geometry — it's shared with the model template.
+            // Only dispose materials (which are cloned per-instance by ModelManager).
+            if (child.material) {
+              if (Array.isArray(child.material)) {
+                child.material.forEach(m => m.dispose());
+              } else {
+                (child.material as THREE.Material).dispose();
+              }
+            }
           }
         });
         this.sceneManager.scene.remove(obj);
