@@ -63,7 +63,7 @@ export class FogOfWar {
     }
 
     this.fogTexture = new THREE.DataTexture(
-      this.fogData, this.mapW, this.mapH, THREE.RGBAFormat
+      this.fogData as unknown as BufferSource, this.mapW, this.mapH, THREE.RGBAFormat
     );
     this.fogTexture.magFilter = THREE.LinearFilter;
     this.fogTexture.minFilter = THREE.LinearFilter;
@@ -92,7 +92,7 @@ export class FogOfWar {
 
     this.fogTexture.dispose();
     this.fogTexture = new THREE.DataTexture(
-      this.fogData, this.mapW, this.mapH, THREE.RGBAFormat
+      this.fogData as unknown as BufferSource, this.mapW, this.mapH, THREE.RGBAFormat
     );
     this.fogTexture.magFilter = THREE.LinearFilter;
     this.fogTexture.minFilter = THREE.LinearFilter;

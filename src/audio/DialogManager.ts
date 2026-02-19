@@ -252,6 +252,9 @@ const EVENT_MAPPINGS: Record<DialogEvent, DialogMapping> = {
   retreatFailed: {
     generic: 'RetreatFailed',
   },
+  buildingComplete: {
+    generic: 'ConComplete',
+  },
 };
 
 // Per-event cooldowns (ms). High-frequency events get aggressive throttling.

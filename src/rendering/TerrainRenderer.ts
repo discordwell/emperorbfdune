@@ -336,7 +336,7 @@ export class TerrainRenderer {
 
     if (!this.splatmapTexture) {
       this.splatmapTexture = new THREE.DataTexture(
-        data, splatW, splatH, THREE.RGBAFormat
+        data as unknown as BufferSource, splatW, splatH, THREE.RGBAFormat
       );
       this.splatmapTexture.magFilter = THREE.LinearFilter;
       this.splatmapTexture.minFilter = THREE.LinearFilter;

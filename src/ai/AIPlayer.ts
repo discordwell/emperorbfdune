@@ -10,6 +10,7 @@ import type { BuildingDef } from '../config/BuildingDefs';
 import type { CombatSystem } from '../simulation/CombatSystem';
 import type { ProductionSystem } from '../simulation/ProductionSystem';
 import type { HarvestSystem } from '../simulation/HarvestSystem';
+import type { SpatialGrid } from '../utils/SpatialGrid';
 import { randomFloat, distance2D, worldToTile, TILE_SIZE } from '../utils/MathUtils';
 import { EventBus } from '../core/EventBus';
 
@@ -89,6 +90,9 @@ export class AIPlayer implements GameSystem {
   private unitRoles = new Map<string, UnitRole>();
   private compositionGoal = { antiInf: 0.3, antiVeh: 0.4, antiBldg: 0.2, scout: 0.1 };
   private rolesClassified = false;
+
+  // Spatial grid reference for O(k) neighbor lookups (shared from MovementSystem)
+  private spatialGrid: SpatialGrid | null = null;
 
   // Cached world reference for methods that need it (set each update tick)
   private currentWorld: World | null = null;
@@ -546,33 +550,38 @@ export class AIPlayer implements GameSystem {
         this.markExplored(px, pz, tileSightRadius);
       }
 
-      // Scan for enemy units within view range
-      for (const other of units) {
+      const viewRangeSq = viewRange * viewRange;
+
+      // Use spatial grid for O(k) unit neighbor lookup instead of O(n) scan
+      const nearbyUnits = this.spatialGrid
+        ? this.spatialGrid.getInRadius(px, pz, viewRange)
+        : units;
+      for (let i = 0; i < nearbyUnits.length; i++) {
+        const other = nearbyUnits[i];
         if (Owner.playerId[other] === this.playerId) continue;
         if (Health.current[other] <= 0) continue;
         const dx = Position.x[other] - px;
         const dz = Position.z[other] - pz;
-        if (dx * dx + dz * dz < viewRange * viewRange) {
-          const otherTypeName = this.getUnitTypeName(other);
+        if (dx * dx + dz * dz < viewRangeSq) {
           this.knownEnemyPositions.set(other, {
             x: Position.x[other],
             z: Position.z[other],
-            typeName: otherTypeName ?? 'Unknown',
+            typeName: this.getUnitTypeName(other) ?? 'Unknown',
             tick: this.tickCounter,
           });
         }
       }
 
-      // Scan for enemy buildings within view range
+      // Scan buildings (few entities, no grid needed)
       for (const beid of buildings) {
         if (Owner.playerId[beid] === this.playerId) continue;
         if (Health.current[beid] <= 0) continue;
         const dx = Position.x[beid] - px;
         const dz = Position.z[beid] - pz;
-        if (dx * dx + dz * dz < viewRange * viewRange) {
+        if (dx * dx + dz * dz < viewRangeSq) {
           const typeId = BuildingType.id[beid];
           const bName = this.buildingTypeNames[typeId] ?? 'Building';
-          this.knownEnemyPositions.set(beid + 100000, { // Offset to avoid collision with unit eids
+          this.knownEnemyPositions.set(beid + 100000, {
             x: Position.x[beid],
             z: Position.z[beid],
             typeName: bName,
@@ -593,6 +602,11 @@ export class AIPlayer implements GameSystem {
   /** Set the unit type name lookup array (from index.ts unitTypeNames) */
   setUnitTypeNames(names: string[]): void {
     this.unitTypeNamesCache = names;
+  }
+
+  /** Inject spatial grid for O(k) neighbor queries instead of O(n) scans */
+  setSpatialGrid(grid: SpatialGrid): void {
+    this.spatialGrid = grid;
   }
 
   /** Get a unit type name from an entity's UnitType.id component */
@@ -1621,14 +1635,29 @@ export class AIPlayer implements GameSystem {
 
     // Also detect enemies near base as an attack indicator
     if (!activeDamageDetected) {
-      const units = unitQuery(world);
-      for (const eid of units) {
-        if (Owner.playerId[eid] === this.playerId) continue;
-        if (Health.current[eid] <= 0) continue;
-        const dist = distance2D(Position.x[eid], Position.z[eid], this.baseX, this.baseZ);
-        if (dist < 30) {
-          activeDamageDetected = true;
-          break;
+      const baseCheckRadius = 30;
+      if (this.spatialGrid) {
+        const nearby = this.spatialGrid.getInRadius(this.baseX, this.baseZ, baseCheckRadius);
+        for (let i = 0; i < nearby.length; i++) {
+          const eid = nearby[i];
+          if (Owner.playerId[eid] === this.playerId) continue;
+          if (Health.current[eid] <= 0) continue;
+          const dist = distance2D(Position.x[eid], Position.z[eid], this.baseX, this.baseZ);
+          if (dist < baseCheckRadius) {
+            activeDamageDetected = true;
+            break;
+          }
+        }
+      } else {
+        const units = unitQuery(world);
+        for (const eid of units) {
+          if (Owner.playerId[eid] === this.playerId) continue;
+          if (Health.current[eid] <= 0) continue;
+          const dist = distance2D(Position.x[eid], Position.z[eid], this.baseX, this.baseZ);
+          if (dist < baseCheckRadius) {
+            activeDamageDetected = true;
+            break;
+          }
         }
       }
     }
@@ -1736,16 +1765,30 @@ export class AIPlayer implements GameSystem {
 
   /** During base defense, make nearby units actively engage enemy attackers */
   private engageNearbyEnemies(world: World): void {
-    const allUnits = unitQuery(world);
     const enemies: number[] = [];
 
-    // Find enemy units near AI base
-    for (const eid of allUnits) {
-      if (Owner.playerId[eid] === this.playerId) continue;
-      if (Health.current[eid] <= 0) continue;
-      const dist = distance2D(Position.x[eid], Position.z[eid], this.baseX, this.baseZ);
-      if (dist < 40) {
-        enemies.push(eid);
+    // Find enemy units near AI base using spatial grid
+    const engageRadius = 40;
+    if (this.spatialGrid) {
+      const nearby = this.spatialGrid.getInRadius(this.baseX, this.baseZ, engageRadius);
+      for (let i = 0; i < nearby.length; i++) {
+        const eid = nearby[i];
+        if (Owner.playerId[eid] === this.playerId) continue;
+        if (Health.current[eid] <= 0) continue;
+        const dist = distance2D(Position.x[eid], Position.z[eid], this.baseX, this.baseZ);
+        if (dist < engageRadius) {
+          enemies.push(eid);
+        }
+      }
+    } else {
+      const allUnits = unitQuery(world);
+      for (const eid of allUnits) {
+        if (Owner.playerId[eid] === this.playerId) continue;
+        if (Health.current[eid] <= 0) continue;
+        const dist = distance2D(Position.x[eid], Position.z[eid], this.baseX, this.baseZ);
+        if (dist < engageRadius) {
+          enemies.push(eid);
+        }
       }
     }
 
@@ -1763,14 +1806,19 @@ export class AIPlayer implements GameSystem {
     };
 
     // Assign idle defenders and nearby units to attack the closest enemy
-    for (const eid of allUnits) {
+    const defenderRadius = 50;
+    const candidates = this.spatialGrid
+      ? this.spatialGrid.getInRadius(this.baseX, this.baseZ, defenderRadius)
+      : unitQuery(world);
+
+    for (const eid of candidates) {
       if (Owner.playerId[eid] !== this.playerId) continue;
       if (Health.current[eid] <= 0) continue;
       if (hasComponent(world, Harvester, eid)) continue;
 
       // Only engage units near base that aren't already attacking
       const dist = distance2D(Position.x[eid], Position.z[eid], this.baseX, this.baseZ);
-      if (dist > 50) continue;
+      if (dist > defenderRadius) continue;
 
       // Skip units that already have an active attack target
       if (hasComponent(world, AttackTarget, eid) && AttackTarget.active[eid] === 1) continue;

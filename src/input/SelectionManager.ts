@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { World } from '../core/ECS';
-import { Position, Selectable, Owner, UnitType, Health, Combat, MoveTarget, Harvester, selectableQuery, unitQuery, hasComponent } from '../core/ECS';
+import { Position, Selectable, Owner, UnitType, Health, Combat, MoveTarget, AttackTarget, Harvester, selectableQuery, unitQuery, hasComponent } from '../core/ECS';
 import type { SceneManager } from '../rendering/SceneManager';
 import type { UnitRenderer } from '../rendering/UnitRenderer';
 import { EventBus } from '../core/EventBus';
@@ -129,9 +129,9 @@ export class SelectionManager {
       const world = (window as any).game?.getWorld();
       if (!world) return;
 
-      // Double-click: select all same-type units on screen
+      // Double-click: select same-type units (Ctrl = all on map, otherwise on-screen only)
       if (this.lastClickEid === eid && (now - this.lastClickTime) < 400) {
-        this.selectAllSameType(world, eid);
+        this.selectAllSameType(world, eid, e.ctrlKey || e.metaKey);
         this.lastClickEid = null;
         return;
       }
@@ -146,7 +146,7 @@ export class SelectionManager {
     }
   }
 
-  private selectAllSameType(world: World, referenceEid: number): void {
+  private selectAllSameType(world: World, referenceEid: number, global = false): void {
     if (!hasComponent(world, UnitType, referenceEid)) return;
     const typeId = UnitType.id[referenceEid];
     const entities = selectableQuery(world);
@@ -158,13 +158,20 @@ export class SelectionManager {
       if (UnitType.id[eid] !== typeId) continue;
       if (Health.current[eid] <= 0) continue;
 
-      // Check if on screen
-      const worldPos = new THREE.Vector3(Position.x[eid], Position.y[eid], Position.z[eid]);
-      const screenPos = worldPos.project(this.sceneManager.camera);
-      const sx = (screenPos.x + 1) / 2 * window.innerWidth;
-      const sy = (-screenPos.y + 1) / 2 * window.innerHeight;
-      if (sx >= 0 && sx <= window.innerWidth && sy >= 0 && sy <= window.innerHeight) {
+      if (global) {
+        // Ctrl+double-click: select all on entire map
         matches.push(eid);
+      } else {
+        // Double-click: select only on-screen units
+        const worldPos = new THREE.Vector3(Position.x[eid], Position.y[eid], Position.z[eid]);
+        const screenPos = worldPos.project(this.sceneManager.camera);
+        if (screenPos.z > 0 && screenPos.z < 1) {
+          const sx = (screenPos.x + 1) / 2 * window.innerWidth;
+          const sy = (-screenPos.y + 1) / 2 * window.innerHeight;
+          if (sx >= 0 && sx <= window.innerWidth && sy >= 0 && sy <= window.innerHeight) {
+            matches.push(eid);
+          }
+        }
       }
     }
 
@@ -187,6 +194,7 @@ export class SelectionManager {
       // Project entity world position to screen
       const worldPos = new THREE.Vector3(Position.x[eid], Position.y[eid], Position.z[eid]);
       const screenPos = worldPos.project(this.sceneManager.camera);
+      if (screenPos.z <= 0 || screenPos.z >= 1) continue; // Behind camera
       const sx = (screenPos.x + 1) / 2 * window.innerWidth;
       const sy = (-screenPos.y + 1) / 2 * window.innerHeight;
 
@@ -247,7 +255,7 @@ export class SelectionManager {
         if (Health.current[eid] <= 0) continue;
         if (hasComponent(world, Harvester, eid)) continue;
         if (MoveTarget.active[eid] === 1) continue;
-        if (hasComponent(world, Combat, eid) && Combat.targetEid[eid] > 0) continue;
+        if (hasComponent(world, Combat, eid) && hasComponent(world, AttackTarget, eid) && AttackTarget.active[eid] === 1) continue;
         idle.push(eid);
       }
       if (idle.length > 0) this.selectEntities(world, idle);

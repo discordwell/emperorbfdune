@@ -449,6 +449,44 @@ export class CommandManager {
     this.audioManager?.playSfx('select');
   }
 
+  private issueScatterCommand(entityIds: number[]): void {
+    if (entityIds.length === 0) return;
+
+    // Calculate group centroid
+    let cx = 0, cz = 0;
+    for (const eid of entityIds) {
+      cx += Position.x[eid];
+      cz += Position.z[eid];
+    }
+    cx /= entityIds.length;
+    cz /= entityIds.length;
+
+    // Move each unit away from center
+    const scatterDist = 6;
+    for (const eid of entityIds) {
+      let dx = Position.x[eid] - cx;
+      let dz = Position.z[eid] - cz;
+      const len = Math.sqrt(dx * dx + dz * dz);
+      if (len < 0.5) {
+        // Units at center: give random direction
+        const angle = Math.random() * Math.PI * 2;
+        dx = Math.cos(angle);
+        dz = Math.sin(angle);
+      } else {
+        dx /= len;
+        dz /= len;
+      }
+      MoveTarget.x[eid] = Position.x[eid] + dx * scatterDist;
+      MoveTarget.z[eid] = Position.z[eid] + dz * scatterDist;
+      MoveTarget.active[eid] = 1;
+      AttackTarget.active[eid] = 0;
+      this.waypointQueues.delete(eid);
+      this.patrolEntities.delete(eid);
+    }
+    this.combatSystem?.clearAttackMove(entityIds);
+    this.audioManager?.playSfx('select');
+  }
+
   private issueEscortCommand(entityIds: number[], targetEid: number): void {
     for (const eid of entityIds) {
       this.waypointQueues.delete(eid);

@@ -84,6 +84,8 @@ export class UnitRenderer {
   private entityAnims = new Map<number, EntityAnimData>();
   // Clock for animation delta
   private animClock = new THREE.Clock();
+  // Turret node cache: entity ID -> THREE.Object3D (found by ::0 name prefix)
+  private turretNodes = new Map<number, THREE.Object3D>();
 
   constructor(sceneManager: SceneManager, modelManager: ModelManager, artMap: Map<string, ArtEntry>) {
     this.sceneManager = sceneManager;
@@ -327,19 +329,11 @@ export class UnitRenderer {
       );
       obj.rotation.y = Rotation.y[eid];
 
-      // Independent turret rotation: rotate the model's first child group (turret heuristic)
+      // Independent turret rotation: rotate the ::0 turret node (found by XBF name convention)
       if (hasComponent(world, TurretRotation, eid)) {
-        const turretAngle = TurretRotation.y[eid] - Rotation.y[eid]; // Relative to hull
-        // Find the model wrapper (first non-circle child), then its first child (turret)
-        for (const child of obj.children) {
-          if (child instanceof THREE.Group && child.children.length > 0) {
-            // The model wrapper's first child group is the turret
-            const turret = child.children[0];
-            if (turret instanceof THREE.Group || turret instanceof THREE.Mesh) {
-              turret.rotation.y = turretAngle;
-            }
-            break;
-          }
+        const turretNode = this.turretNodes.get(eid);
+        if (turretNode) {
+          turretNode.rotation.y = TurretRotation.y[eid] - Rotation.y[eid]; // Relative to hull
         }
       }
 
@@ -577,6 +571,14 @@ export class UnitRenderer {
           // Tint the model slightly with team color
           child.material.color.lerp(color, 0.3);
         }
+      }
+    });
+
+    // Cache turret node (identified by ::0 name prefix in XBF models)
+    this.turretNodes.delete(eid);
+    clone.traverse(child => {
+      if (child.name.startsWith('::0')) {
+        this.turretNodes.set(eid, child);
       }
     });
 
@@ -843,6 +845,7 @@ export class UnitRenderer {
     this.rankSprites.delete(eid);
     this.pendingModels.delete(eid);
     this.deconstructing.delete(eid);
+    this.turretNodes.delete(eid);
     // Clean up animation mixer — uncacheRoot releases PropertyBinding cache
     const animData = this.entityAnims.get(eid);
     if (animData) {
