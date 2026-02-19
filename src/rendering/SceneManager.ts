@@ -187,9 +187,16 @@ export class SceneManager implements RenderSystem {
     this.mapBoundsZ = worldH;
   }
 
-  /** Smoothly pan the camera to a world position */
+  /** Smoothly pan the camera to a world position (clamped to map bounds) */
   panTo(x: number, z: number): void {
-    this.panTarget = new THREE.Vector3(x, 0, z);
+    const cx = Math.max(-20, Math.min(this.mapBoundsX + 20, x));
+    const cz = Math.max(-20, Math.min(this.mapBoundsZ + 20, z));
+    this.panTarget = new THREE.Vector3(cx, 0, cz);
+  }
+
+  /** Get current camera target position */
+  getCameraTarget(): { x: number; z: number } {
+    return { x: this.cameraTarget.x, z: this.cameraTarget.z };
   }
 
   /** Instantly snap camera (cancels any smooth pan) */

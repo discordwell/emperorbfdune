@@ -35,6 +35,8 @@ export class SelectionPanel {
   private passengerCountFn: ((eid: number) => number) | null = null;
   private isRepairingFn: ((eid: number) => boolean) | null = null;
   private playerFaction = 'AT';
+  private panToFn: ((x: number, z: number) => void) | null = null;
+  private deselectFn: ((eid: number) => void) | null = null;
 
   constructor(
     rules: GameRules,
@@ -108,6 +110,14 @@ export class SelectionPanel {
 
   setPlayerFaction(prefix: string): void {
     this.playerFaction = prefix;
+  }
+
+  setPanToFn(fn: (x: number, z: number) => void): void {
+    this.panToFn = fn;
+  }
+
+  setDeselectFn(fn: (eid: number) => void): void {
+    this.deselectFn = fn;
   }
 
   /** Refresh the panel display (call periodically to update dynamic info like upgrade progress, repair state) */
@@ -450,7 +460,7 @@ export class SelectionPanel {
       const initial = name.charAt(0).toUpperCase();
 
       gridHtml += `
-        <div style="width:32px;text-align:center;font-size:9px;color:#aaa;" title="${name}">
+        <div class="unit-portrait" data-eid="${eid}" style="width:32px;text-align:center;font-size:9px;color:#aaa;cursor:pointer;" title="${name} — Click: pan, Ctrl+Click: deselect">
           <div style="width:28px;height:28px;margin:0 auto 2px;background:#1a1a3e;border:1px solid #444;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:bold;color:#fff;">${initial}</div>
           <div style="width:28px;height:3px;margin:0 auto;background:#333;">
             <div style="height:100%;width:${Math.round(ratio * 100)}%;background:${barColor};"></div>
@@ -495,5 +505,29 @@ export class SelectionPanel {
         <div style="display:flex;flex-wrap:wrap;gap:2px;">${gridHtml}${moreText}</div>
       </div>
     `;
+
+    // Wire up portrait click handlers
+    const portraits = this.container.querySelectorAll('.unit-portrait');
+    portraits.forEach((el) => {
+      const eid = parseInt((el as HTMLElement).dataset.eid ?? '0', 10);
+      (el as HTMLElement).addEventListener('click', (ev) => {
+        if (ev.ctrlKey || ev.metaKey) {
+          // Ctrl+click: remove from selection
+          if (this.deselectFn) this.deselectFn(eid);
+        } else {
+          // Click: pan camera to unit
+          if (this.panToFn && this.world && hasComponent(this.world, Position, eid)) {
+            this.panToFn(Position.x[eid], Position.z[eid]);
+          }
+        }
+      });
+      // Hover highlight
+      (el as HTMLElement).addEventListener('mouseenter', () => {
+        (el.querySelector('div') as HTMLElement).style.borderColor = '#88f';
+      });
+      (el as HTMLElement).addEventListener('mouseleave', () => {
+        (el.querySelector('div') as HTMLElement).style.borderColor = '#444';
+      });
+    });
   }
 }

@@ -9,6 +9,53 @@ interface PathNode {
   parent: PathNode | null;
 }
 
+/** Binary min-heap for A* open set — O(log n) insert/extract vs O(n) linear scan */
+class MinHeap {
+  private data: PathNode[] = [];
+
+  get length(): number { return this.data.length; }
+
+  insert(node: PathNode): void {
+    this.data.push(node);
+    this.bubbleUp(this.data.length - 1);
+  }
+
+  extractMin(): PathNode {
+    const min = this.data[0];
+    const last = this.data.pop()!;
+    if (this.data.length > 0) {
+      this.data[0] = last;
+      this.sinkDown(0);
+    }
+    return min;
+  }
+
+  private bubbleUp(i: number): void {
+    const d = this.data;
+    while (i > 0) {
+      const parent = (i - 1) >> 1;
+      if (d[i].f >= d[parent].f) break;
+      const tmp = d[i]; d[i] = d[parent]; d[parent] = tmp;
+      i = parent;
+    }
+  }
+
+  private sinkDown(i: number): void {
+    const d = this.data;
+    const n = d.length;
+    while (true) {
+      let smallest = i;
+      const left = 2 * i + 1;
+      const right = 2 * i + 2;
+      if (left < n && d[left].f < d[smallest].f) smallest = left;
+      if (right < n && d[right].f < d[smallest].f) smallest = right;
+      if (smallest === i) break;
+      const tmp = d[i]; d[i] = d[smallest]; d[smallest] = tmp;
+      i = smallest;
+    }
+  }
+}
+
 export class PathfindingSystem {
   private terrain: TerrainRenderer;
   private blockedTiles = new Set<number>(); // key = tz * mapW + tx
@@ -47,8 +94,9 @@ export class PathfindingSystem {
       endTz = nearest.tz;
     }
 
-    const openSet: PathNode[] = [];
+    const openSet = new MinHeap();
     const closedSet = new Set<number>();
+    const bestG = new Map<number, number>();
 
     const startNode: PathNode = {
       tx: startTx, tz: startTz,
@@ -58,20 +106,14 @@ export class PathfindingSystem {
       parent: null,
     };
     startNode.f = startNode.g + startNode.h;
-    openSet.push(startNode);
+    openSet.insert(startNode);
 
     let nodesExplored = 0;
 
     while (openSet.length > 0 && nodesExplored < maxNodes) {
       nodesExplored++;
 
-      // Find lowest f
-      let bestIdx = 0;
-      for (let i = 1; i < openSet.length; i++) {
-        if (openSet[i].f < openSet[bestIdx].f) bestIdx = i;
-      }
-      const current = openSet[bestIdx];
-      openSet.splice(bestIdx, 1);
+      const current = openSet.extractMin();
 
       if (current.tx === endTx && current.tz === endTz) {
         return this.reconstructPath(current);
@@ -102,9 +144,13 @@ export class PathfindingSystem {
 
           const moveCost = (dx !== 0 && dz !== 0) ? 1.414 : 1.0;
           const g = current.g + moveCost;
-          const h = this.heuristic(ntx, ntz, endTx, endTz);
 
-          openSet.push({
+          // Skip if we already found a shorter path to this tile
+          if (g >= (bestG.get(nkey) ?? Infinity)) continue;
+          bestG.set(nkey, g);
+
+          const h = this.heuristic(ntx, ntz, endTx, endTz);
+          openSet.insert({
             tx: ntx, tz: ntz,
             g, h, f: g + h,
             parent: current,
