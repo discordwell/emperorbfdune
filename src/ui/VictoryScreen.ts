@@ -1,4 +1,4 @@
-import { Owner, Health, BuildingType, buildingQuery, type World } from '../core/ECS';
+import { Owner, Health, BuildingType, buildingQuery, unitQuery, type World } from '../core/ECS';
 import type { AudioManager } from '../audio/AudioManager';
 
 export type VictoryCondition = 'annihilate' | 'conyard' | 'survival';
@@ -144,7 +144,14 @@ export class VictorySystem {
         else enemyAlive = true;
       }
     } else {
+      // Annihilate: check both buildings and units
       for (const eid of buildings) {
+        if (Health.current[eid] <= 0) continue;
+        if (Owner.playerId[eid] === this.localPlayerId) playerAlive = true;
+        else enemyAlive = true;
+      }
+      const units = unitQuery(world);
+      for (const eid of units) {
         if (Health.current[eid] <= 0) continue;
         if (Owner.playerId[eid] === this.localPlayerId) playerAlive = true;
         else enemyAlive = true;

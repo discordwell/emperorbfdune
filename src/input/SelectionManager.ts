@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { World } from '../core/ECS';
-import { Position, Selectable, Owner, UnitType, Health, Combat, MoveTarget, AttackTarget, Harvester, selectableQuery, unitQuery, hasComponent } from '../core/ECS';
+import { Position, Selectable, Owner, UnitType, Health, Combat, MoveTarget, AttackTarget, Harvester, BuildingType, selectableQuery, unitQuery, buildingQuery, hasComponent } from '../core/ECS';
 import type { SceneManager } from '../rendering/SceneManager';
 import type { UnitRenderer } from '../rendering/UnitRenderer';
 import { EventBus } from '../core/EventBus';
@@ -29,6 +29,9 @@ export class SelectionManager {
   private lastClickTime = 0;
   private lastClickEid: number | null = null;
 
+  // Building type names for Home key (jump to base)
+  private buildingTypeNames: string[] = [];
+
   constructor(sceneManager: SceneManager, unitRenderer: UnitRenderer) {
     this.sceneManager = sceneManager;
     this.unitRenderer = unitRenderer;
@@ -46,6 +49,10 @@ export class SelectionManager {
 
   getSelectedEntities(): number[] {
     return this.selectedEntities;
+  }
+
+  setBuildingTypeNames(names: string[]): void {
+    this.buildingTypeNames = names;
   }
 
   getControlGroups(): Map<number, number[]> {
@@ -259,6 +266,51 @@ export class SelectionManager {
         idle.push(eid);
       }
       if (idle.length > 0) this.selectEntities(world, idle);
+      return;
+    }
+
+    // Home: Jump camera to base (ConYard)
+    if (key === 'Home' || (key === 'h' && !e.ctrlKey && !e.metaKey && !e.shiftKey)) {
+      const world = (window as any).game?.getWorld();
+      if (!world) return;
+      const buildings = buildingQuery(world);
+      for (const eid of buildings) {
+        if (Owner.playerId[eid] !== 0) continue;
+        if (Health.current[eid] <= 0) continue;
+        const typeId = BuildingType.id[eid];
+        const bName = this.buildingTypeNames[typeId] ?? '';
+        if (bName.includes('ConYard') || bName.includes('Conyard')) {
+          this.sceneManager.panTo(Position.x[eid], Position.z[eid]);
+          return;
+        }
+      }
+      // No ConYard — pan to any owned building
+      for (const eid of buildings) {
+        if (Owner.playerId[eid] !== 0) continue;
+        if (Health.current[eid] <= 0) continue;
+        this.sceneManager.panTo(Position.x[eid], Position.z[eid]);
+        return;
+      }
+      return;
+    }
+
+    // Space: Center camera on current selection
+    if (key === ' ') {
+      e.preventDefault();
+      if (this.selectedEntities.length > 0) {
+        let cx = 0, cz = 0;
+        let alive = 0;
+        for (const eid of this.selectedEntities) {
+          if (Health.current[eid] > 0) {
+            cx += Position.x[eid];
+            cz += Position.z[eid];
+            alive++;
+          }
+        }
+        if (alive > 0) {
+          this.sceneManager.panTo(cx / alive, cz / alive);
+        }
+      }
       return;
     }
 

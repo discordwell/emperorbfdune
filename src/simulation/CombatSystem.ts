@@ -700,6 +700,13 @@ export class CombatSystem implements GameSystem {
         if (cdx * cdx + cdz * cdz > closeRange * closeRange) continue;
       }
 
+      // Anti-air targeting: skip flying units if our weapon lacks antiAircraft capability
+      const targetTypeName = this.unitTypeMap.get(other);
+      if (targetTypeName) {
+        const targetDef = this.rules.units.get(targetTypeName);
+        if (targetDef?.canFly && !bullet?.antiAircraft) continue;
+      }
+
       // Player units can only auto-target enemies in visible fog tiles
       if (myOwner === this.localPlayerId && this.fogOfWar && this.fogOfWar.isEnabled()) {
         const tile = worldToTile(Position.x[other], Position.z[other]);

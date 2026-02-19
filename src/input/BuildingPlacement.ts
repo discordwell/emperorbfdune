@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { SceneManager } from '../rendering/SceneManager';
 import type { TerrainRenderer } from '../rendering/TerrainRenderer';
 import { TerrainType } from '../rendering/TerrainRenderer';
-import { Position, BuildingType, buildingQuery, type World } from '../core/ECS';
+import { Position, Owner, Health, BuildingType, buildingQuery, type World } from '../core/ECS';
 import { worldToTile, tileToWorld, TILE_SIZE } from '../utils/MathUtils';
 import { GameConstants } from '../utils/Constants';
 import { EventBus } from '../core/EventBus';
@@ -31,7 +31,8 @@ export class BuildingPlacement {
   private isValidPlacement = false;
 
   // Occupied tiles tracking
-  private occupiedTiles = new Set<string>();
+  private occupiedTiles = new Set<string>(); // All buildings (for overlap check)
+  private ownedTiles = new Set<string>(); // Player-owned buildings (for proximity check)
 
   constructor(
     sceneManager: SceneManager,
@@ -133,13 +134,18 @@ export class BuildingPlacement {
   // Call from game tick to update occupied tiles from ECS
   updateOccupiedTiles(world: World): void {
     this.occupiedTiles.clear();
+    this.ownedTiles.clear();
     const buildings = buildingQuery(world);
     for (const eid of buildings) {
+      if (Health.current[eid] <= 0) continue;
       const tile = worldToTile(Position.x[eid], Position.z[eid]);
+      const isOwned = Owner.playerId[eid] === 0;
       // Mark 3x3 area as occupied (approximate building footprint)
       for (let dz = -1; dz <= 1; dz++) {
         for (let dx = -1; dx <= 1; dx++) {
-          this.occupiedTiles.add(`${tile.tx + dx},${tile.tz + dz}`);
+          const key = `${tile.tx + dx},${tile.tz + dz}`;
+          this.occupiedTiles.add(key);
+          if (isOwned) this.ownedTiles.add(key);
         }
       }
     }
@@ -178,10 +184,10 @@ export class BuildingPlacement {
       }
     }
 
-    // Must be within range of existing owned buildings
+    // Must be within range of existing player-owned buildings
     const maxDist = GameConstants.MAX_BUILDING_PLACEMENT_TILE_DIST;
     let nearBuilding = false;
-    for (const key of this.occupiedTiles) {
+    for (const key of this.ownedTiles) {
       const [bx, bz] = key.split(',').map(Number);
       const dist = Math.abs(bx - tx) + Math.abs(bz - tz);
       if (dist <= maxDist + 3) { // +3 for building footprint

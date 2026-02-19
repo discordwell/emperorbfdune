@@ -39,6 +39,8 @@ export class AIPlayer implements GameSystem {
   private infantryPool: string[] = [];
   private vehiclePool: string[] = [];
   private aircraftPool: string[] = [];
+  private specialPool: string[] = []; // Engineers, saboteurs, infiltrators, deviators
+  private specialEntities = new Set<number>(); // Track deployed special units
   private subhousePrefix = '';
 
   // Build order tracking
@@ -143,9 +145,11 @@ export class AIPlayer implements GameSystem {
     });
 
     for (const [name, def] of rules.units) {
-      if (name.startsWith('HK') && def.cost > 0 && def.cost <= 1200) {
+      if (name.startsWith('HK') && def.cost > 0) {
         if (def.canFly) {
           this.aircraftPool.push(name);
+        } else if (def.aiSpecial && !def.deviator) {
+          this.specialPool.push(name);
         } else {
           this.unitPool.push(name);
         }
@@ -203,6 +207,8 @@ export class AIPlayer implements GameSystem {
       if (name.startsWith(prefix) && def.cost > 0) {
         if (def.canFly) {
           this.aircraftPool.push(name);
+        } else if (def.aiSpecial && !def.deviator) {
+          this.specialPool.push(name);
         } else {
           this.unitPool.push(name);
           if (def.infantry) {
@@ -223,11 +229,15 @@ export class AIPlayer implements GameSystem {
     this.infantryPool = [];
     this.vehiclePool = [];
     this.aircraftPool = [];
+    this.specialPool = [];
 
     for (const [name, def] of this.rules.units) {
       if (name.startsWith(prefix) && def.cost > 0) {
         if (def.canFly) {
           this.aircraftPool.push(name);
+        } else if (def.aiSpecial && !def.deviator) {
+          // Special units get their own pool - not mixed with regular army
+          this.specialPool.push(name);
         } else {
           this.unitPool.push(name);
           if (def.infantry) {
@@ -299,6 +309,16 @@ export class AIPlayer implements GameSystem {
     // Use Starport for bulk purchases when prices are good
     if (t % 375 === 100 && this.production && this.harvestSystem) {
       this.useStarport();
+    }
+
+    // Train special units (engineers, saboteurs, infiltrators) periodically
+    if (t % 600 === 300 && this.production && this.harvestSystem && this.specialPool.length > 0) {
+      this.trainSpecialUnit();
+    }
+
+    // Deploy special units toward enemy buildings (every ~12 seconds)
+    if (t % 300 === 150) {
+      this.deploySpecialUnits(world);
     }
 
     // Detect base attacks: check if AI buildings are taking damage
@@ -723,6 +743,7 @@ export class AIPlayer implements GameSystem {
       if (Owner.playerId[eid] !== this.playerId) continue;
       if (Health.current[eid] <= 0) continue;
       if (hasComponent(world, Harvester, eid)) continue;
+      if (this.specialEntities.has(eid)) continue;
 
       const typeName = this.getUnitTypeName(eid);
       if (!typeName) continue;
@@ -1445,6 +1466,112 @@ export class AIPlayer implements GameSystem {
     }
   }
 
+  /** Train a special unit (engineer, saboteur, infiltrator, deviator) */
+  private trainSpecialUnit(): void {
+    if (!this.production || !this.harvestSystem) return;
+    const solaris = this.harvestSystem.getSolaris(this.playerId);
+    if (solaris < 1000) return; // Special units are a luxury — only with surplus funds
+
+    const buildable = this.specialPool.filter(name =>
+      this.production!.canBuild(this.playerId, name, false)
+    );
+    if (buildable.length === 0) return;
+
+    // Limit special units: max 3 alive at a time
+    this.cleanupSpecialEntities();
+    if (this.specialEntities.size >= 3) return;
+
+    const typeName = buildable[Math.floor(Math.random() * buildable.length)];
+    this.production.startProduction(this.playerId, typeName, false);
+  }
+
+  /** Deploy idle special units toward enemy buildings */
+  private deploySpecialUnits(world: World): void {
+    this.cleanupSpecialEntities();
+
+    const units = unitQuery(world);
+
+    // Find idle special units belonging to this AI
+    const idleSpecials: number[] = [];
+    for (const eid of units) {
+      if (Owner.playerId[eid] !== this.playerId) continue;
+      if (Health.current[eid] <= 0) continue;
+
+      const typeName = this.getUnitTypeName(eid);
+      if (!typeName) continue;
+      const def = this.rules.units.get(typeName);
+      if (!def?.aiSpecial || def.deviator) continue;
+
+      // Track this entity as a special unit
+      this.specialEntities.add(eid);
+
+      // Only command idle specials (not already on a mission)
+      if (MoveTarget.active[eid] === 1) continue;
+
+      idleSpecials.push(eid);
+    }
+
+    if (idleSpecials.length === 0) return;
+
+    // Find enemy buildings to target
+    const buildings = buildingQuery(world);
+    const targets: { eid: number; x: number; z: number; priority: number }[] = [];
+    for (const bid of buildings) {
+      if (Owner.playerId[bid] === this.playerId) continue;
+      if (Health.current[bid] <= 0) continue;
+
+      // Prioritize high-value targets
+      const bTypeId = BuildingType.id[bid];
+      const bName = this.buildingTypeNames[bTypeId] ?? '';
+      const bDef = bName ? this.rules.buildings.get(bName) : null;
+
+      let priority = 1;
+      if (bName.includes('ConYard') || bName.includes('Conyard')) priority = 5;
+      else if (bName.includes('Refinery')) priority = 4;
+      else if (bName.includes('Factory')) priority = 3;
+      else if (bDef?.powerGenerated && bDef.powerGenerated > 0) priority = 2;
+
+      targets.push({
+        eid: bid,
+        x: Position.x[bid],
+        z: Position.z[bid],
+        priority,
+      });
+    }
+
+    if (targets.length === 0) return;
+
+    // Sort by priority (highest first)
+    targets.sort((a, b) => b.priority - a.priority);
+
+    // Assign each special unit to a target building
+    for (let i = 0; i < idleSpecials.length; i++) {
+      const eid = idleSpecials[i];
+      // Cycle through targets so multiple specials don't all go to the same building
+      const target = targets[i % targets.length];
+
+      MoveTarget.x[eid] = target.x + randomFloat(-3, 3);
+      MoveTarget.z[eid] = target.z + randomFloat(-3, 3);
+      MoveTarget.active[eid] = 1;
+    }
+  }
+
+  /** Remove dead/destroyed/recycled entities from specialEntities tracking */
+  private cleanupSpecialEntities(): void {
+    for (const eid of this.specialEntities) {
+      if (Health.current[eid] <= 0 || Owner.playerId[eid] !== this.playerId) {
+        this.specialEntities.delete(eid);
+        continue;
+      }
+      // Verify entity still has aiSpecial flag (handles entity ID reuse)
+      const typeName = this.getUnitTypeName(eid);
+      const def = typeName ? this.rules.units.get(typeName) : null;
+      if (!def?.aiSpecial || def.deviator) {
+        this.specialEntities.delete(eid);
+      }
+    }
+  }
+
   private spawnWave(world: World): void {
     for (let i = 0; i < this.waveSize; i++) {
       const typeName = this.unitPool[Math.floor(Math.random() * this.unitPool.length)];
@@ -1522,6 +1649,8 @@ export class AIPlayer implements GameSystem {
       if (hasComponent(world, Harvester, eid)) continue;
       // Skip scouts - they have their own orders
       if (this.scoutEntities.has(eid)) continue;
+      // Skip special units (engineers, saboteurs, etc.) - they have their own deployment
+      if (this.specialEntities.has(eid)) continue;
       totalUnits++;
 
       if (MoveTarget.active[eid] === 0) {
@@ -1696,6 +1825,8 @@ export class AIPlayer implements GameSystem {
       if (Owner.playerId[eid] !== this.playerId) continue;
       if (Health.current[eid] <= 0) continue;
       if (hasComponent(world, Harvester, eid)) continue;
+      // Special units (engineers, saboteurs) don't retreat — they're on suicide missions
+      if (this.specialEntities.has(eid)) continue;
 
       const ratio = Health.current[eid] / Health.max[eid];
       if (ratio < this.retreatHealthPct) {
@@ -1802,6 +1933,7 @@ export class AIPlayer implements GameSystem {
       if (Owner.playerId[eid] !== this.playerId) continue;
       if (Health.current[eid] <= 0) continue;
       if (hasComponent(world, Harvester, eid)) continue;
+      if (this.specialEntities.has(eid)) continue;
 
       // Only recall units that aren't already near base
       const dist = distance2D(Position.x[eid], Position.z[eid], this.baseX, this.baseZ);
@@ -1828,6 +1960,7 @@ export class AIPlayer implements GameSystem {
       if (Health.current[eid] <= 0) continue;
       if (hasComponent(world, Harvester, eid)) continue;
       if (this.scoutEntities.has(eid)) continue;
+      if (this.specialEntities.has(eid)) continue;
 
       // Only send healthy units (>50% HP) on counterattack
       const hpRatio = Health.current[eid] / Health.max[eid];
@@ -1978,6 +2111,7 @@ export class AIPlayer implements GameSystem {
       if (Health.current[eid] <= 0) continue;
       if (hasComponent(world, Harvester, eid)) continue;
       if (this.scoutEntities.has(eid)) continue; // Don't pull scouts
+      if (this.specialEntities.has(eid)) continue;
       if (MoveTarget.active[eid] === 0) {
         hunters.push(eid);
         if (hunters.length >= 3) break;

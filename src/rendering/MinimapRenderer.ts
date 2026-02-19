@@ -46,6 +46,8 @@ export class MinimapRenderer {
   private unitCategoryFn: ((eid: number) => 'infantry' | 'vehicle' | 'aircraft') | null = null;
   // Building name resolver for importance-based rendering
   private buildingNameFn: ((eid: number) => string) | null = null;
+  // Set of building type names hidden from radar (decorations)
+  private hiddenBuildingNames = new Set<string>();
   // Radar state: requires Outpost building to show unit/building dots
   private radarActive = true;
 
@@ -99,6 +101,11 @@ export class MinimapRenderer {
   /** Set building name resolver for importance-based rendering */
   setBuildingNameFn(fn: (eid: number) => string): void {
     this.buildingNameFn = fn;
+  }
+
+  /** Set building names that should be hidden from the minimap (decorations) */
+  setHiddenBuildingNames(names: Set<string>): void {
+    this.hiddenBuildingNames = names;
   }
 
   /** Set radar state (requires Outpost building to show unit/building dots) */
@@ -256,9 +263,11 @@ export class MinimapRenderer {
         const tile = worldToTile(Position.x[eid], Position.z[eid]);
         if (!this.fogOfWar.isTileVisible(tile.tx, tile.tz)) continue;
       }
+      const bName = this.buildingNameFn ? this.buildingNameFn(eid) : '';
+      // Skip decorations hidden from radar
+      if (bName && this.hiddenBuildingNames.has(bName)) continue;
       const px = Position.x[eid] * scaleWx;
       const pz = Position.z[eid] * scaleWz;
-      const bName = this.buildingNameFn ? this.buildingNameFn(eid) : '';
       const playerColor = PLAYER_COLORS[owner] ?? '#fff';
 
       // Key buildings get special colors and larger size

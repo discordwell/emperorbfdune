@@ -315,6 +315,7 @@ async function main() {
   const modelManager = new ModelManager();
   const unitRenderer = new UnitRenderer(scene, modelManager, artMap);
   const selectionManager = new SelectionManager(scene, unitRenderer);
+  selectionManager.setBuildingTypeNames(buildingTypeNames);
   const commandManager = new CommandManager(scene, selectionManager, unitRenderer);
   commandManager.setAudioManager(audioManager);
 
@@ -389,6 +390,14 @@ async function main() {
     const typeId = BuildingType.id[eid];
     return buildingTypeNames[typeId] ?? '';
   });
+  // Build set of building names hidden from minimap (decorations like trees)
+  const hiddenRadarBuildings = new Set<string>();
+  for (const [name, bDef] of gameRules.buildings) {
+    if (bDef.hideOnRadar) hiddenRadarBuildings.add(name);
+  }
+  if (hiddenRadarBuildings.size > 0) {
+    minimapRenderer.setHiddenBuildingNames(hiddenRadarBuildings);
+  }
   unitRenderer.setFogOfWar(fogOfWar, 0);
   unitRenderer.setUnitCategoryFn((eid: number): 'infantry' | 'vehicle' | 'aircraft' | 'building' => {
     const w = game.getWorld();
@@ -1979,9 +1988,11 @@ async function main() {
         musicTrackEl.textContent = trackName ? `♪ ${trackName}` : '';
       }
 
-      // AI always gets full power (simplification - AI builds enough windtraps)
-      productionSystem.setPowerMultiplier(1, 1.0);
-      combatSystem.setPowerMultiplier(1, 1.0);
+      // AI players get full power (simplification - AI builds enough windtraps)
+      for (let ai = 1; ai < totalPlayers; ai++) {
+        productionSystem.setPowerMultiplier(ai, 1.0);
+        combatSystem.setPowerMultiplier(ai, 1.0);
+      }
 
       // Check for Hanger buildings (enables Carryall harvester airlift)
       const hasHanger = new Array(totalPlayers).fill(false);
