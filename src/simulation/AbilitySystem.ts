@@ -1014,11 +1014,11 @@ export class AbilitySystem {
       if (def?.niabTank) {
         if (this.niabCooldowns.has(eid)) {
           selectionPanel.addMessage('Teleport on cooldown', '#ff8800');
-          break;
+          return true; // Consumed the key even though on cooldown
         }
         // Enter teleport targeting mode
         commandManager.enterCommandMode('teleport', 'Click to teleport');
-        break;
+        return true;
       }
 
       // Projector: create holographic copy of nearest friendly unit
@@ -1052,9 +1052,7 @@ export class AbilitySystem {
               // Hologram: 1 HP, no damage, lasts 6000 ticks (~4 minutes)
               Health.max[holoEid] = 1;
               Health.current[holoEid] = 1;
-              if (hasComponent(world, Combat, holoEid)) {
-                (Combat as any).damage[holoEid] = 0; // Holograms can't deal damage
-              }
+              this.deps.combatSystem.setSuppressed(holoEid, true); // Holograms can't attack
               this.projectorHolograms.set(holoEid, 6000);
               // Make hologram slightly transparent
               const obj = unitRenderer.getEntityObject(holoEid);
@@ -1071,10 +1069,10 @@ export class AbilitySystem {
         } else {
           selectionPanel.addMessage('No unit nearby to copy', '#888');
         }
-        break;
+        return true; // Consumed the key
       }
     }
-    return false; // T key doesn't prevent further handling in the original
+    return false;
   }
 
   /** Load infantry into selected APC (L key) */

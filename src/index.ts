@@ -68,6 +68,7 @@ interface SavedEntity {
   passengerTypeIds?: number[]; // transport passenger unit type IDs
   stance?: number; // 0=aggressive, 1=defensive (default, not saved), 2=hold
   guardPos?: { x: number; z: number }; // guard position
+  attackMoveDest?: { x: number; z: number }; // attack-move destination
 }
 
 interface SaveData {
@@ -2606,6 +2607,7 @@ async function main() {
       // L=load transport, U=unload transport, W=mount worm
       const selected = selectionManager.getSelectedEntities();
       const handled = abilitySystem.handleKeyCommand(e.key, selected, game.getWorld());
+      if (handled) e.stopImmediatePropagation(); // Prevent sidebar from also handling the key
       // X key fallback: scatter if no ability consumed it
       if (!handled && e.key === 'x' && selected.length > 0) {
         commandManager.issueScatterCommand(selected);
@@ -2719,6 +2721,10 @@ async function main() {
       // Save guard position
       const gp = combatSystem.getGuardPosition(eid);
       if (gp) se.guardPos = { x: gp.x, z: gp.z };
+      // Save attack-move destination
+      if (combatSystem.isAttackMove(eid) && MoveTarget.active[eid] === 1) {
+        se.attackMoveDest = { x: MoveTarget.x[eid], z: MoveTarget.z[eid] };
+      }
       entities.push(se);
     }
 
@@ -2893,6 +2899,8 @@ async function main() {
           // Restore stance and guard position
           if (se.stance !== undefined) combatSystem.setStance(eid, se.stance);
           if (se.guardPos) combatSystem.setGuardPosition(eid, se.guardPos.x, se.guardPos.z);
+          // Restore attack-move state
+          if (se.attackMoveDest) combatSystem.setAttackMove([eid]);
         }
       }
     }

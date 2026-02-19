@@ -1910,10 +1910,13 @@ export class AIPlayer implements GameSystem {
       this.engageNearbyEnemies(world);
     }
 
-    // Clean up dead defenders
+    // Clean up stale defenders (dead, deviated, or wandered too far)
     for (const eid of this.defenders) {
-      if (Health.current[eid] <= 0) {
+      if (Health.current[eid] <= 0 || Owner.playerId[eid] !== this.playerId) {
         this.defenders.delete(eid);
+      } else {
+        const dist = distance2D(Position.x[eid], Position.z[eid], this.baseX, this.baseZ);
+        if (dist > 80) this.defenders.delete(eid);
       }
     }
   }

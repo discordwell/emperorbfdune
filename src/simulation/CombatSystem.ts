@@ -711,6 +711,9 @@ export class CombatSystem implements GameSystem {
       targetEntity: targetEid,
     });
 
+    // Re-check ownership after event (Deviator may have converted target to our team)
+    if (Owner.playerId[targetEid] === Owner.playerId[attackerEid]) return;
+
     // AoE blast damage: if bullet has a blast radius, damage all entities in the area
     if (bullet && bullet.blastRadius > 0) {
       this.applyBlastDamage(world, attackerEid, targetEid, baseDamage, bullet);
