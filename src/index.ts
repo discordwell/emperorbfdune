@@ -1140,7 +1140,10 @@ async function main() {
     }
   });
 
+  const processedDeaths = new Set<number>();
   EventBus.on('unit:died', ({ entityId }) => {
+    if (processedDeaths.has(entityId)) return;
+    processedDeaths.add(entityId);
     const world = game.getWorld();
     const isBuilding = hasComponent(world, BuildingType, entityId);
     const x = Position.x[entityId];
@@ -1771,6 +1774,7 @@ async function main() {
   });
 
   EventBus.on('game:tick', () => {
+    processedDeaths.clear();
     const world = game.getWorld();
 
     productionSystem.update();
@@ -2546,8 +2550,11 @@ async function main() {
       scene.panTo(baseX, baseZ);
     } else if (e.key === ' ' && !e.ctrlKey) {
       // Cycle through recent events (most recent first)
+      // Skip if units are selected — SelectionManager handles Space for centering on selection
       e.preventDefault();
-      if (eventQueue.length > 0) {
+      if (selectionManager.getSelectedEntities().length > 0) {
+        // Let SelectionManager's handler handle this
+      } else if (eventQueue.length > 0) {
         if (eventCycleIdx < 0 || eventCycleIdx >= eventQueue.length) eventCycleIdx = eventQueue.length - 1;
         const ev = eventQueue[eventCycleIdx];
         scene.panTo(ev.x, ev.z);
@@ -2762,6 +2769,7 @@ async function main() {
         if (!bName) continue;
         const eid = spawnBuilding(world, bName, se.owner, se.x, se.z);
         if (eid >= 0) {
+          Health.max[eid] = se.maxHp;
           Health.current[eid] = se.hp;
           Position.y[eid] = se.y;
           Rotation.y[eid] = se.rotY;
@@ -2775,6 +2783,7 @@ async function main() {
         if (!uName) continue;
         const eid = spawnUnit(world, uName, se.owner, se.x, se.z);
         if (eid >= 0) {
+          Health.max[eid] = se.maxHp;
           Health.current[eid] = se.hp;
           Position.y[eid] = se.y;
           Rotation.y[eid] = se.rotY;

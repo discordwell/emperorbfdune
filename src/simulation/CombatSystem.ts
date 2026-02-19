@@ -187,6 +187,9 @@ export class CombatSystem implements GameSystem {
     this.guardPositions.delete(eid);
     this.escortTargets.delete(eid);
     this.lastAttacker.delete(eid);
+    this.suppressedEntities.delete(eid);
+    this.stealthedEntities.delete(eid);
+    this.disabledBuildings.delete(eid);
     // Clear any units escorting this entity
     for (const [escorter, target] of this.escortTargets) {
       if (target === eid) this.escortTargets.delete(escorter);
