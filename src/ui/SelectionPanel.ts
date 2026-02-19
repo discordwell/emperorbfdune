@@ -34,6 +34,7 @@ export class SelectionPanel {
   private sellConfirmTimer: ReturnType<typeof setTimeout> | null = null;
   private passengerCountFn: ((eid: number) => number) | null = null;
   private isRepairingFn: ((eid: number) => boolean) | null = null;
+  private aircraftAmmoFn: ((eid: number) => { current: number; max: number } | null) | null = null;
   private playerFaction = 'AT';
   private panToFn: ((x: number, z: number) => void) | null = null;
   private deselectFn: ((eid: number) => void) | null = null;
@@ -106,6 +107,10 @@ export class SelectionPanel {
 
   setRepairingFn(fn: (eid: number) => boolean): void {
     this.isRepairingFn = fn;
+  }
+
+  setAircraftAmmoFn(fn: (eid: number) => { current: number; max: number } | null): void {
+    this.aircraftAmmoFn = fn;
   }
 
   setPlayerFaction(prefix: string): void {
@@ -221,6 +226,27 @@ export class SelectionPanel {
           </div>
           <span style="font-size:10px;color:${stateColors[state] ?? '#888'};">${stateNames[state] ?? 'Unknown'}</span>
         </div>`;
+    }
+
+    // Aircraft ammo display
+    let ammoHtml = '';
+    if (isUnit && this.aircraftAmmoFn) {
+      const ammoInfo = this.aircraftAmmoFn(eid);
+      if (ammoInfo) {
+        const ammoPct = ammoInfo.max > 0 ? Math.round((ammoInfo.current / ammoInfo.max) * 100) : 0;
+        const ammoColor = ammoInfo.current > 0 ? '#88aaff' : '#ff4444';
+        const statusText = ammoInfo.current <= 0 ? ' (Rearming)' : '';
+        ammoHtml = `
+          <div style="margin-bottom:3px;">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:1px;">
+              <span style="font-size:10px;color:${ammoColor};">Ammo:</span>
+              <div style="flex:1;height:5px;background:#333;border-radius:2px;overflow:hidden;">
+                <div style="height:100%;width:${ammoPct}%;background:${ammoColor};"></div>
+              </div>
+              <span style="font-size:10px;color:${ammoColor};">${ammoInfo.current}/${ammoInfo.max}${statusText}</span>
+            </div>
+          </div>`;
+      }
     }
 
     // Stats row
@@ -355,6 +381,7 @@ export class SelectionPanel {
           <span style="font-size:11px;color:${hpColor};">${Math.ceil(hp)}/${maxHp}</span>
         </div>
         ${harvesterHtml}
+        ${ammoHtml}
         ${upgradeProgressHtml}
         <div>${statsHtml}</div>
         ${effectivenessHtml || statusHtml ? `<div style="margin-top:2px;display:flex;gap:10px;">${effectivenessHtml}${statusHtml}</div>` : ''}

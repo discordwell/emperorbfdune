@@ -38,6 +38,7 @@ export class AIPlayer implements GameSystem {
   private unitPool: string[] = [];
   private infantryPool: string[] = [];
   private vehiclePool: string[] = [];
+  private aircraftPool: string[] = [];
   private subhousePrefix = '';
 
   // Build order tracking
@@ -142,8 +143,12 @@ export class AIPlayer implements GameSystem {
     });
 
     for (const [name, def] of rules.units) {
-      if (name.startsWith('HK') && def.cost > 0 && def.cost <= 1200 && !def.canFly) {
-        this.unitPool.push(name);
+      if (name.startsWith('HK') && def.cost > 0 && def.cost <= 1200) {
+        if (def.canFly) {
+          this.aircraftPool.push(name);
+        } else {
+          this.unitPool.push(name);
+        }
       }
     }
     if (this.unitPool.length === 0) {
@@ -195,12 +200,16 @@ export class AIPlayer implements GameSystem {
     this.subhousePrefix = prefix;
     // Add sub-house units to the unit pools
     for (const [name, def] of this.rules.units) {
-      if (name.startsWith(prefix) && def.cost > 0 && !def.canFly) {
-        this.unitPool.push(name);
-        if (def.infantry) {
-          this.infantryPool.push(name);
+      if (name.startsWith(prefix) && def.cost > 0) {
+        if (def.canFly) {
+          this.aircraftPool.push(name);
         } else {
-          this.vehiclePool.push(name);
+          this.unitPool.push(name);
+          if (def.infantry) {
+            this.infantryPool.push(name);
+          } else {
+            this.vehiclePool.push(name);
+          }
         }
       }
     }
@@ -213,14 +222,19 @@ export class AIPlayer implements GameSystem {
     this.unitPool = [];
     this.infantryPool = [];
     this.vehiclePool = [];
+    this.aircraftPool = [];
 
     for (const [name, def] of this.rules.units) {
-      if (name.startsWith(prefix) && def.cost > 0 && !def.canFly) {
-        this.unitPool.push(name);
-        if (def.infantry) {
-          this.infantryPool.push(name);
+      if (name.startsWith(prefix) && def.cost > 0) {
+        if (def.canFly) {
+          this.aircraftPool.push(name);
         } else {
-          this.vehiclePool.push(name);
+          this.unitPool.push(name);
+          if (def.infantry) {
+            this.infantryPool.push(name);
+          } else {
+            this.vehiclePool.push(name);
+          }
         }
       }
     }
@@ -275,6 +289,16 @@ export class AIPlayer implements GameSystem {
     const trainInterval = Math.max(75, Math.floor(150 / this.difficulty));
     if (t % trainInterval === 0 && this.production && this.harvestSystem) {
       this.trainUnits();
+    }
+
+    // Train aircraft periodically (slower than ground units)
+    if (t % 500 === 200 && this.production && this.harvestSystem && this.aircraftPool.length > 0) {
+      this.trainAircraft();
+    }
+
+    // Use Starport for bulk purchases when prices are good
+    if (t % 375 === 100 && this.production && this.harvestSystem) {
+      this.useStarport();
     }
 
     // Detect base attacks: check if AI buildings are taking damage
@@ -1166,13 +1190,52 @@ export class AIPlayer implements GameSystem {
         // If canBuild is false (missing prerequisite), don't advance — retry next tick
       }
     } else {
-      // Try upgrading buildings for higher tech levels
-      if (solaris > 1500) {
-        const upgradePriority = [`${px}Factory`, `${px}Barracks`, `${px}ConYard`];
-        for (const bType of upgradePriority) {
+      // Proactive upgrade: scan unit pool for units needing upgradedPrimaryRequired
+      // and upgrade those buildings first, then fall back to generic upgrade priority
+      if (solaris > 800) {
+        const neededUpgrades = new Set<string>();
+        for (const unitName of this.unitPool) {
+          const uDef = this.rules.units.get(unitName);
+          if (uDef?.upgradedPrimaryRequired && uDef.primaryBuilding) {
+            if (!this.production.isUpgraded(this.playerId, uDef.primaryBuilding)) {
+              neededUpgrades.add(uDef.primaryBuilding);
+            }
+          }
+        }
+        // Also check building pool for upgradedPrimaryRequired buildings
+        const allBuildings = [`${px}Factory`, `${px}Barracks`, `${px}ConYard`, `${px}Hanger`];
+        if (this.subhousePrefix) {
+          const subBuildings: Record<string, string[]> = {
+            'FR': ['FRFremenCamp'], 'IM': ['IMBarracks'], 'IX': ['IXResCentre'],
+            'TL': ['TLFleshVat'], 'GU': ['GUPalace'],
+          };
+          allBuildings.push(...(subBuildings[this.subhousePrefix] ?? []));
+        }
+        for (const bName of allBuildings) {
+          const bDef = this.rules.buildings.get(bName);
+          if (bDef?.upgradedPrimaryRequired && bDef.primaryBuilding) {
+            if (!this.production.isUpgraded(this.playerId, bDef.primaryBuilding)) {
+              neededUpgrades.add(bDef.primaryBuilding);
+            }
+          }
+        }
+
+        // Try upgrading buildings that unlock units first
+        let startedUpgrade = false;
+        for (const bType of neededUpgrades) {
           if (this.production.canUpgrade(this.playerId, bType)) {
             this.production.startUpgrade(this.playerId, bType);
+            startedUpgrade = true;
             break;
+          }
+        }
+        // Then try generic upgrades for tech level progression
+        if (!startedUpgrade && solaris > 1500) {
+          for (const bType of allBuildings) {
+            if (this.production.canUpgrade(this.playerId, bType)) {
+              this.production.startUpgrade(this.playerId, bType);
+              break;
+            }
           }
         }
       }
@@ -1335,6 +1398,51 @@ export class AIPlayer implements GameSystem {
 
     const typeName = buildable[Math.floor(Math.random() * buildable.length)];
     this.production.startProduction(this.playerId, typeName, false);
+  }
+
+  /** Train aircraft when the AI has a Hanger/Helipad */
+  private trainAircraft(): void {
+    if (!this.production || !this.harvestSystem) return;
+    const solaris = this.harvestSystem.getSolaris(this.playerId);
+    if (solaris < 800) return; // Aircraft are expensive — only build with surplus
+
+    const buildable = this.aircraftPool.filter(name =>
+      this.production!.canBuild(this.playerId, name, false)
+    );
+    if (buildable.length === 0) return;
+
+    const typeName = buildable[Math.floor(Math.random() * buildable.length)];
+    this.production.startProduction(this.playerId, typeName, false);
+  }
+
+  /** Buy units from the Starport when prices are favorable */
+  private useStarport(): void {
+    if (!this.production || !this.harvestSystem) return;
+    const solaris = this.harvestSystem.getSolaris(this.playerId);
+    if (solaris < 1000) return;
+
+    // Must own a Starport building
+    if (!this.production.ownsAnyBuildingSuffix(this.playerId, 'Starport')) return;
+
+    const offers = this.production.getStarportOffers(this.factionPrefix);
+    if (offers.length === 0) return;
+
+    // Find best deal: lowest price relative to base cost
+    let bestDeal: { name: string; price: number; ratio: number } | null = null;
+    for (const offer of offers) {
+      const def = this.rules.units.get(offer.name);
+      if (!def) continue;
+      const ratio = offer.price / def.cost; // < 1.0 = discount
+      if (ratio < 1.1 && offer.price <= solaris) { // Buy if at most 10% markup
+        if (!bestDeal || ratio < bestDeal.ratio) {
+          bestDeal = { name: offer.name, price: offer.price, ratio };
+        }
+      }
+    }
+
+    if (bestDeal) {
+      this.production.buyFromStarport(this.playerId, bestDeal.name);
+    }
   }
 
   private spawnWave(world: World): void {

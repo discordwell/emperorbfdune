@@ -131,12 +131,21 @@ export class CommandManager {
 
     const shiftHeld = e.shiftKey;
 
+    // Force-fire: Ctrl+right-click forces attack on any target (including ground/friendly)
+    const ctrlHeld = e.ctrlKey || e.metaKey;
+
     // Check if right-clicked on a unit
     const targetEid = this.unitRenderer.getEntityAtScreen(e.clientX, e.clientY);
     if (targetEid !== null) {
       const targetOwner = Owner.playerId[targetEid];
       const selectedOwner = Owner.playerId[selected[0]];
-      if (targetOwner === selectedOwner && !selected.includes(targetEid)) {
+      if (ctrlHeld) {
+        // Ctrl+right-click: force-attack any target (even friendly)
+        if (!selected.includes(targetEid)) {
+          this.issueAttackCommand(selected, targetEid);
+          this.audioManager?.playUnitVoiceOrSfx('attack', this.getSelectedCategory(selected), selected[0]);
+        }
+      } else if (targetOwner === selectedOwner && !selected.includes(targetEid)) {
         // Right-click on friendly unit = escort
         this.issueEscortCommand(selected, targetEid);
         this.audioManager?.playUnitVoiceOrSfx('move', this.getSelectedCategory(selected), selected[0]);
@@ -146,6 +155,16 @@ export class CommandManager {
         this.audioManager?.playUnitVoiceOrSfx('attack', this.getSelectedCategory(selected), selected[0]);
       }
       return;
+    }
+
+    // Ctrl+right-click on ground = force-fire (attack-ground)
+    if (ctrlHeld && selected.length > 0) {
+      const worldPos = this.sceneManager.screenToWorld(e.clientX, e.clientY);
+      if (worldPos) {
+        this.issueAttackMoveCommand(selected, worldPos.x, worldPos.z);
+        this.audioManager?.playUnitVoiceOrSfx('attack', this.getSelectedCategory(selected), selected[0]);
+        return;
+      }
     }
 
     // Move command
@@ -251,6 +270,13 @@ export class CommandManager {
           if (returned > 0) {
             this.audioManager?.playSfx('select');
           }
+        }
+        break;
+
+      case 'x':
+        // Scatter
+        if (selected.length > 0) {
+          this.issueScatterCommand(selected);
         }
         break;
 

@@ -46,6 +46,8 @@ export class MinimapRenderer {
   private unitCategoryFn: ((eid: number) => 'infantry' | 'vehicle' | 'aircraft') | null = null;
   // Building name resolver for importance-based rendering
   private buildingNameFn: ((eid: number) => string) | null = null;
+  // Radar state: requires Outpost building to show unit/building dots
+  private radarActive = true;
 
   constructor(terrain: TerrainRenderer, sceneManager: SceneManager) {
     this.canvas = document.getElementById('minimap-canvas') as HTMLCanvasElement;
@@ -97,6 +99,11 @@ export class MinimapRenderer {
   /** Set building name resolver for importance-based rendering */
   setBuildingNameFn(fn: (eid: number) => string): void {
     this.buildingNameFn = fn;
+  }
+
+  /** Set radar state (requires Outpost building to show unit/building dots) */
+  setRadarActive(active: boolean): void {
+    this.radarActive = active;
   }
 
   renderTerrain(): void {
@@ -172,6 +179,30 @@ export class MinimapRenderer {
     const worldH = mapH * TILE_SIZE;
     const scaleWx = 200 / worldW;
     const scaleWz = 200 / worldH;
+
+    // If radar is disabled, show "No Radar" overlay and skip unit/building dots
+    if (!this.radarActive) {
+      this.ctx.fillStyle = '#111';
+      this.ctx.fillRect(0, 0, 200, 200);
+      this.ctx.fillStyle = '#ff4444';
+      this.ctx.font = 'bold 14px sans-serif';
+      this.ctx.textAlign = 'center';
+      this.ctx.fillText('NO RADAR', 100, 95);
+      this.ctx.font = '10px sans-serif';
+      this.ctx.fillStyle = '#aa3333';
+      this.ctx.fillText('Build Outpost', 100, 112);
+      this.ctx.textAlign = 'start';
+      // Still draw camera viewport
+      const camTarget = this.sceneManager.cameraTarget;
+      if (camTarget) {
+        const camX = camTarget.x * (200 / (mapW * TILE_SIZE));
+        const camZ = camTarget.z * (200 / (mapH * TILE_SIZE));
+        this.ctx.strokeStyle = '#fff';
+        this.ctx.lineWidth = 1;
+        this.ctx.strokeRect(camX - 15, camZ - 10, 30, 20);
+      }
+      return;
+    }
 
     // Draw units — differentiated by type
     const units = unitQuery(world);

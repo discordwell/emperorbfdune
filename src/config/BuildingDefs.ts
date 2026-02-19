@@ -40,6 +40,9 @@ export interface BuildingDef {
   roofHeight: number;
   unstealthRange: number;
 
+  // Radar
+  outpost: boolean; // Enables minimap/radar when owned
+
   // AI
   aiResource: boolean;
   aiDefence: boolean;
@@ -80,6 +83,7 @@ export function createDefaultBuildingDef(name: string): BuildingDef {
     numInfantryWhenGone: 0,
     roofHeight: 80,
     unstealthRange: 0,
+    outpost: false,
     aiResource: false,
     aiDefence: false,
     aiCritical: false,

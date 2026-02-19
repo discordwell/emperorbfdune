@@ -1670,6 +1670,12 @@ async function main() {
     return ammo / MAX_AMMO;
   });
 
+  // Wire aircraft ammo display to SelectionPanel
+  selectionPanel.setAircraftAmmoFn((eid: number) => {
+    if (!aircraftAmmo.has(eid)) return null;
+    return { current: aircraftAmmo.get(eid)!, max: MAX_AMMO };
+  });
+
   // Ability state maps moved to AbilitySystem
 
   function findNearestLandingPad(world: World, owner: number, fromX: number, fromZ: number): { eid: number; x: number; z: number } | null {
@@ -1746,6 +1752,19 @@ async function main() {
     }
     unitRenderer.tickDeconstruction();
     unitRenderer.tickDeathAnimations();
+    // Check radar state: player needs an Outpost building for minimap
+    if (game.getTickCount() % 50 === 0) {
+      let hasOutpost = false;
+      const blds = buildingQuery(world);
+      for (const bid of blds) {
+        if (Owner.playerId[bid] !== 0 || Health.current[bid] <= 0) continue;
+        const bTypeId = BuildingType.id[bid];
+        const bName = buildingTypeNames[bTypeId];
+        const bDef = bName ? gameRules.buildings.get(bName) : null;
+        if (bDef?.outpost) { hasOutpost = true; break; }
+      }
+      minimapRenderer.setRadarActive(hasOutpost);
+    }
     minimapRenderer.update(world);
     effectsManager.update(40); // ~40ms per tick at 25 TPS
     effectsManager.updateWormVisuals(sandwormSystem.getWorms(), 40);

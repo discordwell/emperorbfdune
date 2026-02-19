@@ -157,6 +157,20 @@ export class ProductionSystem {
     return this.repeatUnits.get(playerId)?.has(typeName) ?? false;
   }
 
+  ownsBuilding(playerId: number, buildingType: string): boolean {
+    const owned = this.playerBuildings.get(playerId);
+    return owned ? (owned.get(buildingType) ?? 0) > 0 : false;
+  }
+
+  ownsAnyBuildingSuffix(playerId: number, suffix: string): boolean {
+    const owned = this.playerBuildings.get(playerId);
+    if (!owned) return false;
+    for (const bType of owned.keys()) {
+      if (bType.endsWith(suffix) && (owned.get(bType) ?? 0) > 0) return true;
+    }
+    return false;
+  }
+
   addPlayerBuilding(playerId: number, buildingType: string): void {
     if (!this.playerBuildings.has(playerId)) {
       this.playerBuildings.set(playerId, new Map());
@@ -182,6 +196,9 @@ export class ProductionSystem {
     if (!def || !def.upgradable) return false;
     // Already upgraded?
     if (this.upgradedBuildings.get(playerId)?.has(buildingType)) return false;
+    // Already in upgrade queue?
+    const queue = this.upgradeQueues.get(playerId);
+    if (queue?.some(q => q.typeName === buildingType)) return false;
     // Can afford? (apply difficulty cost multiplier to upgrade cost)
     const costMult = this.costMultipliers.get(playerId) ?? 1.0;
     const adjustedUpgradeCost = Math.round(def.upgradeCost * costMult);
@@ -356,10 +373,6 @@ export class ProductionSystem {
       : this.rules.units.get(typeName);
     if (!def) return false;
 
-    // Spend money (difficulty-adjusted)
-    const adjustedCost = this.getAdjustedCost(playerId, typeName, isBuilding);
-    if (!this.harvestSystem.spendSolaris(playerId, adjustedCost)) return false;
-
     let queue: QueueItem[];
     if (isBuilding) {
       queue = this.buildingQueues.get(playerId) ?? [];
@@ -368,6 +381,13 @@ export class ProductionSystem {
       const queueMap = isInf ? this.infantryQueues : this.vehicleQueues;
       queue = queueMap.get(playerId) ?? [];
     }
+
+    // Queue limit: max 5 items per production queue
+    if (queue.length >= 5) return false;
+
+    // Spend money (difficulty-adjusted)
+    const adjustedCost = this.getAdjustedCost(playerId, typeName, isBuilding);
+    if (!this.harvestSystem.spendSolaris(playerId, adjustedCost)) return false;
 
     const adjustedTime = this.getAdjustedBuildTime(playerId, def);
     queue.push({
@@ -524,9 +544,14 @@ export class ProductionSystem {
     const def = this.rules.units.get(unitName);
     if (!def) return false;
 
+    // Check player owns a Starport building
+    if (!this.ownsAnyBuildingSuffix(playerId, 'Starport')) return false;
+
     const isInf = this.isInfantryType(unitName);
     const queueMap = isInf ? this.infantryQueues : this.vehicleQueues;
     const queue = queueMap.get(playerId) ?? [];
+    // Queue limit: max 5 items per production queue
+    if (queue.length >= 5) return false;
     queue.push({
       typeName: unitName,
       isBuilding: false,
