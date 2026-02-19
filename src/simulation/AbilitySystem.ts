@@ -479,10 +479,12 @@ export class AbilitySystem {
       const typeName = unitTypeNames[typeId];
       const def = typeName ? rules.units.get(typeName) : null;
       if (!def || !def.engineer) continue;
-      if (MoveTarget.active[eid] !== 1) continue; // Only capture while moving (toward target)
 
       const engOwner = Owner.playerId[eid];
 
+      // Engineers capture on proximity (no MoveTarget check) - unlike infiltrators/leeches,
+      // engineers are consumed on capture so proximity-only is safe and avoids the bug
+      // where MoveTarget clears on arrival before the capture check runs.
       for (const bid of allBuildings) {
         if (Health.current[bid] <= 0) continue;
         if (Owner.playerId[bid] === engOwner) continue; // Skip friendly buildings

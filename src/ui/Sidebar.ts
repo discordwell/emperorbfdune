@@ -315,7 +315,7 @@ export class Sidebar {
     const subPrefix = this.subhousePrefix;
     let hotkeyIdx = 0;
 
-    // Collect and sort units by cost
+    // Collect units
     const units: { name: string; def: UnitDef }[] = [];
     for (const [name, def] of this.rules.units) {
       if (!name.startsWith(prefix) && !(subPrefix && name.startsWith(subPrefix))) continue;
@@ -324,9 +324,34 @@ export class Sidebar {
       if (!infantryOnly && def.infantry) continue;
       units.push({ name, def });
     }
-    units.sort((a, b) => a.def.cost - b.def.cost);
 
+    // Sort by tech level, then cost
+    units.sort((a, b) => {
+      const tierA = Math.max(a.def.techLevel, 1);
+      const tierB = Math.max(b.def.techLevel, 1);
+      if (tierA !== tierB) return tierA - tierB;
+      return a.def.cost - b.def.cost;
+    });
+
+    // Compute sequential tier indices (collapse gaps in tech levels)
+    const rawTiers = [...new Set(units.map(u => Math.max(u.def.techLevel, 1)))].sort((a, b) => a - b);
+    const tierIndexMap = new Map<number, number>();
+    rawTiers.forEach((t, i) => tierIndexMap.set(t, i + 1));
+
+    // Render with tier separators
+    let lastTier = -1;
     for (const { name, def } of units) {
+      const rawTier = Math.max(def.techLevel, 1);
+      const tier = tierIndexMap.get(rawTier) ?? rawTier;
+      if (rawTier !== lastTier) {
+        lastTier = rawTier;
+        const sep = document.createElement('div');
+        const label = Sidebar.getTierLabel(tier);
+        sep.style.cssText = 'grid-column:1/-1;padding:3px 4px;font-size:9px;color:#888;border-bottom:1px solid #333;text-transform:uppercase;letter-spacing:1px;margin-top:2px;';
+        sep.textContent = label;
+        grid.appendChild(sep);
+      }
+
       const canBuild = this.production.canBuild(this.playerId, name, false);
       const hotkey = hotkeyIdx < HOTKEYS.length ? HOTKEYS[hotkeyIdx] : undefined;
       const role = Sidebar.getUnitRole(name, def);

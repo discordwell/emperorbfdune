@@ -493,12 +493,31 @@ export class HarvestSystem implements GameSystem {
         Position.y[eid] = 0.1 + (airTimer / 50) * 4;
         return;
       }
-      // Airlift complete - teleport to refinery
+      // Airlift complete - land adjacent to refinery (try cardinal directions to avoid obstacles)
       this.airlifting.delete(eid);
       const refEntity = Harvester.refineryEntity[eid];
       if (refEntity > 0) {
-        Position.x[eid] = Position.x[refEntity];
-        Position.z[eid] = Position.z[refEntity];
+        const rx = Position.x[refEntity];
+        const rz = Position.z[refEntity];
+        // Try 4 cardinal offsets outside 3x3 building footprint
+        const offsets = [[0, 4], [4, 0], [0, -4], [-4, 0]];
+        let placed = false;
+        for (const [ox, oz] of offsets) {
+          const tx = rx + ox;
+          const tz = rz + oz;
+          const tile = worldToTile(tx, tz);
+          if (this.terrain.isPassable(tile.tx, tile.tz)) {
+            Position.x[eid] = tx;
+            Position.z[eid] = tz;
+            placed = true;
+            break;
+          }
+        }
+        if (!placed) {
+          // Fallback: land south of refinery
+          Position.x[eid] = rx;
+          Position.z[eid] = rz + 4;
+        }
       }
       Position.y[eid] = 0.1;
       Harvester.state[eid] = UNLOADING;
