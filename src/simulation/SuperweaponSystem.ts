@@ -264,19 +264,18 @@ export class SuperweaponSystem {
       this.swButton.style.display = 'none';
     }
 
-    // AI fires superweapon at player base when ready
+    // AI fires superweapon at enemy base when ready (targets any enemy, not just player 0)
     const aiSwBlds = buildingQuery(world);
     for (let aiPid = 1; aiPid < totalPlayers; aiPid++) {
       const aiSw = this.state.get(aiPid);
       if (aiSw?.ready) {
-        const playerBlds = aiSwBlds;
         let bestX = 100, bestZ = 100, bestCount = 0;
-        for (const bid of playerBlds) {
-          if (Owner.playerId[bid] !== 0 || Health.current[bid] <= 0) continue;
+        for (const bid of aiSwBlds) {
+          if (Owner.playerId[bid] === aiPid || Health.current[bid] <= 0) continue;
           const bx = Position.x[bid], bz = Position.z[bid];
           let count = 0;
-          for (const bid2 of playerBlds) {
-            if (Owner.playerId[bid2] !== 0 || Health.current[bid2] <= 0) continue;
+          for (const bid2 of aiSwBlds) {
+            if (Owner.playerId[bid2] === aiPid || Health.current[bid2] <= 0) continue;
             const dx = Position.x[bid2] - bx, dz = Position.z[bid2] - bz;
             if (dx * dx + dz * dz < 225) count++;
           }
