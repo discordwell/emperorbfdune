@@ -45,7 +45,7 @@ import {
   addEntity, addComponent, removeEntity, hasComponent,
   Position, Velocity, Rotation, Health, Owner, UnitType, Selectable,
   MoveTarget, AttackTarget, Combat, Armour, Speed, ViewRange, Renderable,
-  Harvester, BuildingType, PowerSource, Veterancy,
+  Harvester, BuildingType, PowerSource, Veterancy, TurretRotation,
   unitQuery, buildingQuery,
   type World,
 } from './core/ECS';
@@ -570,6 +570,7 @@ async function main() {
     ai.setSubhousePrefix(availableSubhouses[i % availableSubhouses.length]);
     ai.setProductionSystem(productionSystem, harvestSystem);
     ai.setBuildingTypeNames(buildingTypeNames);
+    ai.setUnitTypeNames(unitTypeNames);
     // Stagger tick offsets to spread CPU load across frames
     ai.setTickOffset(Math.floor((i * 10) / opponents.length));
     aiPlayers.push(ai);
@@ -766,6 +767,8 @@ async function main() {
 
     if (def.turretAttach) {
       addComponent(world, Combat, eid);
+      addComponent(world, TurretRotation, eid);
+      TurretRotation.y[eid] = rot;
       const turret = gameRules.turrets.get(def.turretAttach);
       const bullet = turret ? gameRules.bullets.get(turret.bullet) : null;
       Combat.weaponId[eid] = 0;
@@ -846,6 +849,8 @@ async function main() {
 
     if (def.turretAttach) {
       addComponent(world, Combat, eid);
+      addComponent(world, TurretRotation, eid);
+      TurretRotation.y[eid] = 0;
       addComponent(world, MoveTarget, eid);
       addComponent(world, AttackTarget, eid);
       addComponent(world, Velocity, eid);
@@ -1104,13 +1109,14 @@ async function main() {
       EventBus.emit('building:destroyed', { entityId, owner: deadOwner, x, z });
     }
 
-    // Death animation: tilt the 3D model before removal
+    // Death animation: play explode clip if available, otherwise procedural tilt
+    const hasDeathClip = unitRenderer.playDeathAnim(entityId);
     const obj = unitRenderer.getEntityObject(entityId);
-    if (obj && !isBuilding) {
+    if (obj && !isBuilding && !hasDeathClip) {
       const tiltDir = Math.random() * Math.PI * 2;
       let frame = 0;
       const animateDeath = () => {
-        if (!obj.parent || frame >= 8) return; // Stop if removed from scene
+        if (!obj.parent || frame >= 8) return;
         frame++;
         obj.rotation.x = Math.sin(tiltDir) * frame * 0.1;
         obj.rotation.z = Math.cos(tiltDir) * frame * 0.1;
@@ -2175,6 +2181,9 @@ async function main() {
   // Camera bookmarks (F1-F4 recall, Ctrl+F1-F4 save)
   const cameraBookmarks = new Map<number, { x: number; z: number }>();
 
+  // Control groups (Ctrl+1-9 to assign, 1-9 to select and center camera)
+  const controlGroups = new Map<number, number[]>();
+
   // Event ring buffer for Space key cycling (last 5 events)
   type GameEvent = { x: number; z: number; type: string; time: number };
   const eventQueue: GameEvent[] = [];
@@ -2393,6 +2402,37 @@ async function main() {
       // L=load transport, U=unload transport, W=mount worm
       const selected = selectionManager.getSelectedEntities();
       abilitySystem.handleKeyCommand(e.key, selected, game.getWorld());
+    } else if (e.key >= '1' && e.key <= '9' && !e.altKey) {
+      const groupNum = parseInt(e.key);
+      const w = game.getWorld();
+      if (e.ctrlKey || e.metaKey) {
+        // Ctrl+1-9: Assign current selection to control group
+        e.preventDefault();
+        const selected = selectionManager.getSelectedEntities().filter(eid => Health.current[eid] > 0);
+        if (selected.length > 0) {
+          controlGroups.set(groupNum, [...selected]);
+          selectionPanel.addMessage(`Group ${groupNum}: ${selected.length} units`, '#8f8');
+        }
+      } else {
+        // 1-9: Select control group and center camera on it
+        e.preventDefault();
+        const group = controlGroups.get(groupNum);
+        if (group) {
+          // Filter out dead entities
+          const alive = group.filter(eid => Health.current[eid] > 0);
+          controlGroups.set(groupNum, alive);
+          if (alive.length > 0) {
+            selectionManager.clearSelection();
+            for (const eid of alive) selectionManager.selectEntity(eid);
+            // Center camera on group centroid
+            let cx = 0, cz = 0;
+            for (const eid of alive) { cx += Position.x[eid]; cz += Position.z[eid]; }
+            scene.panTo(cx / alive.length, cz / alive.length);
+          } else {
+            selectionPanel.addMessage(`Group ${groupNum} empty`, '#666');
+          }
+        }
+      }
     } else if (e.key === 'F1' || e.key === 'F2' || e.key === 'F3' || e.key === 'F4') {
       e.preventDefault();
       const slot = parseInt(e.key.charAt(1)) - 1; // 0-3

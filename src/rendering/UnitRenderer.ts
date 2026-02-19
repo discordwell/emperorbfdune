@@ -4,12 +4,22 @@ import type { ModelManager, LoadedModel } from './ModelManager';
 import type { ArtEntry } from '../config/ArtIniParser';
 import {
   Position, Rotation, Renderable, Health, Selectable, Owner,
-  BuildingType, UnitType, MoveTarget, Veterancy, Combat, hasComponent,
+  BuildingType, UnitType, MoveTarget, Veterancy, Combat, TurretRotation, AttackTarget, hasComponent,
   renderQuery, renderEnter, renderExit,
   type World,
 } from '../core/ECS';
 import type { FogOfWar } from './FogOfWar';
 import { worldToTile } from '../utils/MathUtils';
+
+// Animation state tracking
+type AnimState = 'idle' | 'move' | 'fire' | 'explode' | 'idle2';
+
+interface EntityAnimData {
+  mixer: THREE.AnimationMixer;
+  clips: Map<string, THREE.AnimationClip>;
+  currentState: AnimState;
+  currentAction: THREE.AnimationAction | null;
+}
 
 // House colors for team tinting
 const HOUSE_COLORS: THREE.Color[] = [
@@ -70,6 +80,10 @@ export class UnitRenderer {
   // Idle harvester indicator circles
   private idleHarvesterCircles = new Map<number, THREE.Mesh>();
   private idleHarvesterFn: ((eid: number) => boolean) | null = null;
+  // Animation system: per-entity mixer and clip management
+  private entityAnims = new Map<number, EntityAnimData>();
+  // Clock for animation delta
+  private animClock = new THREE.Clock();
 
   constructor(sceneManager: SceneManager, modelManager: ModelManager, artMap: Map<string, ArtEntry>) {
     this.sceneManager = sceneManager;
@@ -279,7 +293,8 @@ export class UnitRenderer {
 
   update(world: World): void {
     this.currentWorld = world;
-    this.animTime += 0.016; // ~60fps frame time
+    const dt = Math.min(this.animClock.getDelta() || 0.016, 0.1);
+    this.animTime += dt;
 
     // Compute view frustum for culling expensive updates on off-screen entities
     const cam = this.sceneManager.camera;
@@ -312,6 +327,22 @@ export class UnitRenderer {
       );
       obj.rotation.y = Rotation.y[eid];
 
+      // Independent turret rotation: rotate the model's first child group (turret heuristic)
+      if (hasComponent(world, TurretRotation, eid)) {
+        const turretAngle = TurretRotation.y[eid] - Rotation.y[eid]; // Relative to hull
+        // Find the model wrapper (first non-circle child), then its first child (turret)
+        for (const child of obj.children) {
+          if (child instanceof THREE.Group && child.children.length > 0) {
+            // The model wrapper's first child group is the turret
+            const turret = child.children[0];
+            if (turret instanceof THREE.Group || turret instanceof THREE.Mesh) {
+              turret.rotation.y = turretAngle;
+            }
+            break;
+          }
+        }
+      }
+
       // Fog of war: hide enemy entities in non-visible tiles
       if (this.fogOfWar && this.fogOfWar.isEnabled() && Owner.playerId[eid] !== this.localPlayerId) {
         const tile = worldToTile(Position.x[eid], Position.z[eid]);
@@ -326,8 +357,16 @@ export class UnitRenderer {
       const inFrustum = this.frustum.intersectsSphere(this.cullingSphere);
       if (!inFrustum && !obj.visible) continue; // Fog-hidden + off-screen: skip everything
 
-      // Idle animations (subtle movement when not moving) — only for visible entities
-      if (inFrustum && this.unitCategoryFn && !hasComponent(world, BuildingType, eid)) {
+      // Update animation state and advance mixer
+      const hasRealAnim = this.entityAnims.has(eid);
+      if (inFrustum && hasRealAnim) {
+        this.updateAnimState(eid, world);
+        const animData = this.entityAnims.get(eid)!;
+        animData.mixer.update(dt);
+      }
+
+      // Procedural idle animations — only for entities WITHOUT real animations
+      if (inFrustum && !hasRealAnim && this.unitCategoryFn && !hasComponent(world, BuildingType, eid)) {
         const isIdle = !hasComponent(world, MoveTarget, eid) || MoveTarget.active[eid] === 0;
         const cat = this.unitCategoryFn(eid);
         const t = this.animTime + eid * 1.37; // Phase offset per entity
@@ -338,6 +377,13 @@ export class UnitRenderer {
           obj.position.y += Math.sin(t * 3.0) * 0.03;
         } else if (cat === 'vehicle' && isIdle) {
           obj.position.y += Math.sin(t * 8.0) * 0.008;
+        }
+      } else if (inFrustum && hasRealAnim && this.unitCategoryFn) {
+        // Even with real animations, aircraft need the hover bob
+        const cat = this.unitCategoryFn(eid);
+        if (cat === 'aircraft') {
+          const t = this.animTime + eid * 1.37;
+          obj.position.y += Math.sin(t * 2.0) * 0.15;
         }
       }
 
@@ -533,6 +579,95 @@ export class UnitRenderer {
         }
       }
     });
+
+    // Set up animation mixer if the template has animation clips
+    if (template.animations.length > 0) {
+      const mixer = new THREE.AnimationMixer(existing);
+      const clips = new Map<string, THREE.AnimationClip>();
+      for (const clip of template.animations) {
+        clips.set(clip.name, clip);
+      }
+      this.entityAnims.set(eid, {
+        mixer,
+        clips,
+        currentState: 'idle',
+        currentAction: null,
+      });
+      // Try to play an initial idle clip
+      this.playAnimClip(eid, 'idle');
+    }
+  }
+
+  /** Map a logical animation state to the best available clip name */
+  private getClipForState(clips: Map<string, THREE.AnimationClip>, state: AnimState): THREE.AnimationClip | null {
+    const candidates: Record<AnimState, string[]> = {
+      'idle': ['Idle 0', 'Idle 1', 'Idle', 'Stationary', 'Hover'],
+      'idle2': ['Idle 1', 'Idle 0', 'Idle', 'Stationary'],
+      'move': ['Move', 'Move Start', 'Fly', 'Crawl', 'Move Special'],
+      'fire': ['Fire 0', 'Fire 1', 'Shot 1', 'Shot 2', 'Lay Down Fire', 'CrouchFire'],
+      'explode': ['Explode', 'Blow Up 1', 'Blow Up 2', 'Burnt 1'],
+    };
+    for (const name of candidates[state]) {
+      const clip = clips.get(name);
+      if (clip) return clip;
+    }
+    return null;
+  }
+
+  /** Play a named animation clip on an entity */
+  private playAnimClip(eid: number, state: AnimState): void {
+    const anim = this.entityAnims.get(eid);
+    if (!anim) return;
+    if (anim.currentState === state && anim.currentAction?.isRunning()) return;
+
+    const clip = this.getClipForState(anim.clips, state);
+    if (!clip) return;
+
+    // Cross-fade from current to new
+    const newAction = anim.mixer.clipAction(clip);
+    if (anim.currentAction && anim.currentAction !== newAction) {
+      anim.currentAction.fadeOut(0.15);
+    }
+    newAction.reset();
+    newAction.fadeIn(0.15);
+    // Looping for idle/move, clamp for fire/explode
+    if (state === 'fire' || state === 'explode') {
+      newAction.setLoop(THREE.LoopOnce, 1);
+      newAction.clampWhenFinished = true;
+    } else {
+      newAction.setLoop(THREE.LoopRepeat, Infinity);
+    }
+    newAction.play();
+
+    anim.currentState = state;
+    anim.currentAction = newAction;
+  }
+
+  /** Update animation state based on ECS component data */
+  private updateAnimState(eid: number, world: World): void {
+    const anim = this.entityAnims.get(eid);
+    if (!anim) return;
+
+    // Determine desired state from ECS
+    const isMoving = hasComponent(world, MoveTarget, eid) && MoveTarget.active[eid] === 1;
+    const isFiring = hasComponent(world, AttackTarget, eid) && AttackTarget.active[eid] === 1;
+
+    let desiredState: AnimState;
+    if (isFiring && !isMoving) {
+      desiredState = 'fire';
+    } else if (isMoving) {
+      desiredState = 'move';
+    } else {
+      desiredState = 'idle';
+    }
+
+    if (desiredState !== anim.currentState) {
+      // If currently firing, wait for the clip to finish before transitioning
+      if (anim.currentState === 'fire' && anim.currentAction?.isRunning()) {
+        return;
+      }
+      this.playAnimClip(eid, desiredState);
+    }
   }
 
   private updateHealthBar(eid: number): void {
@@ -708,6 +843,13 @@ export class UnitRenderer {
     this.rankSprites.delete(eid);
     this.pendingModels.delete(eid);
     this.deconstructing.delete(eid);
+    // Clean up animation mixer — uncacheRoot releases PropertyBinding cache
+    const animData = this.entityAnims.get(eid);
+    if (animData) {
+      animData.mixer.stopAllAction();
+      animData.mixer.uncacheRoot(animData.mixer.getRoot());
+      this.entityAnims.delete(eid);
+    }
     const rc = this.rangeCircles.get(eid);
     if (rc) { this.sceneManager.scene.remove(rc); rc.geometry.dispose(); (rc.material as THREE.Material).dispose(); this.rangeCircles.delete(eid); }
     const ihc = this.idleHarvesterCircles.get(eid);
@@ -796,6 +938,16 @@ export class UnitRenderer {
     ring.position.y = 0.06;
     ring.userData.upgradeRing = true;
     obj.add(ring);
+  }
+
+  /** Trigger the death/explode animation on an entity. Returns true if a clip was found. */
+  playDeathAnim(eid: number): boolean {
+    const anim = this.entityAnims.get(eid);
+    if (!anim) return false;
+    const clip = this.getClipForState(anim.clips, 'explode');
+    if (!clip) return false;
+    this.playAnimClip(eid, 'explode');
+    return true;
   }
 
   getEntityObject(eid: number): THREE.Group | undefined {

@@ -45,6 +45,8 @@ export class AIPlayer implements GameSystem {
   private buildCooldown = 200;
   // Building type name lookup (set externally)
   private buildingTypeNames: string[] = [];
+  // Unit type name lookup (set externally) — replaces O(n) Map iteration
+  private unitTypeNamesCache: string[] = [];
   // Base defense: designated defender units stay near base
   private defenders = new Set<number>();
   private maxDefenders = 4;
@@ -588,20 +590,15 @@ export class AIPlayer implements GameSystem {
     }
   }
 
+  /** Set the unit type name lookup array (from index.ts unitTypeNames) */
+  setUnitTypeNames(names: string[]): void {
+    this.unitTypeNamesCache = names;
+  }
+
   /** Get a unit type name from an entity's UnitType.id component */
   private getUnitTypeName(eid: number): string | null {
     const typeId = UnitType.id[eid];
-    // typeId is an index into the rules.units Map (insertion order)
-    if (typeId === undefined || typeId === 0) {
-      // Check if 0 is valid (it's the first unit type) or uninitialized
-      // We'll try to return it regardless since 0 is a valid index
-    }
-    let idx = 0;
-    for (const [name] of this.rules.units) {
-      if (idx === typeId) return name;
-      idx++;
-    }
-    return null;
+    return this.unitTypeNamesCache[typeId] ?? null;
   }
 
   // ==========================================
@@ -1147,13 +1144,15 @@ export class AIPlayer implements GameSystem {
       const order = buildOrder[this.buildPhase];
       if (solaris >= order.minSolaris) {
         const def = this.rules.buildings.get(order.name);
-        if (def && this.production.canBuild(this.playerId, order.name, true)) {
+        if (!def) {
+          // Building doesn't exist in rules — skip permanently
+          this.buildPhase++;
+        } else if (this.production.canBuild(this.playerId, order.name, true)) {
           if (this.production.startProduction(this.playerId, order.name, true)) {
             this.buildPhase++;
           }
-        } else {
-          this.buildPhase++;
         }
+        // If canBuild is false (missing prerequisite), don't advance — retry next tick
       }
     } else {
       // Try upgrading buildings for higher tech levels

@@ -196,13 +196,13 @@ export const SFX_MANIFEST: Record<string, SfxEntry> = {
   // --- Alerts ---
   underattack: {
     paths: [
-      `${S}worm_sign_elec_1.ogg`,
-      `${S}worm_sign_elec_2.ogg`,
-      `${S}worm_sign_elec_3.ogg`,
+      `${S}radaronline.ogg`,
+      `${S}static01i_vol1.ogg`,
+      `${S}static02i_vol1.ogg`,
     ],
-    volume: 0.4,
+    volume: 0.5,
     pitchVariation: false,
-    cooldown: 3000,
+    cooldown: 5000,
   },
 
   // --- Death sounds ---

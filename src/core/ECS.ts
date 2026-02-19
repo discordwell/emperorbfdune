@@ -33,6 +33,10 @@ export const Rotation = defineComponent({
   y: Types.f32, // Yaw rotation (radians) - RTS units only rotate on Y axis
 });
 
+export const TurretRotation = defineComponent({
+  y: Types.f32, // Independent turret yaw for turreted vehicles
+});
+
 export const Health = defineComponent({
   current: Types.f32,
   max: Types.f32,

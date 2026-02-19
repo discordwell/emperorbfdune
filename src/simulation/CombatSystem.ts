@@ -2,7 +2,8 @@ import type { GameSystem } from '../core/Game';
 import type { World } from '../core/ECS';
 import {
   Position, Health, Combat, Owner, AttackTarget, MoveTarget, Rotation, Speed,
-  Armour, BuildingType, Veterancy, combatQuery, healthQuery, hasComponent,
+  Armour, BuildingType, Veterancy, TurretRotation,
+  combatQuery, healthQuery, hasComponent,
 } from '../core/ECS';
 import type { GameRules } from '../config/RulesParser';
 import type { BulletDef } from '../config/WeaponDefs';
@@ -305,20 +306,27 @@ export class CombatSystem implements GameSystem {
         MoveTarget.active[eid] = 0;
       }
 
-      // Rotate unit/turret to face target
+      // Rotate turret/unit to face target
       if (hasComponent(world, Rotation, eid)) {
         const isBuilding = hasComponent(world, BuildingType, eid);
         const desiredAngle = angleBetween(
           Position.x[eid], Position.z[eid],
           Position.x[targetEid], Position.z[targetEid]
         );
-        if (isBuilding) {
-          // Buildings: instant turret rotation (visual only)
-          Rotation.y[eid] = desiredAngle;
+        if (hasComponent(world, TurretRotation, eid)) {
+          // Independent turret: rotate turret toward target, hull stays facing movement
+          const turnRate = (hasComponent(world, Speed, eid) && Speed.turnRate[eid] > 0)
+            ? Speed.turnRate[eid] : 0.15;
+          TurretRotation.y[eid] = lerpAngle(TurretRotation.y[eid], desiredAngle, Math.min(1, turnRate * 4));
+          // Don't fire until turret is roughly aimed (within ~20 degrees)
+          let angleDiff = desiredAngle - TurretRotation.y[eid];
+          if (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+          if (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+          if (Math.abs(angleDiff) > 0.35) continue;
         } else {
+          // No turret: rotate whole hull
           const turnRate = hasComponent(world, Speed, eid) ? Speed.turnRate[eid] : 0.15;
           Rotation.y[eid] = lerpAngle(Rotation.y[eid], desiredAngle, Math.min(1, turnRate * 3));
-          // Don't fire until roughly facing target (within ~20 degrees)
           let angleDiff = desiredAngle - Rotation.y[eid];
           if (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
           if (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
