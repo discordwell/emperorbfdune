@@ -36,6 +36,8 @@ import { loadCampaignStrings, type HousePrefix, JUMP_POINTS } from './campaign/C
 import { CampaignPhaseManager } from './campaign/CampaignPhaseManager';
 import { SubHouseSystem } from './campaign/SubHouseSystem';
 import { MentatScreen } from './ui/MentatScreen';
+import { PauseMenu } from './ui/PauseMenu';
+import { SuperweaponSystem } from './simulation/SuperweaponSystem';
 import { generateMissionConfig, type MissionConfigData } from './campaign/MissionConfig';
 import {
   addEntity, addComponent, removeEntity, hasComponent,
@@ -1114,16 +1116,17 @@ async function main() {
     const mat = new THREE.MeshBasicMaterial({ color: 0xff6600, transparent: true, opacity: 0.3, side: THREE.DoubleSide });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(x, 0.1, z);
-    sceneManager.scene.add(mesh);
-    bloomMarkers.set(`${x},${z}`, { mesh, ticks: 0 });
+    scene.scene.add(mesh);
+    bloomMarkers.set(`${Math.floor(x)},${Math.floor(z)}`, { mesh, ticks: 0 });
   });
   EventBus.on('bloom:tremor', ({ x, z, intensity }) => {
     // Spawn small dust particles at bloom site
     effectsManager.spawnExplosion(x + (Math.random() - 0.5) * 4, 0, z + (Math.random() - 0.5) * 4, 'small');
     // Pulse the bloom marker
-    const key = `${x},${z}`;
+    const key = `${Math.floor(x)},${Math.floor(z)}`;
     const marker = bloomMarkers.get(key);
     if (marker) {
+      marker.ticks = 0; // Reset TTL on activity
       (marker.mesh.material as THREE.MeshBasicMaterial).opacity = 0.3 + intensity * 0.5;
       const scale = 1.0 + intensity * 0.5;
       marker.mesh.scale.set(scale, scale, scale);
@@ -1135,10 +1138,10 @@ async function main() {
     audioManager.playSfx('worm'); // Rumble sound
     terrain.updateSpiceVisuals();
     // Remove bloom marker
-    const key = `${x},${z}`;
+    const key = `${Math.floor(x)},${Math.floor(z)}`;
     const marker = bloomMarkers.get(key);
     if (marker) {
-      sceneManager.scene.remove(marker.mesh);
+      scene.scene.remove(marker.mesh);
       marker.mesh.geometry.dispose();
       (marker.mesh.material as THREE.Material).dispose();
       bloomMarkers.delete(key);
@@ -1302,7 +1305,7 @@ async function main() {
       let starportX = 0, starportZ = 0;
 
       // Spawn unit near appropriate building — find a barracks/factory owned by this player
-      let baseX: number, baseZ: number;
+      let baseX = 55, baseZ = 55;
       const spawnBuildings = buildingQuery(world);
       let found = false;
 
@@ -1486,162 +1489,19 @@ async function main() {
     return best;
   }
 
-  // --- SUPERWEAPON SYSTEM ---
-  // Palace type -> superweapon config
-  const SUPERWEAPON_CONFIG: Record<string, { name: string; chargeTime: number; radius: number; damage: number; style: 'missile' | 'airstrike' | 'lightning' }> = {
-    'HKPalace': { name: 'Death Hand Missile', chargeTime: 5184, radius: 15, damage: 800, style: 'missile' },
-    'ATPalace': { name: 'Hawk Strike', chargeTime: 4536, radius: 10, damage: 500, style: 'airstrike' },
-    'ORPalace': { name: 'Chaos Lightning', chargeTime: 6220, radius: 12, damage: 600, style: 'lightning' },
-    'GUPalace': { name: 'Guild NIAB Strike', chargeTime: 5500, radius: 10, damage: 700, style: 'lightning' },
-  };
-  // Per-player superweapon state
-  const superweaponState = new Map<number, { palaceType: string; charge: number; ready: boolean }>();
-  let superweaponTargetMode = false;
-
-  // Superweapon UI button (bottom of sidebar area)
-  const swButton = document.createElement('div');
-  swButton.id = 'superweapon-btn';
-  swButton.style.cssText = `
-    position:absolute;bottom:8px;right:8px;width:184px;height:36px;
-    background:linear-gradient(180deg,#2a1a1a,#1a0a0a);border:1px solid #555;
-    border-radius:4px;display:none;align-items:center;justify-content:center;
-    font-family:'Segoe UI',Tahoma,sans-serif;font-size:12px;color:#f88;
-    cursor:pointer;pointer-events:auto;z-index:15;text-align:center;
-    user-select:none;transition:background 0.3s,border-color 0.3s;
-  `;
-  document.getElementById('sidebar')?.appendChild(swButton);
-
-  // Superweapon charge bar on the button
-  const swChargeBar = document.createElement('div');
-  swChargeBar.style.cssText = `
-    position:absolute;bottom:0;left:0;height:3px;width:0%;
-    background:linear-gradient(90deg,#f44,#ff8800);border-radius:0 0 3px 3px;
-    transition:width 0.5s;
-  `;
-  swButton.appendChild(swChargeBar);
-
-  const swLabel = document.createElement('span');
-  swLabel.style.cssText = 'position:relative;z-index:1;';
-  swButton.appendChild(swLabel);
-
-  swButton.addEventListener('click', () => {
-    const sw = superweaponState.get(0);
-    if (!sw || !sw.ready) return;
-    superweaponTargetMode = true;
-    const cmdMode = document.getElementById('command-mode');
-    if (cmdMode) {
-      cmdMode.style.display = 'block';
-      cmdMode.textContent = `${SUPERWEAPON_CONFIG[sw.palaceType]?.name ?? 'Superweapon'} - Click to target`;
-      cmdMode.style.background = 'rgba(200,0,0,0.85)';
-    }
+  // --- SUPERWEAPON SYSTEM (extracted to SuperweaponSystem module) ---
+  const superweaponSystem = new SuperweaponSystem({
+    scene,
+    effectsManager,
+    audioManager,
+    selectionPanel,
+    minimapRenderer,
+    totalPlayers,
+    buildingTypeNames,
+    getWorld: () => game.getWorld(),
+    getTickCount: () => game.getTickCount(),
+    getPowerMultiplier: (pid) => productionSystem.getPowerMultiplier(pid),
   });
-
-  // Listen for targeting click when superweapon is active
-  window.addEventListener('mousedown', (e) => {
-    if (!superweaponTargetMode || e.button !== 0) return;
-    // Don't fire on UI areas
-    if (e.clientY < 32 || e.clientX > window.innerWidth - 200) return;
-    if (e.clientX < 200 && e.clientY > window.innerHeight - 200) return;
-
-    superweaponTargetMode = false;
-    const cmdMode = document.getElementById('command-mode');
-    if (cmdMode) cmdMode.style.display = 'none';
-
-    // Raycast to get world position
-    const worldPos = scene.screenToWorld(e.clientX, e.clientY);
-    if (worldPos) {
-      fireSuperweapon(0, worldPos.x, worldPos.z);
-    }
-  });
-
-  // Cancel superweapon targeting on Escape
-  window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && superweaponTargetMode) {
-      superweaponTargetMode = false;
-      const cmdMode = document.getElementById('command-mode');
-      if (cmdMode) cmdMode.style.display = 'none';
-      e.stopPropagation();
-    }
-  }, true);
-
-  function fireSuperweapon(playerId: number, targetX: number, targetZ: number): void {
-    const sw = superweaponState.get(playerId);
-    if (!sw || !sw.ready) return;
-
-    const config = SUPERWEAPON_CONFIG[sw.palaceType];
-    if (!config) return;
-
-    // Reset charge
-    sw.charge = 0;
-    sw.ready = false;
-
-    EventBus.emit('superweapon:fired', { owner: playerId, type: sw.palaceType, x: targetX, z: targetZ });
-
-    // Visual effects based on style
-    if (config.style === 'missile') {
-      // Death Hand: large explosion cascade
-      effectsManager.spawnExplosion(targetX, 0, targetZ, 'large');
-      setTimeout(() => effectsManager.spawnExplosion(targetX + 3, 0, targetZ + 2, 'large'), 100);
-      setTimeout(() => effectsManager.spawnExplosion(targetX - 2, 0, targetZ - 3, 'large'), 200);
-      setTimeout(() => effectsManager.spawnExplosion(targetX + 1, 0, targetZ + 4, 'large'), 300);
-      setTimeout(() => effectsManager.spawnExplosion(targetX - 3, 0, targetZ + 1, 'large'), 400);
-    } else if (config.style === 'airstrike') {
-      // Hawk Strike: line of explosions
-      for (let i = -3; i <= 3; i++) {
-        const delay = (i + 3) * 120;
-        const ox = targetX + i * 2 + (Math.random() - 0.5) * 2;
-        const oz = targetZ + (Math.random() - 0.5) * 3;
-        setTimeout(() => effectsManager.spawnExplosion(ox, 0, oz, 'medium'), delay);
-      }
-    } else if (config.style === 'lightning') {
-      // Chaos Lightning: rapid chain of small explosions
-      for (let i = 0; i < 8; i++) {
-        const delay = i * 80;
-        const angle = (i / 8) * Math.PI * 2;
-        const dist = 2 + Math.random() * (config.radius * 0.5);
-        const ox = targetX + Math.cos(angle) * dist;
-        const oz = targetZ + Math.sin(angle) * dist;
-        setTimeout(() => effectsManager.spawnExplosion(ox, 0, oz, 'small'), delay);
-      }
-      // Central flash
-      setTimeout(() => effectsManager.spawnExplosion(targetX, 0, targetZ, 'large'), 200);
-    }
-
-    audioManager.playSfx('superweaponLaunch');
-    scene.shake(config.style === 'missile' ? 1.0 : 0.6); // Camera shake!
-
-    // Apply damage to all entities in radius
-    const w = game.getWorld();
-    const allUnits = unitQuery(w);
-    const allBuildings = buildingQuery(w);
-    const targets = [...allUnits, ...allBuildings];
-    for (const eid of targets) {
-      if (Health.current[eid] <= 0) continue;
-      const dx = Position.x[eid] - targetX;
-      const dz = Position.z[eid] - targetZ;
-      const dist2 = dx * dx + dz * dz;
-      const r2 = config.radius * config.radius;
-      if (dist2 < r2) {
-        const dist = Math.sqrt(dist2);
-        const dmg = Math.floor(config.damage * (1 - dist / config.radius));
-        Health.current[eid] = Math.max(0, Health.current[eid] - dmg);
-        if (Health.current[eid] <= 0) {
-          if (hasComponent(w, BuildingType, eid)) {
-            EventBus.emit('building:destroyed', { entityId: eid, owner: Owner.playerId[eid], x: Position.x[eid], z: Position.z[eid] });
-          }
-          EventBus.emit('unit:died', { entityId: eid, killerEntity: -1 });
-        }
-      }
-    }
-
-    // Messages
-    if (playerId === 0) {
-      selectionPanel.addMessage(`${config.name} launched!`, '#ff4444');
-    } else {
-      selectionPanel.addMessage(`Enemy ${config.name} incoming!`, '#ff4444');
-      minimapRenderer.flashPing(targetX, targetZ, '#ff0000');
-    }
-  }
 
   EventBus.on('game:tick', () => {
     const world = game.getWorld();
@@ -1649,101 +1509,7 @@ async function main() {
     productionSystem.update();
     productionSystem.updateStarportPrices();
 
-    // --- Superweapon charge ---
-    if (game.getTickCount() % 25 === 0) { // Check every second
-      for (let pid = 0; pid < totalPlayers; pid++) {
-        // Check if player owns a Palace
-        const blds = buildingQuery(world);
-        let palaceType: string | null = null;
-        for (const bid of blds) {
-          if (Owner.playerId[bid] !== pid || Health.current[bid] <= 0) continue;
-          const bTypeId = BuildingType.id[bid];
-          const bName = buildingTypeNames[bTypeId] ?? '';
-          if (SUPERWEAPON_CONFIG[bName]) {
-            palaceType = bName;
-            break;
-          }
-        }
-
-        if (palaceType) {
-          if (!superweaponState.has(pid)) {
-            superweaponState.set(pid, { palaceType, charge: 0, ready: false });
-          }
-          const sw = superweaponState.get(pid)!;
-          sw.palaceType = palaceType;
-          const config = SUPERWEAPON_CONFIG[palaceType];
-          if (!sw.ready) {
-            const mult = productionSystem.getPowerMultiplier(pid);
-            sw.charge += 25 * mult; // 25 ticks per check
-            if (sw.charge >= config.chargeTime) {
-              sw.charge = config.chargeTime;
-              sw.ready = true;
-              EventBus.emit('superweapon:ready', { owner: pid, type: palaceType });
-              audioManager.playSfx('superweaponReady');
-              if (pid === 0) {
-                selectionPanel.addMessage(`${config.name} ready!`, '#ff8800');
-              } else {
-                selectionPanel.addMessage(`Warning: Enemy superweapon detected!`, '#ff4444');
-              }
-            }
-          }
-        } else {
-          superweaponState.delete(pid);
-        }
-      }
-
-      // Update UI button for player
-      const sw = superweaponState.get(0);
-      if (sw) {
-        swButton.style.display = 'flex';
-        const config = SUPERWEAPON_CONFIG[sw.palaceType];
-        const pct = Math.min(100, (sw.charge / (config?.chargeTime ?? 1)) * 100);
-        swChargeBar.style.width = `${pct}%`;
-        if (sw.ready) {
-          swLabel.textContent = `${config?.name ?? 'Superweapon'} - READY`;
-          swLabel.style.color = '#ff4444';
-          swButton.style.borderColor = '#f44';
-          swButton.style.cursor = 'pointer';
-          swChargeBar.style.background = '#f44';
-        } else {
-          swLabel.textContent = `${config?.name ?? 'Charging...'} ${Math.floor(pct)}%`;
-          swLabel.style.color = '#f88';
-          swButton.style.borderColor = '#555';
-          swButton.style.cursor = 'default';
-        }
-      } else {
-        swButton.style.display = 'none';
-      }
-
-      // AI fires superweapon at player base when ready (check all AI players)
-      const aiSwBlds = buildingQuery(world);
-      for (let aiPid = 1; aiPid < totalPlayers; aiPid++) {
-        const aiSw = superweaponState.get(aiPid);
-        if (aiSw?.ready) {
-          // Target player's building cluster
-          const playerBlds = aiSwBlds;
-          let bestX = 100, bestZ = 100, bestCount = 0;
-          for (const bid of playerBlds) {
-            if (Owner.playerId[bid] !== 0 || Health.current[bid] <= 0) continue;
-            const bx = Position.x[bid], bz = Position.z[bid];
-            let count = 0;
-            for (const bid2 of playerBlds) {
-              if (Owner.playerId[bid2] !== 0 || Health.current[bid2] <= 0) continue;
-              const dx = Position.x[bid2] - bx, dz = Position.z[bid2] - bz;
-              if (dx * dx + dz * dz < 225) count++; // 15 unit radius
-            }
-            if (count > bestCount) { bestCount = count; bestX = bx; bestZ = bz; }
-          }
-          if (bestCount > 0) {
-            bestX += (Math.random() - 0.5) * 6;
-            bestZ += (Math.random() - 0.5) * 6;
-            fireSuperweapon(aiPid, bestX, bestZ);
-          }
-        }
-      }
-    }
-
-    // Deviator revert now handled by AbilitySystem.update()
+    superweaponSystem.update(world, game.getTickCount());
 
     // Dust trails for moving ground units (every 3rd tick to limit particles)
     if (game.getTickCount() % 3 === 0) {
@@ -1766,6 +1532,16 @@ async function main() {
     minimapRenderer.update(world);
     effectsManager.update(40); // ~40ms per tick at 25 TPS
     effectsManager.updateWormVisuals(sandwormSystem.getWorms(), 40);
+    // Clean up stale bloom markers (TTL: 300 ticks = 12 seconds)
+    for (const [key, marker] of bloomMarkers) {
+      marker.ticks++;
+      if (marker.ticks > 300) {
+        scene.scene.remove(marker.mesh);
+        marker.mesh.geometry.dispose();
+        (marker.mesh.material as THREE.Material).dispose();
+        bloomMarkers.delete(key);
+      }
+    }
     fogOfWar.update(world);
     victorySystem.update(world);
     audioManager.updateIntensity();
@@ -1788,7 +1564,7 @@ async function main() {
 
     // Command mode indicator (don't overwrite superweapon targeting)
     const mode = commandManager.getCommandMode();
-    if (commandModeEl && !superweaponTargetMode) {
+    if (commandModeEl && !superweaponSystem.isTargeting) {
       if (mode === 'attack-move') {
         commandModeEl.style.display = 'block';
         commandModeEl.textContent = 'ATTACK-MOVE — Right-click destination';
@@ -1879,8 +1655,8 @@ async function main() {
           const obj = unitRenderer.getEntityObject(eid);
           if (obj) {
             obj.traverse(child => {
-              const mat = (child as any).material;
-              if (mat) {
+              if (child instanceof THREE.Mesh && child.material) {
+                const mat = child.material as THREE.MeshStandardMaterial;
                 mat.transparent = lowPower;
                 mat.opacity = lowPower ? 0.4 : 1.0;
               }
@@ -2220,13 +1996,12 @@ async function main() {
       }
     } else if (e.key === 'Escape' && !helpOverlay?.style.display?.includes('block')) {
       e.preventDefault();
-      if (pauseMenu && pauseMenu.parentNode) {
-        pauseMenu.remove();
-        pauseMenu = null;
+      if (pauseMenu.isOpen) {
+        pauseMenu.close();
         if (game.isPaused()) game.pause(); // Unpause
       } else {
         if (!game.isPaused()) game.pause();
-        showPauseMenu();
+        pauseMenu.show();
       }
     } else if (e.key === 'F9') {
       e.preventDefault();
@@ -2320,297 +2095,16 @@ async function main() {
     selectionPanel.addMessage('Game saved! (F8 to load)', '#44ff44');
   }
 
-  let pauseMenu: HTMLDivElement | null = null;
-
-  // Settings persistence
-  const savedSettings = JSON.parse(localStorage.getItem('ebfd_settings') ?? '{}');
-  if (savedSettings.musicVol !== undefined) audioManager.setMusicVolume(savedSettings.musicVol);
-  if (savedSettings.sfxVol !== undefined) audioManager.setSfxVolume(savedSettings.sfxVol);
-
-  function saveSettings(musicVol: number, sfxVol: number, scrollSpeed: number): void {
-    localStorage.setItem('ebfd_settings', JSON.stringify({ musicVol, sfxVol, scrollSpeed }));
-  }
-
-  function showPauseMenu(): void {
-    if (pauseMenu) return; // Prevent duplicate menus
-    pauseMenu = document.createElement('div');
-    pauseMenu.style.cssText = `
-      position:fixed;top:0;left:0;right:0;bottom:0;
-      background:rgba(0,0,0,0.8);display:flex;flex-direction:column;
-      align-items:center;justify-content:center;z-index:900;
-      font-family:'Segoe UI',Tahoma,sans-serif;
-    `;
-
-    const elapsed = Math.floor(game.getTickCount() / 25);
-    const mins = Math.floor(elapsed / 60);
-    const secs = elapsed % 60;
-
-    pauseMenu.innerHTML = `
-      <div style="color:#d4a840;font-size:36px;font-weight:bold;margin-bottom:8px;">PAUSED</div>
-      <div style="color:#888;font-size:14px;margin-bottom:32px;">Game Time: ${mins}:${secs.toString().padStart(2, '0')}</div>
-    `;
-
-    const buttons = [
-      { label: 'Resume', action: () => { pauseMenu?.remove(); pauseMenu = null; game.pause(); } },
-      { label: 'Mentat', action: () => { showMentatPanel(); } },
-      { label: 'Settings', action: () => { showSettingsPanel(); } },
-      { label: 'Save / Load', action: () => { showSaveLoadPanel(); } },
-      { label: 'Restart Mission', action: () => { window.location.reload(); } },
-      { label: 'Quit to Menu', action: () => {
-        // Clear campaign continuation and reload to main menu
-        localStorage.removeItem('ebfd_campaign_next');
-        localStorage.removeItem('ebfd_load');
-        localStorage.removeItem('ebfd_load_data');
-        window.location.reload();
-      }},
-    ];
-
-    for (const { label, action } of buttons) {
-      const btn = document.createElement('button');
-      btn.textContent = label;
-      btn.style.cssText = 'display:block;width:200px;padding:10px;margin:4px;background:#1a1a3e;border:1px solid #444;color:#ccc;cursor:pointer;font-size:14px;';
-      btn.onmouseenter = () => { btn.style.borderColor = '#88f'; btn.style.color = '#fff'; };
-      btn.onmouseleave = () => { btn.style.borderColor = '#444'; btn.style.color = '#ccc'; };
-      btn.onclick = action;
-      pauseMenu.appendChild(btn);
-    }
-
-    document.body.appendChild(pauseMenu);
-  }
-
-  function showSaveLoadPanel(): void {
-    if (!pauseMenu) return;
-    pauseMenu.innerHTML = '';
-
-    const panel = document.createElement('div');
-    panel.style.cssText = 'background:#1a1a3e;border:1px solid #555;padding:24px 32px;border-radius:4px;min-width:360px;';
-
-    const title = document.createElement('div');
-    title.textContent = 'SAVE / LOAD';
-    title.style.cssText = 'color:#d4a840;font-size:24px;font-weight:bold;text-align:center;margin-bottom:20px;';
-    panel.appendChild(title);
-
-    const slotKeys = ['ebfd_save', 'ebfd_save_2', 'ebfd_save_3'];
-    const slotLabels = ['Slot 1 (F5)', 'Slot 2', 'Slot 3'];
-
-    for (let i = 0; i < slotKeys.length; i++) {
-      const key = slotKeys[i];
-      const raw = localStorage.getItem(key);
-      const timeKey = key + '_time';
-      const timeStr = localStorage.getItem(timeKey) ?? '';
-      const hasSave = !!raw;
-
-      const row = document.createElement('div');
-      row.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:8px;';
-
-      const label = document.createElement('div');
-      label.style.cssText = 'color:#ccc;font-size:13px;flex:1;';
-      label.textContent = hasSave ? `${slotLabels[i]} — ${timeStr}` : `${slotLabels[i]} — Empty`;
-      row.appendChild(label);
-
-      const saveBtn = document.createElement('button');
-      saveBtn.textContent = 'Save';
-      saveBtn.style.cssText = 'padding:4px 12px;background:#1a3e1a;border:1px solid #4a4;color:#ccc;cursor:pointer;font-size:12px;';
-      saveBtn.onmouseenter = () => { saveBtn.style.borderColor = '#8f8'; };
-      saveBtn.onmouseleave = () => { saveBtn.style.borderColor = '#4a4'; };
-      saveBtn.onclick = () => {
-        const data = buildSaveData();
-        localStorage.setItem(key, JSON.stringify(data));
-        localStorage.setItem(timeKey, new Date().toLocaleString());
-        selectionPanel.addMessage(`Saved to ${slotLabels[i]}`, '#44ff44');
-        showSaveLoadPanel(); // Refresh
-      };
-      row.appendChild(saveBtn);
-
-      const loadBtn = document.createElement('button');
-      loadBtn.textContent = 'Load';
-      loadBtn.style.cssText = `padding:4px 12px;background:#1a1a3e;border:1px solid ${hasSave ? '#44f' : '#333'};color:${hasSave ? '#ccc' : '#555'};cursor:${hasSave ? 'pointer' : 'default'};font-size:12px;`;
-      if (hasSave) {
-        loadBtn.onmouseenter = () => { loadBtn.style.borderColor = '#88f'; };
-        loadBtn.onmouseleave = () => { loadBtn.style.borderColor = '#44f'; };
-        loadBtn.onclick = () => {
-          localStorage.setItem('ebfd_load_data', raw!);
-          localStorage.setItem('ebfd_load', '1');
-          window.location.reload();
-        };
-      }
-      row.appendChild(loadBtn);
-
-      panel.appendChild(row);
-    }
-
-    // Autosave slot (read-only, load only)
-    const autoRaw = localStorage.getItem('ebfd_autosave');
-    const autoTime = localStorage.getItem('ebfd_autosave_time') ?? '';
-    const hasAuto = !!autoRaw;
-
-    const autoRow = document.createElement('div');
-    autoRow.style.cssText = 'display:flex;align-items:center;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid #333;';
-
-    const autoLabel = document.createElement('div');
-    autoLabel.style.cssText = 'color:#888;font-size:13px;flex:1;';
-    autoLabel.textContent = hasAuto ? `Autosave — ${autoTime}` : 'Autosave — None';
-    autoRow.appendChild(autoLabel);
-
-    const autoLoadBtn = document.createElement('button');
-    autoLoadBtn.textContent = 'Load';
-    autoLoadBtn.style.cssText = `padding:4px 12px;background:#1a1a3e;border:1px solid ${hasAuto ? '#44f' : '#333'};color:${hasAuto ? '#ccc' : '#555'};cursor:${hasAuto ? 'pointer' : 'default'};font-size:12px;`;
-    if (hasAuto) {
-      autoLoadBtn.onmouseenter = () => { autoLoadBtn.style.borderColor = '#88f'; };
-      autoLoadBtn.onmouseleave = () => { autoLoadBtn.style.borderColor = '#44f'; };
-      autoLoadBtn.onclick = () => {
-        localStorage.setItem('ebfd_load_data', autoRaw!);
-        localStorage.setItem('ebfd_load', '1');
-        window.location.reload();
-      };
-    }
-    autoRow.appendChild(autoLoadBtn);
-    panel.appendChild(autoRow);
-
-    // Back button
-    const backBtn = document.createElement('button');
-    backBtn.textContent = 'Back';
-    backBtn.style.cssText = 'display:block;width:100%;padding:10px;background:#2a2a4e;border:1px solid #555;color:#ccc;cursor:pointer;font-size:14px;margin-top:16px;';
-    backBtn.onmouseenter = () => { backBtn.style.borderColor = '#88f'; };
-    backBtn.onmouseleave = () => { backBtn.style.borderColor = '#555'; };
-    backBtn.onclick = () => {
-      pauseMenu?.remove();
-      pauseMenu = null;
-      showPauseMenu();
-    };
-    panel.appendChild(backBtn);
-
-    pauseMenu.appendChild(panel);
-  }
-
-  function showMentatPanel(): void {
-    if (!pauseMenu) return;
-    pauseMenu.innerHTML = '';
-
-    const panel = document.createElement('div');
-    panel.style.cssText = 'background:#1a1a2e;border:1px solid #555;border-radius:4px;width:640px;height:480px;display:flex;flex-direction:column;';
-
-    // Back button
-    const backRow = document.createElement('div');
-    backRow.style.cssText = 'display:flex;justify-content:flex-end;padding:4px 8px;';
-    const backBtn = document.createElement('button');
-    backBtn.textContent = 'Back';
-    backBtn.style.cssText = 'padding:4px 12px;background:#1a1a3e;border:1px solid #444;color:#ccc;cursor:pointer;font-size:11px;';
-    backBtn.onmouseenter = () => { backBtn.style.borderColor = '#88f'; };
-    backBtn.onmouseleave = () => { backBtn.style.borderColor = '#444'; };
-    backBtn.onclick = () => { pauseMenu?.remove(); pauseMenu = null; showPauseMenu(); };
-    backRow.appendChild(backBtn);
-    panel.appendChild(backRow);
-
-    // Mentat content container
-    const contentDiv = document.createElement('div');
-    contentDiv.style.cssText = 'flex:1;overflow:hidden;';
-    panel.appendChild(contentDiv);
-
-    const mentat = new MentatScreen(gameRules);
-    mentat.show(contentDiv);
-
-    pauseMenu.appendChild(panel);
-  }
-
-  function showSettingsPanel(): void {
-    if (!pauseMenu) return;
-    // Clear pause menu content and show settings
-    pauseMenu.innerHTML = '';
-
-    const panel = document.createElement('div');
-    panel.style.cssText = 'background:#1a1a3e;border:1px solid #555;padding:24px 32px;border-radius:4px;min-width:300px;';
-
-    const title = document.createElement('div');
-    title.textContent = 'SETTINGS';
-    title.style.cssText = 'color:#d4a840;font-size:24px;font-weight:bold;text-align:center;margin-bottom:20px;';
-    panel.appendChild(title);
-
-    // Music volume slider
-    const currentSettings = JSON.parse(localStorage.getItem('ebfd_settings') ?? '{"musicVol":0.3,"sfxVol":0.5,"scrollSpeed":1}');
-    let musicVol = currentSettings.musicVol ?? 0.3;
-    let sfxVol = currentSettings.sfxVol ?? 0.5;
-    let scrollSpd = currentSettings.scrollSpeed ?? 1;
-
-    const createSlider = (label: string, value: number, onChange: (v: number) => void): HTMLElement => {
-      const row = document.createElement('div');
-      row.style.cssText = 'margin-bottom:16px;';
-      const lbl = document.createElement('div');
-      lbl.style.cssText = 'color:#ccc;font-size:13px;margin-bottom:4px;display:flex;justify-content:space-between;';
-      const valLabel = document.createElement('span');
-      valLabel.textContent = `${Math.round(value * 100)}%`;
-      valLabel.style.color = '#8cf';
-      lbl.innerHTML = `<span>${label}</span>`;
-      lbl.appendChild(valLabel);
-      row.appendChild(lbl);
-      const slider = document.createElement('input');
-      slider.type = 'range';
-      slider.min = '0';
-      slider.max = '100';
-      slider.value = String(Math.round(value * 100));
-      slider.style.cssText = 'width:100%;accent-color:#d4a840;';
-      slider.oninput = () => {
-        const v = parseInt(slider.value) / 100;
-        valLabel.textContent = `${slider.value}%`;
-        onChange(v);
-      };
-      row.appendChild(slider);
-      return row;
-    };
-
-    panel.appendChild(createSlider('Music Volume', musicVol, (v) => {
-      musicVol = v;
-      audioManager.setMusicVolume(v);
-    }));
-
-    panel.appendChild(createSlider('SFX Volume', sfxVol, (v) => {
-      sfxVol = v;
-      audioManager.setSfxVolume(v);
-    }));
-
-    panel.appendChild(createSlider('Scroll Speed', scrollSpd, (v) => {
-      scrollSpd = v;
-    }));
-
-    // Game speed selector
-    const speedRow = document.createElement('div');
-    speedRow.style.cssText = 'margin-bottom:20px;';
-    const speedLabel = document.createElement('div');
-    speedLabel.textContent = 'Game Speed';
-    speedLabel.style.cssText = 'color:#ccc;font-size:13px;margin-bottom:4px;';
-    speedRow.appendChild(speedLabel);
-    const speedBtns = document.createElement('div');
-    speedBtns.style.cssText = 'display:flex;gap:4px;';
-    for (const { label, speed } of [{ label: 'Slow', speed: 0.5 }, { label: 'Normal', speed: 1.0 }, { label: 'Fast', speed: 2.0 }]) {
-      const btn = document.createElement('button');
-      btn.textContent = label;
-      btn.style.cssText = 'flex:1;padding:6px;background:#111;border:1px solid #444;color:#ccc;cursor:pointer;font-size:12px;';
-      btn.onclick = () => {
-        game.setSpeed(speed);
-        speedBtns.querySelectorAll('button').forEach(b => (b as HTMLElement).style.borderColor = '#444');
-        btn.style.borderColor = '#d4a840';
-      };
-      speedBtns.appendChild(btn);
-    }
-    speedRow.appendChild(speedBtns);
-    panel.appendChild(speedRow);
-
-    // Back button
-    const backBtn = document.createElement('button');
-    backBtn.textContent = 'Back';
-    backBtn.style.cssText = 'display:block;width:100%;padding:10px;background:#2a2a4e;border:1px solid #555;color:#ccc;cursor:pointer;font-size:14px;margin-top:8px;';
-    backBtn.onmouseenter = () => { backBtn.style.borderColor = '#88f'; };
-    backBtn.onmouseleave = () => { backBtn.style.borderColor = '#555'; };
-    backBtn.onclick = () => {
-      saveSettings(musicVol, sfxVol, scrollSpd);
-      pauseMenu?.remove();
-      pauseMenu = null;
-      showPauseMenu();
-    };
-    panel.appendChild(backBtn);
-
-    pauseMenu.appendChild(panel);
-  }
+  // Pause menu (extracted to PauseMenu module)
+  const pauseMenu = new PauseMenu({
+    audioManager,
+    selectionPanel,
+    gameRules,
+    getTickCount: () => game.getTickCount(),
+    setSpeed: (speed: number) => game.setSpeed(speed),
+    pause: () => game.pause(),
+    buildSaveData,
+  });
 
   // --- SPAWN INITIAL ENTITIES ---
   const world = game.getWorld();
