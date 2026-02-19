@@ -273,12 +273,7 @@ export class CommandManager {
         }
         break;
 
-      case 'x':
-        // Scatter
-        if (selected.length > 0) {
-          this.issueScatterCommand(selected);
-        }
-        break;
+      // 'x' scatter is handled in index.ts as fallback when ability system doesn't consume it
 
       case 'escape':
         if (this.commandMode !== 'normal') {
@@ -475,7 +470,7 @@ export class CommandManager {
     this.audioManager?.playSfx('select');
   }
 
-  private issueScatterCommand(entityIds: number[]): void {
+  issueScatterCommand(entityIds: number[]): void {
     if (entityIds.length === 0) return;
 
     // Calculate group centroid

@@ -70,6 +70,8 @@ export class AbilitySystem {
   private stealthTimers = new Map<number, { idleTicks: number; fireCooldown: number; active: boolean }>();
   // Track previous positions for movement detection
   private stealthPrevPositions = new Map<number, { x: number; z: number }>();
+  // Persistent unstealth zone tracking (prevents flicker between 25-tick checks)
+  private unitsInUnstealthZone = new Set<number>();
 
   // --- APC Transport system ---
   private transportPassengers = new Map<number, number[]>();
@@ -291,10 +293,9 @@ export class AbilitySystem {
       }
     }
 
-    // Check buildings with unstealthRange (every 25 ticks) — collect positions with owner
-    let unstealthZones: { x: number; z: number; r2: number; owner: number }[] | null = null;
+    // Recompute unstealth zones every 25 ticks and persist per-unit state
     if (tickCount % 25 === 0) {
-      unstealthZones = [];
+      const unstealthZones: { x: number; z: number; r2: number; owner: number }[] = [];
       const allBuildings = buildingQuery(world);
       for (const bid of allBuildings) {
         if (Health.current[bid] <= 0) continue;
@@ -308,6 +309,23 @@ export class AbilitySystem {
             r2: bDef.unstealthRange * bDef.unstealthRange,
             owner: Owner.playerId[bid],
           });
+        }
+      }
+      this.unitsInUnstealthZone.clear();
+      if (unstealthZones.length > 0) {
+        for (const eid of units) {
+          if (Health.current[eid] <= 0) continue;
+          const unitOwner = Owner.playerId[eid];
+          const ux = Position.x[eid], uz = Position.z[eid];
+          for (const zone of unstealthZones) {
+            if (zone.owner === unitOwner) continue;
+            const dx = ux - zone.x;
+            const dz = uz - zone.z;
+            if (dx * dx + dz * dz < zone.r2) {
+              this.unitsInUnstealthZone.add(eid);
+              break;
+            }
+          }
         }
       }
     }
@@ -339,20 +357,8 @@ export class AbilitySystem {
       // Infiltrator reveal overrides stealth
       const isRevealed = this.infiltratorRevealed.has(eid);
 
-      // Check if near an enemy unstealth building (use cached zones with owner)
-      let inUnstealthZone = false;
-      if (unstealthZones) {
-        const unitOwner = Owner.playerId[eid];
-        for (const zone of unstealthZones) {
-          if (zone.owner === unitOwner) continue; // Only enemy buildings unstealth
-          const dx = cx - zone.x;
-          const dz = cz - zone.z;
-          if (dx * dx + dz * dz < zone.r2) {
-            inUnstealthZone = true;
-            break;
-          }
-        }
-      }
+      // Check if near an enemy unstealth building (persisted across ticks)
+      const inUnstealthZone = this.unitsInUnstealthZone.has(eid);
 
       // Decrement fire cooldown
       if (timer.fireCooldown > 0) {

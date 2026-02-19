@@ -86,11 +86,14 @@ export class SuperweaponSystem {
       }
     });
 
-    // Targeting click
+    // Targeting click (capture phase to consume before selection/command handlers)
     window.addEventListener('mousedown', (e) => {
       if (!this.targetMode || e.button !== 0) return;
       if (e.clientY < 32 || e.clientX > window.innerWidth - 200) return;
       if (e.clientX < 200 && e.clientY > window.innerHeight - 200) return;
+
+      e.stopPropagation();
+      e.preventDefault();
 
       this.targetMode = false;
       const cmdMode = document.getElementById('command-mode');
@@ -100,7 +103,7 @@ export class SuperweaponSystem {
       if (worldPos) {
         this.fire(0, worldPos.x, worldPos.z);
       }
-    });
+    }, true);
 
     // Cancel on Escape
     window.addEventListener('keydown', (e) => {

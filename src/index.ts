@@ -2565,7 +2565,11 @@ async function main() {
       // Ability key commands: X=self-destruct, D=deploy/MCV, T=teleport/projector,
       // L=load transport, U=unload transport, W=mount worm
       const selected = selectionManager.getSelectedEntities();
-      abilitySystem.handleKeyCommand(e.key, selected, game.getWorld());
+      const handled = abilitySystem.handleKeyCommand(e.key, selected, game.getWorld());
+      // X key fallback: scatter if no ability consumed it
+      if (!handled && e.key === 'x' && selected.length > 0) {
+        commandManager.issueScatterCommand(selected);
+      }
     } else if (e.key === 'F1' || e.key === 'F2' || e.key === 'F3' || e.key === 'F4') {
       e.preventDefault();
       const slot = parseInt(e.key.charAt(1)) - 1; // 0-3
