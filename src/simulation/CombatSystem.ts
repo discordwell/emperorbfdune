@@ -51,6 +51,10 @@ export class CombatSystem implements GameSystem {
   private recentlyFired = new Set<number>();
   // Hit slowdown: target eid -> { ticksLeft, speedReduction (0-100%) }
   private hitSlowdowns = new Map<number, { ticksLeft: number; amount: number }>();
+  // Infantry suppression timers (1/5 chance on hit, 200 tick duration, stops firing)
+  // Uses separate set from suppressedEntities to avoid conflicts with aircraft rearming etc.
+  private suppressionTimers = new Map<number, number>(); // eid -> ticksLeft
+  private infantrySuppressed = new Set<number>();
   // Terrain reference for height/infantry rock bonuses
   private terrain: TerrainRenderer | null = null;
 
@@ -133,6 +137,8 @@ export class CombatSystem implements GameSystem {
   unregisterUnit(eid: number): void {
     this.unitTypeMap.delete(eid);
     this.hitSlowdowns.delete(eid);
+    this.suppressionTimers.delete(eid);
+    this.infantrySuppressed.delete(eid);
     this.attackMoveEntities.delete(eid);
     this.attackMoveDestinations.delete(eid);
     this.stances.delete(eid);
@@ -170,11 +176,19 @@ export class CombatSystem implements GameSystem {
     return this.recentlyFired.has(eid);
   }
 
-  /** Get speed multiplier for hit slowdown (1.0 = normal, lower = slowed) */
+  /** Get speed multiplier for hit slowdown + suppression (1.0 = normal, lower = slowed) */
   getHitSlowdownMultiplier(eid: number): number {
+    let mult = 1.0;
     const slow = this.hitSlowdowns.get(eid);
-    if (!slow) return 1.0;
-    return Math.max(0.1, 1.0 - slow.amount / 100);
+    if (slow) mult = Math.max(0.1, 1.0 - slow.amount / 100);
+    // Suppressed infantry move at 50% speed
+    if (this.infantrySuppressed.has(eid)) mult *= 0.5;
+    return mult;
+  }
+
+  /** Check if an entity is suppressed by combat (infantry suppression) */
+  isSuppressed(eid: number): boolean {
+    return this.infantrySuppressed.has(eid);
   }
 
   update(world: World, _dt: number): void {
@@ -185,6 +199,16 @@ export class CombatSystem implements GameSystem {
     for (const [eid, slow] of this.hitSlowdowns) {
       slow.ticksLeft--;
       if (slow.ticksLeft <= 0) this.hitSlowdowns.delete(eid);
+    }
+
+    // Tick down infantry suppression timers (separate from aircraft/leech suppression)
+    for (const [eid, ticksLeft] of this.suppressionTimers) {
+      if (ticksLeft <= 1) {
+        this.suppressionTimers.delete(eid);
+        this.infantrySuppressed.delete(eid);
+      } else {
+        this.suppressionTimers.set(eid, ticksLeft - 1);
+      }
     }
 
     // Update escort targets: follow the escorted unit
@@ -217,9 +241,10 @@ export class CombatSystem implements GameSystem {
     const entities = combatQuery(world);
 
     for (const eid of entities) {
-      // Skip disabled buildings (low power) or suppressed units (rearming)
+      // Skip disabled buildings (low power), suppressed units (rearming), or infantry suppressed by combat
       if (this.disabledBuildings.has(eid)) continue;
       if (this.suppressedEntities.has(eid)) continue;
+      if (this.infantrySuppressed.has(eid)) continue;
 
       // Decrement fire timer
       if (Combat.fireTimer[eid] > 0) {
@@ -457,6 +482,16 @@ export class CombatSystem implements GameSystem {
           // Weaker hit: just refresh timer if it would last longer
           existing.ticksLeft = Math.max(existing.ticksLeft, attackerDef.hitSlowDownDuration);
         }
+      }
+    }
+
+    // Infantry suppression: 1/5 chance when hit, lasts 200 ticks (stops firing + slows)
+    const targetTypeName = this.unitTypeMap.get(targetEid);
+    if (targetTypeName && !this.suppressionTimers.has(targetEid)) {
+      const targetDef = this.rules.units.get(targetTypeName);
+      if (targetDef && targetDef.canBeSuppressed && Math.random() < 0.2) { // 1/5 chance
+        this.suppressionTimers.set(targetEid, 200);
+        this.infantrySuppressed.add(targetEid);
       }
     }
 

@@ -1126,6 +1126,9 @@ async function main() {
     effectsManager.spawnExplosion(x, y, z, explosionSize);
     effectsManager.spawnWreckage(x, y, z, isBuilding);
     effectsManager.spawnDecal(x, z, explosionSize);
+    // Minimap death ping (red for enemy deaths, orange for own units)
+    const deathColor = deadOwner === 0 ? '#ff6600' : '#ff2222';
+    minimapRenderer.flashPing(x, z, deathColor);
     // Screen shake proportional to explosion size
     if (explosionSize === 'large') scene.shake(0.4);
     else if (explosionSize === 'medium') scene.shake(0.15);
@@ -2093,7 +2096,7 @@ async function main() {
           EventBus.off('game:tick', stormDamage);
           return;
         }
-        // Damage units on sand every 25 ticks during storm
+        // Damage units and buildings on sand every 25 ticks during storm
         if (game.getTickCount() % 25 === 0) {
           const stormUnits = unitQuery(world);
           for (const eid of stormUnits) {
@@ -2112,6 +2115,20 @@ async function main() {
               if (Health.current[eid] <= 0) {
                 EventBus.emit('unit:died', { entityId: eid, killerEntity: -1 });
               }
+            }
+          }
+          // Buildings also take storm damage (per-building stormDamage from rules.txt)
+          const stormBldgs = buildingQuery(world);
+          for (const bid of stormBldgs) {
+            if (Health.current[bid] <= 0) continue;
+            const bTypeId = BuildingType.id[bid];
+            const bName = buildingTypeNames[bTypeId];
+            const bDef = bName ? gameRules.buildings.get(bName) : null;
+            const bDmg = bDef?.stormDamage ?? 0;
+            if (bDmg <= 0) continue;
+            Health.current[bid] = Math.max(0, Health.current[bid] - bDmg);
+            if (Health.current[bid] <= 0) {
+              EventBus.emit('unit:died', { entityId: bid, killerEntity: -1 });
             }
           }
         }

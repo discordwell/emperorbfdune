@@ -435,8 +435,8 @@ export class AbilitySystem {
 
   /** Infantry crushing: vehicles crush infantry they overlap */
   private updateInfantryCrushing(world: World, tickCount: number): void {
-    if (tickCount % 10 !== 0) return;
-    const { unitTypeNames, rules } = this.deps;
+    if (tickCount % 3 !== 0) return; // Check every 3 ticks (~120ms) for reliable detection
+    const { unitTypeNames, rules, effectsManager } = this.deps;
     const allUnits = unitQuery(world);
     // Pre-filter: collect moving crushers and crushable infantry separately
     const crushers: number[] = [];
@@ -459,8 +459,9 @@ export class AbilitySystem {
         if (Owner.playerId[other] === owner) continue;
         const dx = px - Position.x[other];
         const dz = pz - Position.z[other];
-        if (dx * dx + dz * dz < 2.0) {
+        if (dx * dx + dz * dz < 2.5) { // ~1.58 world units radius
           Health.current[other] = 0;
+          effectsManager.spawnExplosion(Position.x[other], 0, Position.z[other], 'small');
           EventBus.emit('unit:died', { entityId: other, killerEntity: eid });
         }
       }
