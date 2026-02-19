@@ -1168,7 +1168,10 @@ export class AudioManager {
       this.musicElement.volume = this.muted ? 0 : this.musicVolume;
     }
     if (this.fadingOutElement) {
-      this.fadingOutElement.volume = this.muted ? 0 : this.fadingOutElement.volume;
+      this.fadingOutElement.volume = this.muted ? 0 : this.musicVolume;
+    }
+    if (this.sampleBank) {
+      this.sampleBank.setVolume(this.muted ? 0 : this.sfxVolume);
     }
     if (this.dialogManager) {
       this.dialogManager.setMuted(this.muted);

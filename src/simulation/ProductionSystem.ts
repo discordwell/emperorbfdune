@@ -570,6 +570,11 @@ export class ProductionSystem {
     return offers;
   }
 
+  /** Check if a player can afford a specific credit amount (for starport UI) */
+  canAffordAmount(playerId: number, amount: number): boolean {
+    return this.harvestSystem.getSolaris(playerId) >= amount;
+  }
+
   /** Purchase a unit from the starport (arrives after delay via normal production:complete) */
   buyFromStarport(playerId: number, unitName: string): boolean {
     const price = this.starportPrices.get(unitName);

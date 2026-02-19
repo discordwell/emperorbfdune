@@ -247,7 +247,7 @@ export class TerrainRenderer {
 
   isPassable(tx: number, tz: number): boolean {
     const type = this.getTerrainType(tx, tz);
-    return type !== TerrainType.Cliff && type !== TerrainType.Rock;
+    return type !== TerrainType.Cliff;
   }
 
   isPassableVehicle(tx: number, tz: number): boolean {

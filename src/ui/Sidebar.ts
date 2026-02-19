@@ -372,7 +372,8 @@ export class Sidebar {
     for (const { name, price } of offers) {
       const def = this.rules.units.get(name);
       if (!def) continue;
-      const canAfford = this.production.canBuild(this.playerId, name, false);
+      // Starport bypasses factory/tech prerequisites — only check if player can afford the price
+      const canAfford = this.production.canAffordAmount(this.playerId, price);
       const displayName = getDisplayName(name);
       const baseCost = def.cost;
       const priceDelta = price - baseCost;

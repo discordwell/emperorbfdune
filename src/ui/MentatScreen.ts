@@ -174,7 +174,7 @@ export class MentatScreen {
             <div style="margin-top:12px;border-top:1px solid #333;padding-top:8px;">
               <div style="color:${fColor};font-size:13px;font-weight:bold;margin-bottom:6px;">Weapon</div>
               ${this.statRow('Damage', `${bullet.damage}`)}
-              ${this.statRow('Range', `${bullet.maxRange.toFixed(1)}`)}
+              ${this.statRow('Range', `${(bullet.maxRange * 2).toFixed(1)}`)}
               ${turret.reloadCount > 0 ? this.statRow('Fire Rate', `${(25 / turret.reloadCount).toFixed(1)}/s`) : ''}
               ${bullet.blastRadius > 0 ? this.statRow('Blast Radius', `${(bullet.blastRadius / 32).toFixed(1)} tiles`) : ''}
               ${bullet.homing ? this.statRow('Tracking', 'Yes') : ''}
@@ -282,7 +282,7 @@ export class MentatScreen {
             <div style="margin-top:12px;border-top:1px solid #333;padding-top:8px;">
               <div style="color:${fColor};font-size:13px;font-weight:bold;margin-bottom:6px;">Weapon</div>
               ${this.statRow('Damage', `${bullet.damage}`)}
-              ${this.statRow('Range', `${bullet.maxRange.toFixed(1)}`)}
+              ${this.statRow('Range', `${(bullet.maxRange * 2).toFixed(1)}`)}
               ${turret.reloadCount > 0 ? this.statRow('Fire Rate', `${(25 / turret.reloadCount).toFixed(1)}/s`) : ''}
               ${bullet.antiAircraft ? this.statRow('Anti-Air', 'Yes') : ''}
             </div>

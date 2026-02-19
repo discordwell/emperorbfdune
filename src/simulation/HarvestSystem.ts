@@ -560,7 +560,7 @@ export class HarvestSystem implements GameSystem {
 
     if (timer < 25) return; // Unloading takes 1 second (25 ticks)
 
-    const spiceValue = Harvester.spiceCarried[eid] * GameConstants.SPICE_VALUE * 100;
+    const spiceValue = Harvester.spiceCarried[eid] * GameConstants.SPICE_VALUE;
     const owner = Owner.playerId[eid];
     this.addSolaris(owner, spiceValue);
     EventBus.emit('harvest:delivered', { amount: spiceValue, owner });
