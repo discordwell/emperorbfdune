@@ -167,7 +167,7 @@ export class VictorySystem {
     // Survival mode: win after surviving N ticks
     if (this.victoryCondition === 'survival') {
       const elapsed = this.tickCounter - this.graceperiodTicks;
-      if (elapsed >= this.survivalTicks) {
+      if (this.survivalTicks > 0 && elapsed >= this.survivalTicks) {
         this.triggerVictory();
       }
       return;

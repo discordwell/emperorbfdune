@@ -198,6 +198,7 @@ export class SelectionManager {
     const selected: number[] = [];
 
     for (const eid of entities) {
+      if (hasComponent(world, Health, eid) && Health.current[eid] <= 0) continue;
       // Project entity world position to screen
       const worldPos = new THREE.Vector3(Position.x[eid], Position.y[eid], Position.z[eid]);
       const screenPos = worldPos.project(this.sceneManager.camera);

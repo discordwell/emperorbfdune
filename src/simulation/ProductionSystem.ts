@@ -22,6 +22,8 @@ export interface ProductionState {
   upgradeQueues: Record<number, QueueItem[]>;
   upgradedBuildings: Record<number, string[]>;
   repeatUnits: Record<number, string[]>;
+  costMultipliers?: Record<number, number>;
+  timeMultipliers?: Record<number, number>;
 }
 
 export class ProductionSystem {
@@ -565,7 +567,6 @@ export class ProductionSystem {
   buyFromStarport(playerId: number, unitName: string): boolean {
     const price = this.starportPrices.get(unitName);
     if (price === undefined) return false;
-    if (!this.harvestSystem.spendSolaris(playerId, price)) return false;
 
     // Queue as a unit with reduced build time (arrives by air)
     const def = this.rules.units.get(unitName);
@@ -579,6 +580,9 @@ export class ProductionSystem {
     const queue = queueMap.get(playerId) ?? [];
     // Queue limit: max 5 items per production queue
     if (queue.length >= 5) return false;
+
+    // All validation passed — now spend money
+    if (!this.harvestSystem.spendSolaris(playerId, price)) return false;
     queue.push({
       typeName: unitName,
       isBuilding: false,
@@ -631,6 +635,10 @@ export class ProductionSystem {
       }
       return out;
     };
+    const costMults: Record<number, number> = {};
+    for (const [pid, m] of this.costMultipliers) costMults[pid] = m;
+    const timeMults: Record<number, number> = {};
+    for (const [pid, m] of this.timeMultipliers) timeMults[pid] = m;
     return {
       buildingQueues: serializeQueue(this.buildingQueues),
       infantryQueues: serializeQueue(this.infantryQueues),
@@ -638,6 +646,8 @@ export class ProductionSystem {
       upgradeQueues: serializeQueue(this.upgradeQueues),
       upgradedBuildings: serializeSet(this.upgradedBuildings),
       repeatUnits: serializeSet(this.repeatUnits),
+      costMultipliers: costMults,
+      timeMultipliers: timeMults,
     };
   }
 
@@ -649,6 +659,8 @@ export class ProductionSystem {
     this.upgradeQueues.clear();
     this.upgradedBuildings.clear();
     this.repeatUnits.clear();
+    this.costMultipliers.clear();
+    this.timeMultipliers.clear();
     const restoreQueue = (data: Record<number, QueueItem[]>, target: Map<number, QueueItem[]>): void => {
       for (const pid of Object.keys(data)) {
         const items = data[Number(pid)];
@@ -672,6 +684,16 @@ export class ProductionSystem {
     restoreQueue(state.upgradeQueues ?? {}, this.upgradeQueues);
     restoreSet(state.upgradedBuildings ?? {}, this.upgradedBuildings);
     restoreSet(state.repeatUnits ?? {}, this.repeatUnits);
+    if (state.costMultipliers) {
+      for (const pid of Object.keys(state.costMultipliers)) {
+        this.costMultipliers.set(Number(pid), state.costMultipliers[Number(pid)]);
+      }
+    }
+    if (state.timeMultipliers) {
+      for (const pid of Object.keys(state.timeMultipliers)) {
+        this.timeMultipliers.set(Number(pid), state.timeMultipliers[Number(pid)]);
+      }
+    }
   }
 
   /** Cancel a queued item by index, refunding cost (partial for in-progress).
@@ -697,7 +719,7 @@ export class ProductionSystem {
     if (!queue || index < 0 || index >= queue.length) return false;
 
     const item = queue[index];
-    const refundRatio = index === 0 ? (1 - item.elapsed / item.totalTime) : 1.0;
+    const refundRatio = index === 0 && item.totalTime > 0 ? (1 - item.elapsed / item.totalTime) : 1.0;
     const refund = Math.floor(item.cost * refundRatio);
     this.harvestSystem.addSolaris(playerId, refund);
 

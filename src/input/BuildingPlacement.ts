@@ -127,12 +127,22 @@ export class BuildingPlacement {
       (this.ghostMesh.material as THREE.Material).dispose();
       this.ghostMesh = null;
     }
-    if (this.gridHelper) {
-      this.sceneManager.scene.remove(this.gridHelper);
-      this.gridHelper = null;
-    }
+    this.disposeGridHelper();
 
     document.body.style.cursor = 'default';
+  }
+
+  private disposeGridHelper(): void {
+    if (this.gridHelper) {
+      this.sceneManager.scene.remove(this.gridHelper);
+      for (const child of this.gridHelper.children) {
+        if (child instanceof THREE.Mesh) {
+          child.geometry.dispose();
+          (child.material as THREE.Material).dispose();
+        }
+      }
+      this.gridHelper = null;
+    }
   }
 
   isActive(): boolean {
@@ -295,10 +305,7 @@ export class BuildingPlacement {
           (this.ghostMesh.material as THREE.Material).dispose();
           this.ghostMesh = null;
         }
-        if (this.gridHelper) {
-          this.sceneManager.scene.remove(this.gridHelper);
-          this.gridHelper = null;
-        }
+        this.disposeGridHelper();
         document.body.style.cursor = 'default';
       } else {
         this.audioManager.playSfx('error');
