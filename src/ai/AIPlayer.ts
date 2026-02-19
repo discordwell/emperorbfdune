@@ -847,7 +847,9 @@ export class AIPlayer implements GameSystem {
 
     if (harvesterCount < desiredHarvesters) {
       const solaris = this.harvestSystem.getSolaris(this.playerId);
-      if (solaris < 600) return; // Can't afford one
+      const harvName = `${this.factionPrefix}Harvester`;
+      const minCost = this.production ? this.production.getAdjustedCost(this.playerId, harvName, false) : 600;
+      if (solaris < minCost) return; // Can't afford one
 
       // Try to find a harvester unit type in the rules
       const harvesterNames = [

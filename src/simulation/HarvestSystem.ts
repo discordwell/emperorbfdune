@@ -549,6 +549,15 @@ export class HarvestSystem implements GameSystem {
     const timer = (this.harvestTimers.get(eid) ?? 0) + 1;
     this.harvestTimers.set(eid, timer);
 
+    // Verify refinery is still alive during unload
+    const refEntity = Harvester.refineryEntity[eid];
+    if (refEntity <= 0 || Health.current[refEntity] <= 0) {
+      this.harvestTimers.delete(eid);
+      Harvester.state[eid] = RETURNING;
+      this.returnToRefinery(eid);
+      return;
+    }
+
     if (timer < 25) return; // Unloading takes 1 second (25 ticks)
 
     const spiceValue = Harvester.spiceCarried[eid] * GameConstants.SPICE_VALUE * 100;

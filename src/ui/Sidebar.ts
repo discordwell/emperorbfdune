@@ -295,7 +295,7 @@ export class Sidebar {
       const adjustedCost = this.production.getAdjustedCost(this.playerId, name, true);
       const item = this.createBuildItem(name, adjustedCost, canBuild, true, hotkey, role);
       grid.appendChild(item);
-      if (hotkey && canBuild) {
+      if (hotkey) {
         this.hotkeyMap.set(hotkey, { name, isBuilding: true });
       }
       hotkeyIdx++;
@@ -358,7 +358,7 @@ export class Sidebar {
       const adjustedCost = this.production.getAdjustedCost(this.playerId, name, false);
       const item = this.createBuildItem(name, adjustedCost, canBuild, false, hotkey, role);
       grid.appendChild(item);
-      if (hotkey && canBuild) {
+      if (hotkey) {
         this.hotkeyMap.set(hotkey, { name, isBuilding: false });
       }
       hotkeyIdx++;

@@ -1,8 +1,8 @@
 import type { GameSystem } from '../core/Game';
 import type { World } from '../core/ECS';
 import {
-  Position, Velocity, Speed, MoveTarget, Rotation,
-  movableQuery,
+  Position, Velocity, Speed, MoveTarget, Rotation, Health,
+  movableQuery, hasComponent,
 } from '../core/ECS';
 import { PathfindingSystem } from './PathfindingSystem';
 import { SpatialGrid } from '../utils/SpatialGrid';
@@ -89,6 +89,13 @@ export class MovementSystem implements GameSystem {
     }
 
     for (const eid of entities) {
+      // Clean up dead entities' path cache
+      if (hasComponent(world, Health, eid) && Health.current[eid] <= 0) {
+        this.paths.delete(eid);
+        this.pathIndex.delete(eid);
+        continue;
+      }
+
       if (MoveTarget.active[eid] !== 1) {
         // Apply idle separation to prevent stacking (throttled)
         if (doIdleSep && !this.flyingEntities.has(eid)) {
@@ -107,10 +114,20 @@ export class MovementSystem implements GameSystem {
           if (Math.abs(sepX) > 0.01 || Math.abs(sepZ) > 0.01) {
             const nx = Math.max(0, Math.min(this.mapMaxX, px + sepX * 0.03));
             const nz = Math.max(0, Math.min(this.mapMaxZ, pz + sepZ * 0.03));
-            Position.x[eid] = nx;
-            Position.z[eid] = nz;
-            if (this.terrain && !this.flyingEntities.has(eid)) {
-              Position.y[eid] = this.terrain.getHeightAt(nx, nz) + 0.1;
+            // Check passability before applying separation
+            let passable = true;
+            if (this.terrain) {
+              const tile = worldToTile(nx, nz);
+              passable = this.infantryEntities.has(eid)
+                ? this.terrain.isPassable(tile.tx, tile.tz)
+                : this.terrain.isPassableVehicle(tile.tx, tile.tz);
+            }
+            if (passable) {
+              Position.x[eid] = nx;
+              Position.z[eid] = nz;
+              if (this.terrain && !this.flyingEntities.has(eid)) {
+                Position.y[eid] = this.terrain.getHeightAt(nx, nz) + 0.1;
+              }
             }
           }
         }
