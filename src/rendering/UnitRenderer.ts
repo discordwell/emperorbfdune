@@ -548,9 +548,11 @@ export class UnitRenderer {
     }
 
     // Remove placeholder children and dispose their geometry/material
+    // Preserve the selection circle — it must not be disposed
     const circle = this.selectionCircles.get(eid);
-    while (existing.children.length > 0) {
-      const child = existing.children[0];
+    const childrenToRemove = [...existing.children];
+    for (const child of childrenToRemove) {
+      if (child === circle) continue; // Skip selection circle — re-used below
       existing.remove(child);
       if (child instanceof THREE.Mesh) {
         child.geometry?.dispose();

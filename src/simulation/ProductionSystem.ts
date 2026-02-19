@@ -343,8 +343,11 @@ export class ProductionSystem {
     }
 
     // Unit population cap (only for units, not buildings)
+    // Include units already in production queues to prevent queue-stuffing past the cap
     if (!isBuilding && this.unitCountCallback) {
-      if (this.unitCountCallback(playerId) >= this.maxUnits) return false;
+      const queuedUnits = (this.infantryQueues.get(playerId)?.length ?? 0)
+                        + (this.vehicleQueues.get(playerId)?.length ?? 0);
+      if (this.unitCountCallback(playerId) + queuedUnits >= this.maxUnits) return false;
     }
 
     return true;
@@ -384,8 +387,12 @@ export class ProductionSystem {
     if (def.techLevel > 0 && def.techLevel > this.getPlayerTechLevel(playerId)) {
       return { reason: 'tech', detail: `Tech ${def.techLevel}` };
     }
-    if (!isBuilding && this.unitCountCallback && this.unitCountCallback(playerId) >= this.maxUnits) {
-      return { reason: 'cap', detail: `Max ${this.maxUnits} units` };
+    if (!isBuilding && this.unitCountCallback) {
+      const queuedUnits = (this.infantryQueues.get(playerId)?.length ?? 0)
+                        + (this.vehicleQueues.get(playerId)?.length ?? 0);
+      if (this.unitCountCallback(playerId) + queuedUnits >= this.maxUnits) {
+        return { reason: 'cap', detail: `Max ${this.maxUnits} units` };
+      }
     }
     const adjustedCost = this.getAdjustedCost(playerId, typeName, isBuilding);
     if (this.harvestSystem.getSolaris(playerId) < adjustedCost) {

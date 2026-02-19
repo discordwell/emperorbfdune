@@ -26,7 +26,7 @@ import { FogOfWar } from './rendering/FogOfWar';
 import { BuildingPlacement } from './input/BuildingPlacement';
 import { VictorySystem, GameStats } from './ui/VictoryScreen';
 import { HouseSelect, type HouseChoice, type SubhouseChoice, type Difficulty, type MapChoice, type GameMode, type SkirmishOptions, type OpponentConfig } from './ui/HouseSelect';
-import { loadMap, getCampaignMapId } from './config/MapLoader';
+import { loadMap, getCampaignMapId, getSpecialMissionMapId } from './config/MapLoader';
 import { CampaignMap } from './ui/CampaignMap';
 import { SelectionPanel } from './ui/SelectionPanel';
 import { EffectsManager } from './rendering/EffectsManager';
@@ -647,9 +647,22 @@ async function main() {
   if (house.mapChoice?.mapId) {
     // Skirmish: real map selected from manifest
     realMapId = house.mapChoice.mapId;
-  } else if (house.gameMode === 'campaign' && house.campaignTerritoryId) {
-    // Campaign: derive map ID from territory
-    realMapId = getCampaignMapId(house.campaignTerritoryId, house.prefix) ?? undefined;
+  } else if (house.gameMode === 'campaign') {
+    // Campaign: check for special mission maps first, then regular territory maps
+    const savedCampaignStr = localStorage.getItem('ebfd_campaign');
+    if (savedCampaignStr) {
+      try {
+        const cState = JSON.parse(savedCampaignStr);
+        const pm = CampaignPhaseManager.deserialize(cState.phaseState);
+        const pType = pm.getPhaseType();
+        if (pType !== 'act' && pType !== 'tutorial') {
+          realMapId = getSpecialMissionMapId(pType, house.prefix) ?? undefined;
+        }
+      } catch { /* fall through to territory-based lookup */ }
+    }
+    if (!realMapId && house.campaignTerritoryId) {
+      realMapId = getCampaignMapId(house.campaignTerritoryId, house.prefix) ?? undefined;
+    }
   }
 
   let mapLoaded = false;

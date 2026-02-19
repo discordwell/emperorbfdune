@@ -260,15 +260,25 @@ export class CampaignPhaseManager {
     }
   }
 
+  /** Map non-monotonic phase IDs to a monotonic progression index for tech level comparison.
+   *  Phase progression: 0->1->10->2->11->[14/15]->3->12->13
+   *  Monotonic order:   0  1  2   3  4    5       6  7   8  */
+  private static readonly PHASE_ORDER: Record<number, number> = {
+    0: 0, 1: 1, 10: 2, 2: 3, 11: 4, 14: 5, 15: 5, 3: 6, 12: 7, 13: 8,
+  };
+
   private updateTechLevel(): void {
     // Check each tech level in order
+    const currentOrder = CampaignPhaseManager.PHASE_ORDER[this.state.currentPhase] ?? 0;
     for (let level = this.state.techLevel + 1; level <= 8; level++) {
       const rule = TECH_LEVEL_RULES[level];
       if (!rule) continue;
 
       let achieved = false;
       if (rule.phase !== undefined) {
-        achieved = this.state.currentPhase >= rule.phase;
+        // Compare using monotonic ordering, not raw phase IDs
+        const requiredOrder = CampaignPhaseManager.PHASE_ORDER[rule.phase] ?? 0;
+        achieved = currentOrder >= requiredOrder;
       }
       if (rule.captured !== undefined && !achieved) {
         achieved = this.state.capturesInPhase >= rule.captured;

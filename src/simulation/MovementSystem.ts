@@ -275,12 +275,41 @@ export class MovementSystem implements GameSystem {
       // Apply velocity (scaled by tick interval), clamped to map bounds
       const newX = Math.max(0, Math.min(this.mapMaxX, px + vx * 0.04));
       const newZ = Math.max(0, Math.min(this.mapMaxZ, pz + vz * 0.04));
-      Position.x[eid] = newX;
-      Position.z[eid] = newZ;
+
+      // Check passability before applying movement (separation force can push off-path)
+      let passable = true;
+      if (this.terrain) {
+        const tile = worldToTile(newX, newZ);
+        passable = this.infantryEntities.has(eid)
+          ? this.terrain.isPassable(tile.tx, tile.tz)
+          : this.terrain.isPassableVehicle(tile.tx, tile.tz);
+      }
+      if (passable) {
+        Position.x[eid] = newX;
+        Position.z[eid] = newZ;
+      } else {
+        // Move only along the pathfound direction, ignoring separation force
+        const safeX = Math.max(0, Math.min(this.mapMaxX, px + dirX * speed * 0.04));
+        const safeZ = Math.max(0, Math.min(this.mapMaxZ, pz + dirZ * speed * 0.04));
+        if (this.terrain) {
+          const safeTile = worldToTile(safeX, safeZ);
+          const safePassable = this.infantryEntities.has(eid)
+            ? this.terrain.isPassable(safeTile.tx, safeTile.tz)
+            : this.terrain.isPassableVehicle(safeTile.tx, safeTile.tz);
+          if (safePassable) {
+            Position.x[eid] = safeX;
+            Position.z[eid] = safeZ;
+          }
+          // If even safe direction is impassable, don't move (stuck, will repath next tick)
+        } else {
+          Position.x[eid] = safeX;
+          Position.z[eid] = safeZ;
+        }
+      }
 
       // Ground units follow terrain height
       if (this.terrain) {
-        Position.y[eid] = this.terrain.getHeightAt(newX, newZ) + 0.1;
+        Position.y[eid] = this.terrain.getHeightAt(Position.x[eid], Position.z[eid]) + 0.1;
       }
     }
   }
