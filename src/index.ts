@@ -1776,17 +1776,19 @@ async function main() {
       combatSystem.setPowerMultiplier(1, 1.0);
 
       // Check for Hanger buildings (enables Carryall harvester airlift)
-      const hasHanger = [false, false];
+      const hasHanger = new Array(totalPlayers).fill(false);
       for (const eid of buildings) {
         if (Health.current[eid] <= 0) continue;
         const typeId = BuildingType.id[eid];
         const bName = buildingTypeNames[typeId] ?? '';
         if (bName.includes('Hanger')) {
-          hasHanger[Owner.playerId[eid]] = true;
+          const o = Owner.playerId[eid];
+          if (o < totalPlayers) hasHanger[o] = true;
         }
       }
-      harvestSystem.setCarryallAvailable(0, hasHanger[0]);
-      harvestSystem.setCarryallAvailable(1, hasHanger[1]);
+      for (let i = 0; i < totalPlayers; i++) {
+        harvestSystem.setCarryallAvailable(i, hasHanger[i]);
+      }
 
       // Building damage visual states: smoke and fire based on HP
       for (const eid of buildings) {

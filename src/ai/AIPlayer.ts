@@ -51,6 +51,10 @@ export class AIPlayer implements GameSystem {
   // Track if base was recently attacked for priority response
   private baseUnderAttack = false;
   private baseAttackTick = 0;
+  // Track building health snapshots for detecting active damage (not just permanent damage)
+  private buildingHealthSnapshot = new Map<number, number>();
+  // Track last known attacker positions for smarter counterattack direction
+  private lastAttackerCentroid: { x: number; z: number } | null = null;
 
   // Strategic building placement tracking
   private placedBuildings: { x: number; z: number; name: string }[] = [];
@@ -318,6 +322,11 @@ export class AIPlayer implements GameSystem {
     // --- Composition counter-adjustment every ~200 ticks (8 seconds) ---
     if (t % 200 === 100) {
       this.adjustCompositionForCounters();
+    }
+
+    // --- Repair damaged buildings every ~200 ticks (8 seconds) ---
+    if (t % 200 === 50 && this.harvestSystem) {
+      this.repairBuildings(world);
     }
 
     // --- Economy management every ~150 ticks (6 seconds) ---
@@ -830,6 +839,61 @@ export class AIPlayer implements GameSystem {
     }
   }
 
+  /** Repair the most damaged AI building (prioritizing critical ones) */
+  private repairBuildings(world: World): void {
+    if (!this.harvestSystem) return;
+
+    const solaris = this.harvestSystem.getSolaris(this.playerId);
+    if (solaris < 300) return; // Don't repair if low on funds
+
+    const buildings = buildingQuery(world);
+    let worstEid = -1;
+    let worstScore = 0;
+
+    for (const eid of buildings) {
+      if (Owner.playerId[eid] !== this.playerId) continue;
+      if (Health.current[eid] <= 0) continue;
+
+      const hp = Health.current[eid];
+      const maxHp = Health.max[eid];
+      if (hp >= maxHp) continue;
+
+      const damageRatio = 1 - hp / maxHp;
+      if (damageRatio < 0.1) continue; // Don't repair minor scratches
+
+      // Priority: ConYard > Refinery > Factory > Barracks > Windtrap > other
+      const typeId = BuildingType.id[eid];
+      const name = this.buildingTypeNames[typeId] ?? '';
+      let priority = 1;
+      if (name.includes('ConYard')) priority = 10;
+      else if (name.includes('Refinery')) priority = 8;
+      else if (name.includes('Factory')) priority = 6;
+      else if (name.includes('Barracks')) priority = 4;
+      else if (name.includes('Windtrap')) priority = 3;
+      else if (name.includes('Turret')) priority = 2;
+
+      const score = damageRatio * priority;
+      if (score > worstScore) {
+        worstScore = score;
+        worstEid = eid;
+      }
+    }
+
+    if (worstEid < 0) return;
+
+    // Repair 20% per tick, costs 5% of building cost
+    const maxHp = Health.max[worstEid];
+    const repairAmount = Math.min(maxHp * 0.2, maxHp - Health.current[worstEid]);
+    const typeId = BuildingType.id[worstEid];
+    const typeName = this.buildingTypeNames[typeId];
+    const bDef = typeName ? this.rules.buildings.get(typeName) : null;
+    const cost = bDef ? Math.floor(bDef.cost * 0.05) : 50;
+
+    if (this.harvestSystem.spendSolaris(this.playerId, cost)) {
+      Health.current[worstEid] += repairAmount;
+    }
+  }
+
   // ==========================================
   // Strategic Building Placement
   // ==========================================
@@ -853,7 +917,16 @@ export class AIPlayer implements GameSystem {
     let idealX = baseX;
     let idealZ = baseZ;
 
-    if (def.powerGenerated > 0) {
+    if (typeName.includes('Wall')) {
+      // Walls: build a defensive line perpendicular to the player direction, in front of base
+      const perpX = -dirZ;
+      const perpZ = dirX;
+      // Count existing walls to stagger placement along the line
+      const existingWalls = this.placedBuildings.filter(b => b.name.includes('Wall')).length;
+      const offset = (existingWalls - 3.5) * 2.5; // Spread walls evenly along perpendicular
+      idealX = baseX + dirX * 8 + perpX * offset;
+      idealZ = baseZ + dirZ * 8 + perpZ * offset;
+    } else if (def.powerGenerated > 0) {
       // Windtraps: behind base, away from player
       idealX = baseX + awayX * 8 + (Math.random() - 0.5) * 6;
       idealZ = baseZ + awayZ * 8 + (Math.random() - 0.5) * 6;
@@ -879,7 +952,7 @@ export class AIPlayer implements GameSystem {
     }
 
     // Validate and adjust position
-    const result = this.findValidPlacement(idealX, idealZ);
+    const result = this.findValidPlacement(idealX, idealZ, typeName.includes('Wall'));
 
     // Track the placed building and update base center of mass
     this.placedBuildings.push({ x: result.x, z: result.z, name: typeName });
@@ -889,11 +962,11 @@ export class AIPlayer implements GameSystem {
   }
 
   /** Find a valid placement near the ideal position using spiral search */
-  private findValidPlacement(idealX: number, idealZ: number): { x: number; z: number } {
+  private findValidPlacement(idealX: number, idealZ: number, isWall = false): { x: number; z: number } {
     const worldMaxX = this.mapWidth * TILE_SIZE;
     const worldMaxZ = this.mapHeight * TILE_SIZE;
     const margin = 4; // Keep buildings away from map edges
-    const minSpacing = 4; // Minimum distance between AI buildings (world units)
+    const minSpacing = isWall ? 2 : 4; // Walls can be placed closer together
 
     // Try the ideal position first, then spiral outward
     for (let ring = 0; ring < 10; ring++) {
@@ -1150,6 +1223,21 @@ export class AIPlayer implements GameSystem {
             this.production.startProduction(this.playerId, turret, true);
             return;
           }
+        }
+      }
+
+      // Priority 5.5: Defensive walls (build a line of walls toward the player, cap at 8)
+      let wallCount = 0;
+      for (const eid of buildings) {
+        if (Owner.playerId[eid] !== this.playerId || Health.current[eid] <= 0) continue;
+        const name = this.buildingTypeNames[BuildingType.id[eid]] ?? '';
+        if (name.includes('Wall')) wallCount++;
+      }
+      if (wallCount < 8 && turretCount >= 2 && solaris > 200 && Math.random() < 0.3) {
+        const wallName = `${px}Wall`;
+        if (this.production.canBuild(this.playerId, wallName, true)) {
+          this.production.startProduction(this.playerId, wallName, true);
+          return;
         }
       }
 
@@ -1433,10 +1521,16 @@ export class AIPlayer implements GameSystem {
         this.sendHarassGroup(world, harassUnits);
       }
     } else if (idleUnits.length > 0 && idleUnits.length < attackThreshold) {
-      // Rally idle units near base
+      // Rally idle units toward enemy side of base
+      const toTargetX = this.targetX - this.baseX;
+      const toTargetZ = this.targetZ - this.baseZ;
+      const tDist = Math.sqrt(toTargetX * toTargetX + toTargetZ * toTargetZ) || 1;
+      const rallyDirX = toTargetX / tDist;
+      const rallyDirZ = toTargetZ / tDist;
+
       for (const eid of idleUnits) {
-        const rallyX = this.baseX + randomFloat(-15, 15);
-        const rallyZ = this.baseZ - 15 + randomFloat(-5, 5);
+        const rallyX = this.baseX + rallyDirX * 15 + randomFloat(-8, 8);
+        const rallyZ = this.baseZ + rallyDirZ * 15 + randomFloat(-8, 8);
         MoveTarget.x[eid] = rallyX;
         MoveTarget.z[eid] = rallyZ;
         MoveTarget.active[eid] = 1;
@@ -1506,28 +1600,59 @@ export class AIPlayer implements GameSystem {
 
   private checkBaseDefense(world: World): void {
     const buildings = buildingQuery(world);
-    let underAttack = false;
+    let activeDamageDetected = false;
 
+    // Detect ACTIVE damage by comparing current health to snapshot
     for (const eid of buildings) {
       if (Owner.playerId[eid] !== this.playerId) continue;
-      if (Health.current[eid] <= 0) continue;
-      // Check if any building is below 90% health (recently damaged)
-      if (Health.current[eid] < Health.max[eid] * 0.9) {
-        underAttack = true;
-        break;
+      if (Health.current[eid] <= 0) {
+        this.buildingHealthSnapshot.delete(eid);
+        continue;
+      }
+
+      const prevHealth = this.buildingHealthSnapshot.get(eid);
+      const currHealth = Health.current[eid];
+      this.buildingHealthSnapshot.set(eid, currHealth);
+
+      // Building lost health since last check = actively taking damage
+      if (prevHealth !== undefined && currHealth < prevHealth) {
+        activeDamageDetected = true;
       }
     }
 
-    if (underAttack && !this.baseUnderAttack) {
-      this.baseUnderAttack = true;
-      this.baseAttackTick = this.tickCounter;
-      // Emergency: recall all idle units to defend base
-      this.recallDefenders(world);
-    } else if (!underAttack && this.baseUnderAttack) {
-      // All clear after 20 seconds
-      if (this.tickCounter - this.baseAttackTick > 500) {
-        this.baseUnderAttack = false;
+    // Also detect enemies near base as an attack indicator
+    if (!activeDamageDetected) {
+      const units = unitQuery(world);
+      for (const eid of units) {
+        if (Owner.playerId[eid] === this.playerId) continue;
+        if (Health.current[eid] <= 0) continue;
+        const dist = distance2D(Position.x[eid], Position.z[eid], this.baseX, this.baseZ);
+        if (dist < 30) {
+          activeDamageDetected = true;
+          break;
+        }
       }
+    }
+
+    if (activeDamageDetected) {
+      this.baseAttackTick = this.tickCounter;
+      if (!this.baseUnderAttack) {
+        this.baseUnderAttack = true;
+        // Emergency: recall all idle units to defend base
+        this.recallDefenders(world);
+      }
+    } else if (this.baseUnderAttack) {
+      // All clear after 15 seconds of no active damage
+      if (this.tickCounter - this.baseAttackTick > 375) {
+        this.baseUnderAttack = false;
+        // Counterattack: immediately send rallied forces (they're already gathered at base)
+        this.launchCounterattack(world);
+      }
+    }
+
+    // Active defense: make defenders engage nearby enemies during attack
+    if (this.baseUnderAttack) {
+      this.engageNearbyEnemies(world);
     }
 
     // Clean up dead defenders
@@ -1556,6 +1681,120 @@ export class AIPlayer implements GameSystem {
         }
         // Remove from scouts when recalled
         this.scoutEntities.delete(eid);
+      }
+    }
+  }
+
+  /** After surviving a base attack, launch immediate counterattack with rallied forces */
+  private launchCounterattack(world: World): void {
+    const units = unitQuery(world);
+    const attackForce: number[] = [];
+
+    for (const eid of units) {
+      if (Owner.playerId[eid] !== this.playerId) continue;
+      if (Health.current[eid] <= 0) continue;
+      if (hasComponent(world, Harvester, eid)) continue;
+      if (this.scoutEntities.has(eid)) continue;
+
+      // Only send healthy units (>50% HP) on counterattack
+      const hpRatio = Health.current[eid] / Health.max[eid];
+      if (hpRatio < 0.5) continue;
+
+      const dist = distance2D(Position.x[eid], Position.z[eid], this.baseX, this.baseZ);
+      if (dist < 60) {
+        attackForce.push(eid);
+      }
+    }
+
+    // Need at least 3 units for a meaningful counterattack
+    if (attackForce.length < 3) return;
+
+    // Keep some defenders behind (half of scaled maxDefenders)
+    const scaledMaxDefenders = Math.floor(this.maxDefenders * this.difficulty);
+    const keepBack = Math.floor(scaledMaxDefenders / 2);
+    this.defenders.clear();
+    for (let i = 0; i < keepBack && i < attackForce.length; i++) {
+      this.defenders.add(attackForce[i]);
+    }
+    const counterForce = attackForce.filter(eid => !this.defenders.has(eid));
+    if (counterForce.length < 2) return;
+
+    // Send toward where the attackers came from, or fall back to primary target
+    const tx = this.lastAttackerCentroid?.x ?? this.targetX;
+    const tz = this.lastAttackerCentroid?.z ?? this.targetZ;
+    this.lastAttackerCentroid = null;
+
+    for (const eid of counterForce) {
+      MoveTarget.x[eid] = tx + randomFloat(-12, 12);
+      MoveTarget.z[eid] = tz + randomFloat(-12, 12);
+      MoveTarget.active[eid] = 1;
+    }
+    this.combatSystem.setAttackMove([...counterForce]);
+
+    // Reset attack cooldown so this doesn't interfere with normal attack scheduling
+    this.lastAttackTick = this.tickCounter;
+  }
+
+  /** During base defense, make nearby units actively engage enemy attackers */
+  private engageNearbyEnemies(world: World): void {
+    const allUnits = unitQuery(world);
+    const enemies: number[] = [];
+
+    // Find enemy units near AI base
+    for (const eid of allUnits) {
+      if (Owner.playerId[eid] === this.playerId) continue;
+      if (Health.current[eid] <= 0) continue;
+      const dist = distance2D(Position.x[eid], Position.z[eid], this.baseX, this.baseZ);
+      if (dist < 40) {
+        enemies.push(eid);
+      }
+    }
+
+    if (enemies.length === 0) return;
+
+    // Track attacker centroid for smarter counterattack direction
+    let centroidX = 0, centroidZ = 0;
+    for (const eid of enemies) {
+      centroidX += Position.x[eid];
+      centroidZ += Position.z[eid];
+    }
+    this.lastAttackerCentroid = {
+      x: centroidX / enemies.length,
+      z: centroidZ / enemies.length,
+    };
+
+    // Assign idle defenders and nearby units to attack the closest enemy
+    for (const eid of allUnits) {
+      if (Owner.playerId[eid] !== this.playerId) continue;
+      if (Health.current[eid] <= 0) continue;
+      if (hasComponent(world, Harvester, eid)) continue;
+
+      // Only engage units near base that aren't already attacking
+      const dist = distance2D(Position.x[eid], Position.z[eid], this.baseX, this.baseZ);
+      if (dist > 50) continue;
+
+      // Skip units that already have an active attack target
+      if (hasComponent(world, AttackTarget, eid) && AttackTarget.active[eid] === 1) continue;
+
+      // Find closest enemy
+      let closestEnemy = -1;
+      let closestDist = Infinity;
+      for (const enemy of enemies) {
+        const d = distance2D(Position.x[eid], Position.z[eid], Position.x[enemy], Position.z[enemy]);
+        if (d < closestDist) {
+          closestDist = d;
+          closestEnemy = enemy;
+        }
+      }
+
+      if (closestEnemy >= 0 && closestDist < 30) {
+        if (hasComponent(world, AttackTarget, eid)) {
+          AttackTarget.entityId[eid] = closestEnemy;
+          AttackTarget.active[eid] = 1;
+        }
+        MoveTarget.x[eid] = Position.x[closestEnemy];
+        MoveTarget.z[eid] = Position.z[closestEnemy];
+        MoveTarget.active[eid] = 1;
       }
     }
   }
