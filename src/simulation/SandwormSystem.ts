@@ -127,8 +127,8 @@ export class SandwormSystem implements GameSystem {
 
     const worm: Worm = {
       x, z,
-      targetX: x + randomFloat(-50, 50),
-      targetZ: z + randomFloat(-50, 50),
+      targetX: Math.max(10, Math.min(worldW - 10, x + randomFloat(-50, 50))),
+      targetZ: Math.max(10, Math.min(worldH - 10, z + randomFloat(-50, 50))),
       speed: 0.3,
       life: minLife + Math.floor(Math.random() * (maxLife - minLife)),
       huntingEid: null,

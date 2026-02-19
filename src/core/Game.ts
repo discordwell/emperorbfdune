@@ -72,6 +72,11 @@ export class Game {
     this.paused = !this.paused;
     if (this.paused) {
       EventBus.emit('game:paused', {});
+    } else {
+      // Reset lastTime so elapsed doesn't include the entire pause duration,
+      // which would cause a burst of simulation ticks on unpause
+      this.lastTime = performance.now();
+      this.accumulator = 0;
     }
   }
 

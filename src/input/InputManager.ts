@@ -29,6 +29,9 @@ export class InputManager implements GameSystem {
     window.addEventListener('mouseup', this.onMouseUp);
     window.addEventListener('wheel', this.onWheel, { passive: false });
     window.addEventListener('contextmenu', e => e.preventDefault());
+    // Clear all pressed keys when window loses focus to prevent stuck keys
+    // (keyup events fire in the other window, not this one)
+    window.addEventListener('blur', this.onBlur);
   }
 
   init(_world: World): void {}
@@ -155,5 +158,14 @@ export class InputManager implements GameSystem {
     e.preventDefault();
     const delta = e.deltaY > 0 ? ZOOM_SPEED : -ZOOM_SPEED;
     this.sceneManager.zoom(delta);
+  };
+
+  private onBlur = (): void => {
+    this.keys.clear();
+    this.mouseDown = false;
+    this.rightMouseDown = false;
+    this.middleMouseDown = false;
+    this.middleDragPrev = null;
+    this.dragStart = null;
   };
 }
