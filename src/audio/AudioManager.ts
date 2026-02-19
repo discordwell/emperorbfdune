@@ -50,6 +50,13 @@ export class AudioManager {
   private sfxCooldowns = new Map<string, number>(); // SfxType -> last play timestamp
   private samplesPreloaded = false;
   private unitTypeResolver: ((eid: number) => string) | null = null;
+  // Ambient wind
+  private windNode: AudioBufferSourceNode | null = null;
+  private windGain: GainNode | null = null;
+  private windLfo: OscillatorNode | null = null;
+  private windLfoGain: GainNode | null = null;
+  private windFilter: BiquadFilterNode | null = null;
+  private windActive = false;
 
   constructor() {
     this.setupEventListeners();
@@ -989,6 +996,88 @@ export class AudioManager {
     osc2.stop(t + 0.9);
   }
 
+  // --- Ambient Wind ---
+
+  /** Start a continuous desert wind ambient loop (synthesized). */
+  startAmbientWind(): void {
+    if (this.windActive || this.muted) return;
+    try {
+      const ctx = this.getContext();
+      if (ctx.state === 'suspended') ctx.resume();
+
+      // Create brown noise for wind (low-pass filtered white noise)
+      const bufferSize = ctx.sampleRate * 2; // 2-second loop
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      let lastOut = 0;
+      for (let i = 0; i < bufferSize; i++) {
+        const white = Math.random() * 2 - 1;
+        // Brown noise: integrate white noise with leaky filter
+        lastOut = (lastOut + (0.02 * white)) / 1.02;
+        data[i] = Math.max(-1, Math.min(1, lastOut * 3.5)); // Normalize + clamp
+      }
+
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.loop = true;
+
+      // Bandpass filter: 100-500 Hz for wind character
+      this.windFilter = ctx.createBiquadFilter();
+      this.windFilter.type = 'bandpass';
+      this.windFilter.frequency.value = 250;
+      this.windFilter.Q.value = 0.5;
+
+      // Slow LFO for gusting effect
+      this.windLfo = ctx.createOscillator();
+      this.windLfoGain = ctx.createGain();
+      this.windLfo.type = 'sine';
+      this.windLfo.frequency.value = 0.15; // Very slow gusting
+      this.windLfoGain.gain.value = 0.02 * this.sfxVolume;
+      this.windLfo.connect(this.windLfoGain);
+
+      this.windGain = ctx.createGain();
+      this.windGain.gain.value = 0.04 * this.sfxVolume;
+      this.windLfoGain.connect(this.windGain.gain);
+
+      source.connect(this.windFilter);
+      this.windFilter.connect(this.windGain);
+      this.windGain.connect(ctx.destination);
+      this.windLfo.start();
+      source.start();
+
+      this.windNode = source;
+      this.windActive = true;
+    } catch {
+      // Audio not available
+    }
+  }
+
+  /** Stop the ambient wind loop. */
+  stopAmbientWind(): void {
+    if (this.windLfo) {
+      try { this.windLfo.stop(); } catch { /* */ }
+      this.windLfo.disconnect();
+      this.windLfo = null;
+    }
+    if (this.windLfoGain) { this.windLfoGain.disconnect(); this.windLfoGain = null; }
+    if (this.windFilter) { this.windFilter.disconnect(); this.windFilter = null; }
+    if (this.windNode) {
+      try { this.windNode.stop(); } catch { /* already stopped */ }
+      this.windNode.disconnect();
+      this.windNode = null;
+    }
+    if (this.windGain) { this.windGain.disconnect(); this.windGain = null; }
+    this.windActive = false;
+  }
+
+  /** Get the name of the currently playing music track. */
+  getCurrentTrackName(): string | null {
+    if (!this.musicElement || this.currentTrackIndex < 0) return null;
+    const playlist = this.getPlaylist();
+    if (this.currentTrackIndex >= playlist.length) return null;
+    return playlist[this.currentTrackIndex].name;
+  }
+
   // --- Combat intensity ---
 
   private bumpCombatIntensity(amount: number): void {
@@ -1022,6 +1111,12 @@ export class AudioManager {
     if (this.dialogManager) {
       this.dialogManager.setMuted(this.muted);
     }
+    // Handle ambient wind
+    if (this.muted && this.windActive) {
+      this.stopAmbientWind();
+    } else if (!this.muted && !this.windActive) {
+      this.startAmbientWind();
+    }
   }
 
   setMusicVolume(v: number): void {
@@ -1036,6 +1131,9 @@ export class AudioManager {
     this.sfxVolume = Math.max(0, Math.min(1, v));
     if (this.sampleBank) {
       this.sampleBank.setVolume(this.sfxVolume);
+    }
+    if (this.windGain) {
+      this.windGain.gain.value = 0.04 * this.sfxVolume;
     }
   }
 
@@ -1054,5 +1152,6 @@ export class AudioManager {
       this.fadingOutElement.pause();
       this.fadingOutElement = null;
     }
+    this.stopAmbientWind();
   }
 }

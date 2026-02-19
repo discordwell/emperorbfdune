@@ -293,6 +293,7 @@ async function main() {
   console.log(`Playing as ${house.name} vs ${house.enemyName}`);
   audioManager.setPlayerFaction(house.prefix);
   audioManager.startGameMusic();
+  audioManager.startAmbientWind();
 
   // Create game and systems
   const game = new Game();
@@ -385,6 +386,11 @@ async function main() {
     return 'vehicle';
   });
   unitRenderer.setAttackMoveFn((eid: number) => combatSystem.isAttackMove(eid));
+  // Idle harvester visual indicator
+  unitRenderer.setIdleHarvesterFn((eid: number) => {
+    const world = game.getWorld();
+    return hasComponent(world, Harvester, eid) && Harvester.state[eid] === 0 && MoveTarget.active[eid] === 0;
+  });
   combatSystem.setFogOfWar(fogOfWar, 0);
   combatSystem.setPlayerFaction(0, house.prefix);
   combatSystem.setPlayerFaction(1, house.enemyPrefix);  // AI player 1 (additional AIs registered below)
@@ -1001,6 +1007,7 @@ async function main() {
 
   selectionPanel.setPassengerCountFn((eid) => abilitySystem.getTransportPassengerCount(eid));
   selectionPanel.setRepairingFn((eid) => repairingBuildings.has(eid));
+  selectionPanel.setPlayerFaction(house.prefix);
 
   // --- AI SPAWN CALLBACK ---
 
@@ -1539,6 +1546,7 @@ async function main() {
   const commandModeEl = document.getElementById('command-mode');
   const lowPowerEl = document.getElementById('low-power-warning');
   const controlGroupsEl = document.getElementById('control-groups');
+  const musicTrackEl = document.getElementById('music-track');
 
   // Objective display for campaign
   let objectiveEl: HTMLDivElement | null = null;
@@ -1637,6 +1645,15 @@ async function main() {
 
     unitRenderer.update(world);
     unitRenderer.tickConstruction();
+    // Construction dust particles (every 4th tick for buildings under construction)
+    if (game.getTickCount() % 4 === 0) {
+      for (const [eid] of unitRenderer.getConstructingEntities()) {
+        if (!hasComponent(world, Position, eid)) continue;
+        const cx = Position.x[eid] + (Math.random() - 0.5) * 4;
+        const cz = Position.z[eid] + (Math.random() - 0.5) * 4;
+        effectsManager.spawnDustPuff(cx, cz);
+      }
+    }
     unitRenderer.tickDeconstruction();
     unitRenderer.tickDeathAnimations();
     minimapRenderer.update(world);
@@ -1814,6 +1831,12 @@ async function main() {
         audioManager.playSfx('powerlow');
         audioManager.getDialogManager()?.trigger('lowPower');
         selectionPanel.addMessage('Low power! Build more Windtraps', '#ff4444');
+      }
+
+      // Music track display (update every second)
+      if (musicTrackEl) {
+        const trackName = audioManager.getCurrentTrackName();
+        musicTrackEl.textContent = trackName ? `♪ ${trackName}` : '';
       }
 
       // AI always gets full power (simplification - AI builds enough windtraps)

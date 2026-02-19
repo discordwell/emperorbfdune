@@ -63,6 +63,9 @@ export class UnitRenderer {
   // Rearm progress callback: returns 0-1 progress or null if not rearming
   private rearmProgressFn: ((eid: number) => number | null) | null = null;
   private rearmBars = new Map<number, THREE.Sprite>();
+  // Idle harvester indicator circles
+  private idleHarvesterCircles = new Map<number, THREE.Mesh>();
+  private idleHarvesterFn: ((eid: number) => boolean) | null = null;
 
   constructor(sceneManager: SceneManager, modelManager: ModelManager, artMap: Map<string, ArtEntry>) {
     this.sceneManager = sceneManager;
@@ -101,6 +104,10 @@ export class UnitRenderer {
 
   setRearmProgressFn(fn: (eid: number) => number | null): void {
     this.rearmProgressFn = fn;
+  }
+
+  setIdleHarvesterFn(fn: (eid: number) => boolean): void {
+    this.idleHarvesterFn = fn;
   }
 
   /** Mark a building as under construction — will animate from scaffold to solid */
@@ -329,6 +336,31 @@ export class UnitRenderer {
         if (selected && this.isAttackMoveFn) {
           const mat = circle.material as THREE.MeshBasicMaterial;
           mat.color.set(this.isAttackMoveFn(eid) ? 0xff8800 : 0x00ff00);
+        }
+      }
+
+      // Idle harvester pulsing yellow ring (visible even when not selected)
+      if (this.idleHarvesterFn && Owner.playerId[eid] === this.localPlayerId) {
+        const isIdle = this.idleHarvesterFn(eid);
+        if (isIdle && obj.visible) {
+          let ring = this.idleHarvesterCircles.get(eid);
+          if (!ring) {
+            const geo = new THREE.RingGeometry(1.2, 1.5, 24);
+            geo.rotateX(-Math.PI / 2);
+            const mat = new THREE.MeshBasicMaterial({ color: 0xffcc00, transparent: true, opacity: 0.6, depthWrite: false, side: THREE.DoubleSide });
+            ring = new THREE.Mesh(geo, mat);
+            ring.position.y = 0.08;
+            this.sceneManager.scene.add(ring);
+            this.idleHarvesterCircles.set(eid, ring);
+          }
+          ring.position.set(Position.x[eid], 0.08, Position.z[eid]);
+          ring.visible = true;
+          // Pulse opacity
+          const pulse = 0.3 + Math.sin(this.animTime * 4 + eid * 0.5) * 0.3;
+          (ring.material as THREE.MeshBasicMaterial).opacity = pulse;
+        } else {
+          const ring = this.idleHarvesterCircles.get(eid);
+          if (ring) ring.visible = false;
         }
       }
 
@@ -657,6 +689,8 @@ export class UnitRenderer {
     this.deconstructing.delete(eid);
     const rc = this.rangeCircles.get(eid);
     if (rc) { this.sceneManager.scene.remove(rc); rc.geometry.dispose(); (rc.material as THREE.Material).dispose(); this.rangeCircles.delete(eid); }
+    const ihc = this.idleHarvesterCircles.get(eid);
+    if (ihc) { this.sceneManager.scene.remove(ihc); ihc.geometry.dispose(); (ihc.material as THREE.Material).dispose(); this.idleHarvesterCircles.delete(eid); }
   }
 
   /** Animate dying entities (call each frame) */
@@ -745,5 +779,10 @@ export class UnitRenderer {
 
   getEntityObject(eid: number): THREE.Group | undefined {
     return this.entityObjects.get(eid);
+  }
+
+  /** Get all entities currently under construction (for visual effects). */
+  getConstructingEntities(): Map<number, { progress: number }> {
+    return this.constructing;
   }
 }

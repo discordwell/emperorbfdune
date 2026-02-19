@@ -34,6 +34,7 @@ export class SelectionPanel {
   private sellConfirmTimer: ReturnType<typeof setTimeout> | null = null;
   private passengerCountFn: ((eid: number) => number) | null = null;
   private isRepairingFn: ((eid: number) => boolean) | null = null;
+  private playerFaction = 'AT';
 
   constructor(
     rules: GameRules,
@@ -103,6 +104,10 @@ export class SelectionPanel {
 
   setRepairingFn(fn: (eid: number) => boolean): void {
     this.isRepairingFn = fn;
+  }
+
+  setPlayerFaction(prefix: string): void {
+    this.playerFaction = prefix;
   }
 
   addMessage(text: string, color = '#ccc'): void {
@@ -240,6 +245,27 @@ export class SelectionPanel {
       }
     }
 
+    // Combat effectiveness (damage degradation indicator for non-Harkonnen)
+    let effectivenessHtml = '';
+    const unitFaction = typeName.substring(0, 2);
+    if (isUnit && hasComponent(this.world, Combat, eid) && hpPct < 100 && unitFaction !== 'HK') {
+      const hpRatio = maxHp > 0 ? hp / maxHp : 1;
+      const effectiveness = Math.round((0.5 + hpRatio * 0.5) * 100);
+      const effColor = effectiveness > 85 ? '#4f4' : effectiveness > 65 ? '#ff8' : '#f88';
+      effectivenessHtml = `<span style="font-size:10px;color:${effColor};" title="Damaged units deal less damage (Harkonnen immune)">Combat: ${effectiveness}%</span>`;
+    }
+
+    // Attack-move / escort status (escort takes priority over attack-move)
+    let statusHtml = '';
+    if (isUnit && this.combatSystem) {
+      const escortTarget = this.combatSystem.getEscortTarget(eid);
+      if (escortTarget !== undefined) {
+        statusHtml = '<span style="font-size:10px;color:#8cf;font-weight:bold;">ESCORTING</span>';
+      } else if (this.combatSystem.isAttackMove(eid)) {
+        statusHtml = '<span style="font-size:10px;color:#ff8800;font-weight:bold;">ATTACK-MOVE</span>';
+      }
+    }
+
     // Stance display for units
     let stanceHtml = '';
     if (isUnit && this.combatSystem && hasComponent(this.world!, Combat, eid)) {
@@ -287,6 +313,7 @@ export class SelectionPanel {
         </div>
         ${harvesterHtml}
         <div>${statsHtml}</div>
+        ${effectivenessHtml || statusHtml ? `<div style="margin-top:2px;display:flex;gap:10px;">${effectivenessHtml}${statusHtml}</div>` : ''}
         ${stanceHtml ? `<div style="margin-top:2px;">${stanceHtml}</div>` : ''}
       </div>
       <div style="display:flex;gap:6px;">${buttons}</div>
