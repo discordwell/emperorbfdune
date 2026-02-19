@@ -402,6 +402,19 @@ export class ProductionSystem {
     }
   }
 
+  /** Get upgrade queue progress for a specific building type (or first in queue if no type specified) */
+  getUpgradeProgress(playerId: number, buildingType?: string): { typeName: string; progress: number } | null {
+    const queue = this.upgradeQueues.get(playerId);
+    if (!queue || queue.length === 0) return null;
+    if (buildingType) {
+      const item = queue.find(q => q.typeName === buildingType);
+      if (!item) return null;
+      return { typeName: item.typeName, progress: item.totalTime > 0 ? Math.min(1, item.elapsed / item.totalTime) : 1 };
+    }
+    const item = queue[0];
+    return { typeName: item.typeName, progress: item.totalTime > 0 ? Math.min(1, item.elapsed / item.totalTime) : 1 };
+  }
+
   getQueueProgress(playerId: number, isBuilding: boolean): { typeName: string; progress: number } | null {
     const queue = isBuilding
       ? this.buildingQueues.get(playerId)

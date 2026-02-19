@@ -372,6 +372,21 @@ async function main() {
   });
   const fogOfWar = new FogOfWar(scene, terrain, 0);
   minimapRenderer.setFogOfWar(fogOfWar);
+  // Differentiated minimap rendering: unit types and building names
+  minimapRenderer.setUnitCategoryFn((eid: number): 'infantry' | 'vehicle' | 'aircraft' => {
+    const typeId = UnitType.id[eid];
+    const typeName = unitTypeNames[typeId];
+    if (!typeName) return 'vehicle';
+    const def = gameRules.units.get(typeName);
+    if (!def) return 'vehicle';
+    if (def.canFly) return 'aircraft';
+    if (def.infantry) return 'infantry';
+    return 'vehicle';
+  });
+  minimapRenderer.setBuildingNameFn((eid: number): string => {
+    const typeId = BuildingType.id[eid];
+    return buildingTypeNames[typeId] ?? '';
+  });
   unitRenderer.setFogOfWar(fogOfWar, 0);
   unitRenderer.setUnitCategoryFn((eid: number): 'infantry' | 'vehicle' | 'aircraft' | 'building' => {
     const w = game.getWorld();
@@ -1546,6 +1561,7 @@ async function main() {
   const commandModeEl = document.getElementById('command-mode');
   const lowPowerEl = document.getElementById('low-power-warning');
   const controlGroupsEl = document.getElementById('control-groups');
+  const techLevelEl = document.getElementById('tech-level');
   const musicTrackEl = document.getElementById('music-track');
 
   // Objective display for campaign
@@ -1718,6 +1734,8 @@ async function main() {
     buildingPlacement.updateOccupiedTiles(world);
     pathfinder.updateBlockedTiles(buildingPlacement.getOccupiedTiles());
     selectionPanel.setWorld(world);
+    // Refresh selection panel periodically for dynamic info (upgrade progress, repair state)
+    if (game.getTickCount() % 10 === 0) selectionPanel.refresh();
 
     // Command mode indicator (don't overwrite superweapon targeting)
     const mode = commandManager.getCommandMode();
@@ -1779,6 +1797,12 @@ async function main() {
         }
       }
       if (unitCountEl) unitCountEl.textContent = `${unitCount}`;
+      // Tech level display
+      if (techLevelEl) {
+        const techLevel = productionSystem.getPlayerTechLevel(0);
+        techLevelEl.textContent = `${techLevel}`;
+        techLevelEl.style.color = techLevel >= 3 ? '#FFD700' : techLevel >= 2 ? '#8cf' : '#aaa';
+      }
 
       // Control group badges (update every second)
       if (controlGroupsEl && game.getTickCount() % 25 === 0) {

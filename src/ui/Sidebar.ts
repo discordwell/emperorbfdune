@@ -106,9 +106,33 @@ export class Sidebar {
     const starportOffers = this.production.getStarportOffers(this.factionPrefix);
     if (starportOffers.length > 0) tabs.push('Starport');
 
+    // Count queued items per category for badges
+    const buildingQueueCount = this.production.getQueue(this.playerId, true).length;
+    const unitQueue = this.production.getQueue(this.playerId, false);
+    const infantryNames = new Set<string>();
+    const vehicleNames = new Set<string>();
+    for (const [name, def] of this.rules.units) {
+      if (def.infantry) infantryNames.add(name);
+      else vehicleNames.add(name);
+    }
+    let infantryQueueCount = 0;
+    let vehicleQueueCount = 0;
+    for (const item of unitQueue) {
+      if (infantryNames.has(item.typeName)) infantryQueueCount++;
+      else vehicleQueueCount++;
+    }
+    const queueCounts: Record<string, number> = {
+      Buildings: buildingQueueCount,
+      Units: vehicleQueueCount,
+      Infantry: infantryQueueCount,
+      Starport: 0,
+    };
+
     for (const tab of tabs) {
       const btn = document.createElement('button');
-      btn.textContent = tab;
+      const count = queueCounts[tab] ?? 0;
+      const badge = count > 0 ? `<span style="background:#4f4;color:#000;font-size:9px;padding:0 3px;border-radius:6px;margin-left:3px;">${count}</span>` : '';
+      btn.innerHTML = `${tab}${badge}`;
       btn.style.cssText = `flex:1;padding:6px;background:${tab === this.currentTab ? '#2a2a4e' : '#111'};color:#ccc;border:none;cursor:pointer;font-size:11px;`;
       btn.onclick = () => { this.currentTab = tab; this.render(); };
       tabBar.appendChild(btn);
@@ -508,7 +532,24 @@ export class Sidebar {
 
     if (!isBuilding) {
       const unitDef = def as UnitDef;
-      html += `<div>Speed: ${unitDef.speed.toFixed(1)} &middot; Range: ${unitDef.viewRange}</div>`;
+      html += `<div>Speed: ${unitDef.speed.toFixed(1)} &middot; Sight: ${unitDef.viewRange}</div>`;
+      // Weapon details from turret → bullet chain
+      if (unitDef.turretAttach) {
+        const turret = this.rules.turrets.get(unitDef.turretAttach);
+        const bullet = turret ? this.rules.bullets.get(turret.bullet) : null;
+        if (bullet) {
+          const dmg = bullet.damage;
+          const rof = turret!.reloadCount;
+          const dps = rof > 0 ? (dmg * 25 / rof).toFixed(0) : '0';
+          const range = bullet.maxRange * 2;
+          let weaponInfo = `<div style="color:#f88;font-size:10px;">Damage: ${dmg} &middot; Range: ${range} &middot; DPS: ${dps}`;
+          if (bullet.blastRadius > 0) weaponInfo += ` &middot; AoE`;
+          if (bullet.isLaser) weaponInfo += ` &middot; Laser`;
+          if (bullet.antiAircraft) weaponInfo += ` &middot; AA`;
+          weaponInfo += `</div>`;
+          html += weaponInfo;
+        }
+      }
       if (unitDef.starportable) html += `<div style="color:#aaa;font-size:10px;">Available at Starport</div>`;
     } else {
       const bDef = def as BuildingDef;
@@ -517,6 +558,21 @@ export class Sidebar {
       if (bDef.getUnitWhenBuilt) {
         const unitName = getDisplayName(bDef.getUnitWhenBuilt);
         html += `<div style="color:#8cf;font-size:10px;">Spawns: ${unitName}</div>`;
+      }
+      // Weapon details for defensive buildings
+      if (bDef.turretAttach) {
+        const turret = this.rules.turrets.get(bDef.turretAttach);
+        const bullet = turret ? this.rules.bullets.get(turret.bullet) : null;
+        if (bullet) {
+          const dmg = bullet.damage;
+          const rof = turret!.reloadCount;
+          const dps = rof > 0 ? (dmg * 25 / rof).toFixed(0) : '0';
+          const range = bullet.maxRange * 2;
+          let weaponInfo = `<div style="color:#f88;font-size:10px;">Damage: ${dmg} &middot; Range: ${range} &middot; DPS: ${dps}`;
+          if (bullet.antiAircraft) weaponInfo += ` &middot; AA`;
+          weaponInfo += `</div>`;
+          html += weaponInfo;
+        }
       }
       if (bDef.upgradable) {
         const upgraded = this.production.isUpgraded(this.playerId, name);

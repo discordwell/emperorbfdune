@@ -110,6 +110,13 @@ export class SelectionPanel {
     this.playerFaction = prefix;
   }
 
+  /** Refresh the panel display (call periodically to update dynamic info like upgrade progress, repair state) */
+  refresh(): void {
+    if (this.selectedEntities.length > 0) {
+      this.render();
+    }
+  }
+
   addMessage(text: string, color = '#ccc'): void {
     this.messageLog.push(text);
     if (this.messageLog.length > 5) this.messageLog.shift();
@@ -276,14 +283,40 @@ export class SelectionPanel {
       stanceHtml = `<span id="stance-btn" style="font-size:11px;color:${stanceColors[stance]};cursor:pointer;">${stanceIcons[stance]} ${stanceNames[stance]}</span> <span style="font-size:9px;color:#666;">(V)</span>`;
     }
 
+    // Upgrade progress bar (for buildings with active upgrade)
+    let upgradeProgressHtml = '';
+    if (isBuilding && this.production) {
+      const upProg = this.production.getUpgradeProgress(0, typeName);
+      if (upProg) {
+        const pct = Math.round(upProg.progress * 100);
+        upgradeProgressHtml = `
+          <div style="margin-bottom:3px;">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:1px;">
+              <span style="font-size:10px;color:#88f;">Upgrading:</span>
+              <div style="flex:1;height:5px;background:#222;border-radius:2px;overflow:hidden;">
+                <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,#44f,#88f);transition:width 0.3s;"></div>
+              </div>
+              <span style="font-size:10px;color:#88f;">${pct}%</span>
+            </div>
+          </div>`;
+      } else if (this.production.isUpgraded(0, typeName)) {
+        upgradeProgressHtml = `<div style="font-size:10px;color:#4f4;margin-bottom:2px;">&#x2713; Upgraded</div>`;
+      }
+    }
+
     let buttons = '';
     if (isBuilding) {
       // Check if building can be upgraded
       const bDef = def as import('../config/BuildingDefs').BuildingDef | null;
       const canUpgrade = bDef?.upgradable && this.production && !this.production.isUpgraded(0, typeName)
         && this.production.canUpgrade(0, typeName);
-      const upgradeBtn = canUpgrade
-        ? `<button id="upgrade-btn" style="padding:4px 12px;background:#111144;border:1px solid #44f;color:#88f;cursor:pointer;font-size:11px;">Upgrade $${bDef!.upgradeCost}</button>`
+      // Don't show upgrade button if upgrade is already in progress
+      const upgradeInProgress = this.production?.getUpgradeProgress(0, typeName) != null;
+      const adjustedUpgradeCost = this.production
+        ? Math.round(bDef!.upgradeCost * this.production.getCostMultiplier(0))
+        : bDef!.upgradeCost;
+      const upgradeBtn = (canUpgrade && !upgradeInProgress)
+        ? `<button id="upgrade-btn" style="padding:4px 12px;background:#111144;border:1px solid #44f;color:#88f;cursor:pointer;font-size:11px;">Upgrade $${adjustedUpgradeCost}</button>`
         : '';
       const refund = def ? Math.floor(def.cost * 0.5) : 0;
       const isSellConfirm = this.sellConfirmEid === eid;
@@ -312,6 +345,7 @@ export class SelectionPanel {
           <span style="font-size:11px;color:${hpColor};">${Math.ceil(hp)}/${maxHp}</span>
         </div>
         ${harvesterHtml}
+        ${upgradeProgressHtml}
         <div>${statsHtml}</div>
         ${effectivenessHtml || statusHtml ? `<div style="margin-top:2px;display:flex;gap:10px;">${effectivenessHtml}${statusHtml}</div>` : ''}
         ${stanceHtml ? `<div style="margin-top:2px;">${stanceHtml}</div>` : ''}

@@ -3,7 +3,7 @@ import { TerrainType } from './TerrainRenderer';
 import type { SceneManager } from './SceneManager';
 import type { FogOfWar } from './FogOfWar';
 import { FOG_VISIBLE, FOG_EXPLORED } from './FogOfWar';
-import { Position, Owner, Health, Harvester, unitQuery, buildingQuery, type World, hasComponent } from '../core/ECS';
+import { Position, Owner, Health, Harvester, UnitType, BuildingType, unitQuery, buildingQuery, type World, hasComponent } from '../core/ECS';
 import { worldToTile, TILE_SIZE } from '../utils/MathUtils';
 
 const MINIMAP_COLORS: Record<TerrainType, string> = {
@@ -42,6 +42,10 @@ export class MinimapRenderer {
   private lastClickTime = 0;
   private lastClickX = 0;
   private lastClickY = 0;
+  // Unit category classifier for differentiated rendering
+  private unitCategoryFn: ((eid: number) => 'infantry' | 'vehicle' | 'aircraft') | null = null;
+  // Building name resolver for importance-based rendering
+  private buildingNameFn: ((eid: number) => string) | null = null;
 
   constructor(terrain: TerrainRenderer, sceneManager: SceneManager) {
     this.canvas = document.getElementById('minimap-canvas') as HTMLCanvasElement;
@@ -85,6 +89,16 @@ export class MinimapRenderer {
     this.attackPings.push({ x: worldX / TILE_SIZE, z: worldZ / TILE_SIZE, color, age: 0 });
   }
 
+  /** Set unit category classifier for differentiated minimap rendering */
+  setUnitCategoryFn(fn: (eid: number) => 'infantry' | 'vehicle' | 'aircraft'): void {
+    this.unitCategoryFn = fn;
+  }
+
+  /** Set building name resolver for importance-based rendering */
+  setBuildingNameFn(fn: (eid: number) => string): void {
+    this.buildingNameFn = fn;
+  }
+
   renderTerrain(): void {
     const mapW = this.terrain.getMapWidth();
     const mapH = this.terrain.getMapHeight();
@@ -95,7 +109,18 @@ export class MinimapRenderer {
     for (let tz = 0; tz < mapH; tz++) {
       for (let tx = 0; tx < mapW; tx++) {
         const type = this.terrain.getTerrainType(tx, tz);
-        this.ctx.fillStyle = MINIMAP_COLORS[type] ?? '#000';
+        // Show actual spice density with interpolated color
+        const spice = this.terrain.getSpice(tx, tz);
+        if (spice > 0) {
+          // Lerp between sand orange and rich spice red based on density
+          const s = Math.min(1, spice);
+          const r = Math.round(194 + s * 61);  // 194 -> 255
+          const g = Math.round(144 - s * 42);   // 144 -> 102
+          const b = Math.round(79 - s * 79);    // 79 -> 0
+          this.ctx.fillStyle = `rgb(${r},${g},${b})`;
+        } else {
+          this.ctx.fillStyle = MINIMAP_COLORS[type] ?? '#000';
+        }
         this.ctx.fillRect(tx * scaleX, tz * scaleZ, Math.ceil(scaleX), Math.ceil(scaleZ));
       }
     }
@@ -148,7 +173,7 @@ export class MinimapRenderer {
     const scaleWx = 200 / worldW;
     const scaleWz = 200 / worldH;
 
-    // Draw units
+    // Draw units — differentiated by type
     const units = unitQuery(world);
     for (const eid of units) {
       if (Health.current[eid] <= 0) continue;
@@ -160,13 +185,38 @@ export class MinimapRenderer {
       }
       const px = Position.x[eid] * scaleWx;
       const pz = Position.z[eid] * scaleWz;
-      // Harvesters shown in yellow for friendly, otherwise player color
       const isHarvester = hasComponent(world, Harvester, eid);
-      this.ctx.fillStyle = (isHarvester && owner === 0) ? '#FFD700' : (PLAYER_COLORS[owner] ?? '#fff');
-      this.ctx.fillRect(px - 1, pz - 1, 3, 3);
+      const color = (isHarvester && owner === 0) ? '#FFD700' : (PLAYER_COLORS[owner] ?? '#fff');
+      this.ctx.fillStyle = color;
+
+      const category = this.unitCategoryFn ? this.unitCategoryFn(eid) : 'vehicle';
+      if (isHarvester) {
+        // Harvesters: diamond shape
+        this.ctx.beginPath();
+        this.ctx.moveTo(px, pz - 2);
+        this.ctx.lineTo(px + 2, pz);
+        this.ctx.lineTo(px, pz + 2);
+        this.ctx.lineTo(px - 2, pz);
+        this.ctx.closePath();
+        this.ctx.fill();
+      } else if (category === 'infantry') {
+        // Infantry: small 2px dot
+        this.ctx.fillRect(px - 0.5, pz - 0.5, 2, 2);
+      } else if (category === 'aircraft') {
+        // Aircraft: small triangle
+        this.ctx.beginPath();
+        this.ctx.moveTo(px, pz - 2);
+        this.ctx.lineTo(px + 1.5, pz + 1.5);
+        this.ctx.lineTo(px - 1.5, pz + 1.5);
+        this.ctx.closePath();
+        this.ctx.fill();
+      } else {
+        // Vehicle: standard 3px square
+        this.ctx.fillRect(px - 1, pz - 1, 3, 3);
+      }
     }
 
-    // Draw buildings
+    // Draw buildings — differentiated by importance
     const buildings = buildingQuery(world);
     for (const eid of buildings) {
       if (Health.current[eid] <= 0) continue;
@@ -177,8 +227,34 @@ export class MinimapRenderer {
       }
       const px = Position.x[eid] * scaleWx;
       const pz = Position.z[eid] * scaleWz;
-      this.ctx.fillStyle = PLAYER_COLORS[owner] ?? '#fff';
-      this.ctx.fillRect(px - 2, pz - 2, 5, 5);
+      const bName = this.buildingNameFn ? this.buildingNameFn(eid) : '';
+      const playerColor = PLAYER_COLORS[owner] ?? '#fff';
+
+      // Key buildings get special colors and larger size
+      if (bName.includes('ConYard')) {
+        // Construction Yard: large bright square with border
+        this.ctx.fillStyle = playerColor;
+        this.ctx.fillRect(px - 3, pz - 3, 7, 7);
+        this.ctx.strokeStyle = '#fff';
+        this.ctx.lineWidth = 0.5;
+        this.ctx.strokeRect(px - 3, pz - 3, 7, 7);
+      } else if (bName.includes('Refinery')) {
+        // Refinery: orange-tinted large square
+        this.ctx.fillStyle = owner === 0 ? '#E89030' : playerColor;
+        this.ctx.fillRect(px - 2.5, pz - 2.5, 6, 6);
+      } else if (bName.includes('Turret') || bName.includes('Tower') || bName.includes('Gun') || bName.includes('Rocket') || bName.includes('Pop')) {
+        // Defenses: red-tinted small square
+        this.ctx.fillStyle = owner === 0 ? '#ff6666' : playerColor;
+        this.ctx.fillRect(px - 1.5, pz - 1.5, 4, 4);
+      } else if (bName.includes('Windtrap')) {
+        // Power: green-tinted small square
+        this.ctx.fillStyle = owner === 0 ? '#66cc66' : playerColor;
+        this.ctx.fillRect(px - 1.5, pz - 1.5, 4, 4);
+      } else {
+        // Other buildings: standard 5px square in player color
+        this.ctx.fillStyle = playerColor;
+        this.ctx.fillRect(px - 2, pz - 2, 5, 5);
+      }
     }
 
     // Draw camera viewport
