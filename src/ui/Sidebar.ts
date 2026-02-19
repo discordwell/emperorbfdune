@@ -78,8 +78,10 @@ export class Sidebar {
       const entry = this.hotkeyMap.get(key);
       if (entry && !entry.isBuilding) {
         e.preventDefault();
-        this.production.toggleRepeat(this.playerId, entry.name);
-        this.onBuild(entry.name, entry.isBuilding);
+        const nowOn = this.production.toggleRepeat(this.playerId, entry.name);
+        if (nowOn) {
+          this.onBuild(entry.name, entry.isBuilding); // Queue first one when enabling repeat
+        }
         this.render();
       }
       return;

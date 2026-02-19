@@ -101,6 +101,7 @@ export class AudioManager {
 
   setPlayerFaction(faction: string): void {
     this.playerFaction = faction;
+    this.currentTrackIndex = -1;
   }
 
   setUnitClassifier(fn: (eid: number) => UnitCategory): void {
@@ -1195,6 +1196,9 @@ export class AudioManager {
     }
     if (this.windGain) {
       this.windGain.gain.value = 0.04 * this.sfxVolume;
+    }
+    if (this.windLfoGain) {
+      this.windLfoGain.gain.value = 0.02 * this.sfxVolume;
     }
   }
 

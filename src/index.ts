@@ -83,6 +83,7 @@ interface SaveData {
   production?: ProductionState;
   fogExplored?: number[]; // RLE-encoded explored tiles
   superweaponCharge?: Array<{ playerId: number; palaceType: string; charge: number }>;
+  victoryTick?: number;
 }
 
 // ID maps
@@ -2728,6 +2729,7 @@ async function main() {
       production: productionSystem.getState(),
       fogExplored: fogOfWar.getExploredData(),
       superweaponCharge: superweaponSystem.getChargeState(),
+      victoryTick: victorySystem.getTickCounter(),
     };
   }
 
@@ -2855,6 +2857,10 @@ async function main() {
     // Restore superweapon charge state
     if (savedGame.superweaponCharge) {
       superweaponSystem.setChargeState(savedGame.superweaponCharge);
+    }
+    // Restore victory system tick counter
+    if (savedGame.victoryTick !== undefined) {
+      victorySystem.setTickCounter(savedGame.victoryTick);
     }
 
     console.log(`Restored ${savedGame.entities.length} entities from save (tick ${savedGame.tick})`);

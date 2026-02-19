@@ -88,7 +88,6 @@ export class VictorySystem {
   private onRestart: (() => void) | null = null;
   private graceperiodTicks = 250; // 10 seconds before checking (let game load)
   private stats: GameStats | null = null;
-  private startTime = Date.now();
   private onVictoryCallback: (() => void) | null = null;
   private onDefeatCallback: (() => void) | null = null;
   private onCampaignContinue: (() => void) | null = null;
@@ -112,6 +111,8 @@ export class VictorySystem {
   setBuildingTypeNames(names: string[]): void { this.buildingTypeNames = names; }
   setSurvivalTicks(ticks: number): void { this.survivalTicks = ticks; }
   setObjectiveLabel(label: string): void { this.objectiveLabel = label; }
+  getTickCounter(): number { return this.tickCounter; }
+  setTickCounter(ticks: number): void { this.tickCounter = ticks; }
   getObjectiveLabel(): string { return this.objectiveLabel; }
   getSurvivalProgress(): number {
     if (this.survivalTicks <= 0 || this.tickCounter < this.graceperiodTicks) return 0;
@@ -209,7 +210,7 @@ export class VictorySystem {
       padding: 40px 20px;
     `;
 
-    const elapsed = Math.floor((Date.now() - this.startTime) / 1000);
+    const elapsed = Math.floor(this.tickCounter / 25); // Game time at 25 TPS
     const mins = Math.floor(elapsed / 60);
     const secs = elapsed % 60;
     const timeStr = `${mins}:${secs.toString().padStart(2, '0')}`;
