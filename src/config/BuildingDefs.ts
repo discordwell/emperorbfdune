@@ -31,6 +31,9 @@ export interface BuildingDef {
   upgradeCost: number;
   upgradeTechLevel: number;
 
+  // Production
+  upgradedPrimaryRequired: boolean; // Requires primary building to be upgraded
+
   // Special
   getUnitWhenBuilt: string;
   numInfantryWhenGone: number;
@@ -72,6 +75,7 @@ export function createDefaultBuildingDef(name: string): BuildingDef {
     upgradable: false,
     upgradeCost: 0,
     upgradeTechLevel: 0,
+    upgradedPrimaryRequired: false,
     getUnitWhenBuilt: '',
     numInfantryWhenGone: 0,
     roofHeight: 80,

@@ -76,8 +76,14 @@ export interface UnitDef {
   hitSlowDownAmount: number;
   hitSlowDownDuration: number;
 
+  // Terrain bonuses
+  getsHeightAdvantage: boolean; // Gets range/damage bonuses on elevated terrain
+
   // Audio
   soundFile: number; // SoundID for voice lines (-1 = none)
+
+  // Production
+  upgradedPrimaryRequired: boolean; // Requires primary building to be upgraded
 
   // Special
   getUnitWhenBuilt?: string;
@@ -143,5 +149,7 @@ export function createDefaultUnitDef(name: string): UnitDef {
     stormDamage: 0,
     hitSlowDownAmount: 0,
     hitSlowDownDuration: 0,
+    getsHeightAdvantage: true, // Default: most units get height advantage
+    upgradedPrimaryRequired: false,
   };
 }

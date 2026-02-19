@@ -30,9 +30,15 @@ export class MovementSystem implements GameSystem {
   // Map bounds in world units (set from terrain)
   private mapMaxX = 256;
   private mapMaxZ = 256;
+  // Speed modifier callback (e.g., hit slowdown from CombatSystem)
+  private speedModifierFn: ((eid: number) => number) | null = null;
 
   constructor(pathfinder: PathfindingSystem) {
     this.pathfinder = pathfinder;
+  }
+
+  setSpeedModifier(fn: (eid: number) => number): void {
+    this.speedModifierFn = fn;
   }
 
   setMapBounds(maxX: number, maxZ: number): void {
@@ -194,8 +200,9 @@ export class MovementSystem implements GameSystem {
       const turnRate = Speed.turnRate[eid];
       Rotation.y[eid] = lerpAngle(currentAngle, desiredAngle, Math.min(1, turnRate * 2));
 
-      // Move at speed
-      const speed = Speed.max[eid];
+      // Move at speed (with hit slowdown modifier)
+      let speed = Speed.max[eid];
+      if (this.speedModifierFn) speed *= this.speedModifierFn(eid);
 
       // Separation from nearby units (spatial grid lookup)
       let sepX = 0;

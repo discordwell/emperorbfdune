@@ -410,6 +410,8 @@ async function main() {
   });
   combatSystem.setFogOfWar(fogOfWar, 0);
   combatSystem.setSpatialGrid(movement.getSpatialGrid());
+  combatSystem.setTerrain(terrain);
+  movement.setSpeedModifier((eid: number) => combatSystem.getHitSlowdownMultiplier(eid));
   combatSystem.setPlayerFaction(0, house.prefix);
   combatSystem.setPlayerFaction(1, house.enemyPrefix);  // AI player 1 (additional AIs registered below)
 

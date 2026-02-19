@@ -285,6 +285,11 @@ export class ProductionSystem {
       }
     }
 
+    // Check if upgraded primary building is required
+    if (def.upgradedPrimaryRequired && def.primaryBuilding) {
+      if (!this.isUpgraded(playerId, def.primaryBuilding)) return false;
+    }
+
     // Tech level requirement
     if (def.techLevel > 0) {
       const playerTech = this.getPlayerTechLevel(playerId);
@@ -321,6 +326,13 @@ export class ProductionSystem {
           const reqName = req.replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, '');
           return { reason: 'prereq', detail: reqName };
         }
+      }
+    }
+    // Check upgraded primary requirement
+    if (def.upgradedPrimaryRequired && def.primaryBuilding) {
+      if (!this.isUpgraded(playerId, def.primaryBuilding)) {
+        const reqName = def.primaryBuilding.replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, '');
+        return { reason: 'prereq', detail: `Upgrade ${reqName}` };
       }
     }
     if (def.techLevel > 0 && def.techLevel > this.getPlayerTechLevel(playerId)) {

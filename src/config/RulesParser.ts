@@ -236,6 +236,8 @@ function parseUnitDef(name: string, section: Section): UnitDef {
       case 'StormDamage': def.stormDamage = parseNum(value); break;
       case 'HitSlowDownAmount': def.hitSlowDownAmount = parseNum(value); break;
       case 'HitSlowDownDuration': def.hitSlowDownDuration = parseNum(value); break;
+      case 'GetsHeightAdvantage': def.getsHeightAdvantage = parseBool(value); break;
+      case 'UpgradedPrimaryRequired': def.upgradedPrimaryRequired = parseBool(value); break;
       case 'SoundFile': def.soundFile = parseNum(value, -1); break;
       case 'SoundID': def.soundFile = parseNum(value, -1); break;
       case 'GetUnitWhenBuilt': def.getUnitWhenBuilt = value; break;
@@ -316,6 +318,7 @@ function parseBuildingDef(name: string, section: Section): BuildingDef {
       case 'AiCritical': def.aiCritical = parseBool(value); break;
       case 'UpgradeCost': def.upgradeCost = parseNum(value); def.upgradable = true; break;
       case 'UpgradeTechLevel': def.upgradeTechLevel = parseNum(value); break;
+      case 'UpgradedPrimaryRequired': def.upgradedPrimaryRequired = parseBool(value); break;
     }
   }
 

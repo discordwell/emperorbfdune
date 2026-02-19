@@ -10,6 +10,8 @@ import type { BulletDef } from '../config/WeaponDefs';
 import { distance2D, worldToTile, angleBetween, lerpAngle } from '../utils/MathUtils';
 import { EventBus } from '../core/EventBus';
 import type { FogOfWar } from '../rendering/FogOfWar';
+import type { TerrainRenderer } from '../rendering/TerrainRenderer';
+import { TerrainType } from '../rendering/TerrainRenderer';
 import type { SpatialGrid } from '../utils/SpatialGrid';
 
 const TILE_SIZE = 2;
@@ -47,6 +49,10 @@ export class CombatSystem implements GameSystem {
   private spatialGrid: SpatialGrid | null = null;
   // Entities that fired this tick (for animation triggering)
   private recentlyFired = new Set<number>();
+  // Hit slowdown: target eid -> { ticksLeft, speedReduction (0-100%) }
+  private hitSlowdowns = new Map<number, { ticksLeft: number; amount: number }>();
+  // Terrain reference for height/infantry rock bonuses
+  private terrain: TerrainRenderer | null = null;
 
   constructor(rules: GameRules) {
     this.rules = rules;
@@ -58,6 +64,10 @@ export class CombatSystem implements GameSystem {
 
   setSpatialGrid(grid: SpatialGrid): void {
     this.spatialGrid = grid;
+  }
+
+  setTerrain(terrain: TerrainRenderer): void {
+    this.terrain = terrain;
   }
 
   setFogOfWar(fog: FogOfWar, localPlayerId = 0): void {
@@ -122,6 +132,7 @@ export class CombatSystem implements GameSystem {
 
   unregisterUnit(eid: number): void {
     this.unitTypeMap.delete(eid);
+    this.hitSlowdowns.delete(eid);
     this.attackMoveEntities.delete(eid);
     this.attackMoveDestinations.delete(eid);
     this.stances.delete(eid);
@@ -159,9 +170,22 @@ export class CombatSystem implements GameSystem {
     return this.recentlyFired.has(eid);
   }
 
+  /** Get speed multiplier for hit slowdown (1.0 = normal, lower = slowed) */
+  getHitSlowdownMultiplier(eid: number): number {
+    const slow = this.hitSlowdowns.get(eid);
+    if (!slow) return 1.0;
+    return Math.max(0.1, 1.0 - slow.amount / 100);
+  }
+
   update(world: World, _dt: number): void {
     this.world = world;
     this.recentlyFired.clear();
+
+    // Tick down hit slowdowns
+    for (const [eid, slow] of this.hitSlowdowns) {
+      slow.ticksLeft--;
+      if (slow.ticksLeft <= 0) this.hitSlowdowns.delete(eid);
+    }
 
     // Update escort targets: follow the escorted unit
     for (const [escorter, targetEid] of this.escortTargets) {
@@ -279,7 +303,22 @@ export class CombatSystem implements GameSystem {
         Position.x[targetEid], Position.z[targetEid]
       );
 
-      const range = Combat.attackRange[eid];
+      let range = Combat.attackRange[eid];
+
+      // Terrain range bonuses
+      if (this.terrain) {
+        const aTypeName = this.unitTypeMap.get(eid);
+        const aDef = aTypeName ? this.rules.units.get(aTypeName) : null;
+        if (aDef && aDef.getsHeightAdvantage) {
+          const aTile = worldToTile(Position.x[eid], Position.z[eid]);
+          const tt = this.terrain.getTerrainType(aTile.tx, aTile.tz);
+          if (tt === TerrainType.InfantryRock && aDef.infantry) {
+            range += 4; // +2 tiles (InfRockRangeBonus from rules.txt)
+          } else if (tt === TerrainType.Rock || tt === TerrainType.InfantryRock) {
+            range += 2; // +1 tile (HeightRangeBonus from rules.txt)
+          }
+        }
+      }
 
       if (dist > range) {
         const stance = this.stances.get(eid) ?? 1;
@@ -401,6 +440,25 @@ export class CombatSystem implements GameSystem {
     if (!hasComponent(world, Health, targetEid) || Health.current[targetEid] <= 0) return;
 
     Health.current[targetEid] -= damage;
+
+    // Apply hit slowdown if attacker's weapon causes it
+    const attackerTypeName = this.unitTypeMap.get(attackerEid);
+    if (attackerTypeName) {
+      const attackerDef = this.rules.units.get(attackerTypeName);
+      if (attackerDef && attackerDef.hitSlowDownAmount > 0 && attackerDef.hitSlowDownDuration > 0) {
+        const existing = this.hitSlowdowns.get(targetEid);
+        if (!existing || attackerDef.hitSlowDownAmount >= existing.amount) {
+          // Stronger or equal hit: apply new slowdown
+          this.hitSlowdowns.set(targetEid, {
+            ticksLeft: attackerDef.hitSlowDownDuration,
+            amount: attackerDef.hitSlowDownAmount,
+          });
+        } else {
+          // Weaker hit: just refresh timer if it would last longer
+          existing.ticksLeft = Math.max(existing.ticksLeft, attackerDef.hitSlowDownDuration);
+        }
+      }
+    }
 
     // Emit hit event for floating damage numbers (all visible hits)
     const targetOwner = Owner.playerId[targetEid];
@@ -531,6 +589,19 @@ export class CombatSystem implements GameSystem {
       // Scale: 100% HP = full damage, 50% HP = 75% damage, 0% HP = 50% damage
       const degradation = 0.5 + hpRatio * 0.5;
       baseDamage = Math.round(baseDamage * degradation);
+    }
+
+    // Terrain bonuses: infantry on InfantryRock get +50% damage
+    if (this.terrain) {
+      const attackerTypeName = this.unitTypeMap.get(attackerEid);
+      const attackerDef = attackerTypeName ? this.rules.units.get(attackerTypeName) : null;
+      if (attackerDef && attackerDef.getsHeightAdvantage) {
+        const tile = worldToTile(Position.x[attackerEid], Position.z[attackerEid]);
+        const terrainType = this.terrain.getTerrainType(tile.tx, tile.tz);
+        if (terrainType === TerrainType.InfantryRock && attackerDef.infantry) {
+          baseDamage = Math.round(baseDamage * 1.5); // +50% per rules.txt InfDamageRangeBonus
+        }
+      }
     }
 
     // Emit fire event for visual projectile
