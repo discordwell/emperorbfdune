@@ -32,7 +32,8 @@ export class PauseMenu {
   constructor(deps: PauseMenuDeps) {
     this.deps = deps;
     // Restore persisted settings
-    const saved = JSON.parse(localStorage.getItem('ebfd_settings') ?? '{}');
+    let saved: any = {};
+    try { saved = JSON.parse(localStorage.getItem('ebfd_settings') ?? '{}'); } catch { /* corrupted settings */ }
     if (saved.musicVol !== undefined) deps.audioManager.setMusicVolume(saved.musicVol);
     if (saved.sfxVol !== undefined) deps.audioManager.setSfxVolume(saved.sfxVol);
     if (saved.scrollSpeed !== undefined) deps.setScrollSpeed?.(saved.scrollSpeed);
@@ -230,7 +231,8 @@ export class PauseMenu {
     title.style.cssText = 'color:#d4a840;font-size:24px;font-weight:bold;text-align:center;margin-bottom:20px;';
     panel.appendChild(title);
 
-    const currentSettings = JSON.parse(localStorage.getItem('ebfd_settings') ?? '{"musicVol":0.3,"sfxVol":0.5,"scrollSpeed":1,"fogEnabled":true,"damageNumbers":true}');
+    let currentSettings: any = {};
+    try { currentSettings = JSON.parse(localStorage.getItem('ebfd_settings') ?? '{}'); } catch { /* corrupted settings */ }
     let musicVol = currentSettings.musicVol ?? 0.3;
     let sfxVol = currentSettings.sfxVol ?? 0.5;
     let scrollSpd = currentSettings.scrollSpeed ?? 1;

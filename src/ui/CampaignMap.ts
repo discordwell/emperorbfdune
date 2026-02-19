@@ -77,6 +77,7 @@ export class CampaignMap {
   private canvas: HTMLCanvasElement | undefined;
   private renderer: THREE.WebGLRenderer | undefined;
   private phaseManager: CampaignPhaseManager;
+  private expandedThisCycle = false;
   private subHouseSystem: SubHouseSystem;
 
   constructor(
@@ -205,7 +206,13 @@ export class CampaignMap {
     }
   }
 
+  recordDefeat(): void {
+    this.expandedThisCycle = false; // Allow expansion next time map is shown
+    this.saveCampaign();
+  }
+
   recordVictory(territoryId: number): void {
+    this.expandedThisCycle = false;
     const t = this.state.territories.find(t => t.id === territoryId);
     if (t) {
       t.owner = 'player';
@@ -296,9 +303,12 @@ export class CampaignMap {
 
   /** Show the campaign map and return the chosen territory + difficulty */
   async show(): Promise<{ territory: Territory; difficulty: Difficulty; mapSeed: number } | null> {
-    // AI expands between missions
-    this.expandEnemyTerritory();
-    this.saveCampaign();
+    // AI expands between missions (only once per mission cycle)
+    if (!this.expandedThisCycle) {
+      this.expandEnemyTerritory();
+      this.saveCampaign();
+      this.expandedThisCycle = true;
+    }
 
     // Use 3D campaign map if canvas/renderer available
     if (this.canvas && this.renderer) {

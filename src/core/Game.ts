@@ -113,7 +113,7 @@ export class Game {
       this.accumulator += capped * this.speedMultiplier;
 
       // Fixed timestep simulation
-      while (this.accumulator >= TICK_INTERVAL) {
+      while (this.accumulator >= TICK_INTERVAL && !this.paused) {
         this.tick();
         this.accumulator -= TICK_INTERVAL;
       }

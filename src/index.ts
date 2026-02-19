@@ -492,16 +492,16 @@ async function main() {
     productionSystem.setOverrideTechLevel(0, techLevel);
 
     victorySystem.setVictoryCallback(() => {
-      // Record victory in campaign state
-      campaign.recordVictory(house.campaignTerritoryId!);
-
-      // Determine if this was a territory capture (attack on enemy territory)
+      // Determine capture status BEFORE recording victory (which changes owner)
       const targetTerritory = campaign.getState().territories.find(t => t.id === house.campaignTerritoryId);
       const capturedTerritory = targetTerritory ? targetTerritory.owner !== 'player' : true;
 
       // Check if captured territory is an enemy jump point (not our own)
       const playerJP = JUMP_POINTS[house.prefix as HousePrefix];
       const isJumpPoint = Object.values(JUMP_POINTS).some(jp => jp === house.campaignTerritoryId && jp !== playerJP);
+
+      // Record victory in campaign state (sets territory owner to 'player')
+      campaign.recordVictory(house.campaignTerritoryId!);
 
       phaseManager.recordBattleResult(true, capturedTerritory, isJumpPoint);
       campaign.saveCampaign();
@@ -510,7 +510,7 @@ async function main() {
     victorySystem.setDefeatCallback(() => {
       // Record defeat in phase manager (no territory captured)
       phaseManager.recordBattleResult(false, false, false);
-      campaign.saveCampaign();
+      campaign.recordDefeat();
     });
 
     victorySystem.setCampaignContinue(async () => {
