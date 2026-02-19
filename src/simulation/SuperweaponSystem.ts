@@ -288,4 +288,27 @@ export class SuperweaponSystem {
       }
     }
   }
+
+  /** Serialize superweapon charge state for save/load */
+  getChargeState(): Array<{ playerId: number; palaceType: string; charge: number }> {
+    const result: Array<{ playerId: number; palaceType: string; charge: number }> = [];
+    for (const [playerId, s] of this.state) {
+      result.push({ playerId, palaceType: s.palaceType, charge: s.charge });
+    }
+    return result;
+  }
+
+  /** Restore superweapon charge state from saved data */
+  setChargeState(data: Array<{ playerId: number; palaceType: string; charge: number }>): void {
+    this.state.clear();
+    for (const entry of data) {
+      const cfg = SUPERWEAPON_CONFIG[entry.palaceType];
+      if (!cfg) continue;
+      this.state.set(entry.playerId, {
+        palaceType: entry.palaceType,
+        charge: entry.charge,
+        ready: entry.charge >= cfg.chargeTime,
+      });
+    }
+  }
 }

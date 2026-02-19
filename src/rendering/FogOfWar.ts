@@ -270,4 +270,33 @@ export class FogOfWar {
   getVisibility(): Uint8Array {
     return this.visibility;
   }
+
+  /** Serialize explored tiles for save/load */
+  getExploredData(): number[] {
+    // Run-length encode explored tiles for compact storage
+    const result: number[] = [];
+    let i = 0;
+    const len = this.explored.length;
+    while (i < len) {
+      const val = this.explored[i];
+      let run = 1;
+      while (i + run < len && this.explored[i + run] === val && run < 255) run++;
+      result.push(val, run);
+      i += run;
+    }
+    return result;
+  }
+
+  /** Restore explored tiles from saved data */
+  setExploredData(data: number[]): void {
+    let idx = 0;
+    for (let i = 0; i < data.length; i += 2) {
+      const val = data[i];
+      const run = data[i + 1];
+      for (let j = 0; j < run && idx < this.explored.length; j++) {
+        this.explored[idx++] = val;
+      }
+    }
+    this.lastPositionHash = -1; // Force redraw
+  }
 }

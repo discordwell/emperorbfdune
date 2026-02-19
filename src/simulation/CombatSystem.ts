@@ -49,6 +49,8 @@ export class CombatSystem implements GameSystem {
   private spatialGrid: SpatialGrid | null = null;
   // Entities that fired this tick (for animation triggering)
   private recentlyFired = new Set<number>();
+  // Threat tracking: target eid -> attacker eid (last entity that damaged us)
+  private lastAttacker = new Map<number, number>();
   // Hit slowdown: target eid -> { ticksLeft, speedReduction (0-100%) }
   private hitSlowdowns = new Map<number, { ticksLeft: number; amount: number }>();
   // Infantry suppression timers (1/5 chance on hit, 200 tick duration, stops firing)
@@ -114,6 +116,10 @@ export class CombatSystem implements GameSystem {
     this.guardPositions.delete(eid);
   }
 
+  getGuardPosition(eid: number): { x: number; z: number } | undefined {
+    return this.guardPositions.get(eid);
+  }
+
   setEscortTarget(eid: number, targetEid: number): void {
     this.escortTargets.set(eid, targetEid);
   }
@@ -144,6 +150,7 @@ export class CombatSystem implements GameSystem {
     this.stances.delete(eid);
     this.guardPositions.delete(eid);
     this.escortTargets.delete(eid);
+    this.lastAttacker.delete(eid);
     // Clear any units escorting this entity
     for (const [escorter, target] of this.escortTargets) {
       if (target === eid) this.escortTargets.delete(escorter);
@@ -495,6 +502,9 @@ export class CombatSystem implements GameSystem {
       }
     }
 
+    // Track last attacker for threat-based target priority
+    this.lastAttacker.set(targetEid, attackerEid);
+
     // Emit hit event for floating damage numbers (all visible hits)
     const targetOwner = Owner.playerId[targetEid];
     EventBus.emit('combat:hit', {
@@ -734,6 +744,11 @@ export class CombatSystem implements GameSystem {
         }
       }
 
+      // Bonus: prefer the entity that last attacked us (threat response)
+      if (this.lastAttacker.get(eid) === other) {
+        score -= 5;
+      }
+
       // Penalty: deprioritize buildings (prefer mobile threats)
       if (hasComponent(world, BuildingType, other)) {
         score += 10;
@@ -747,4 +762,5 @@ export class CombatSystem implements GameSystem {
 
     return bestTarget;
   }
+
 }

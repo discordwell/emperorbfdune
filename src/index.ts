@@ -65,6 +65,8 @@ interface SavedEntity {
   vet?: { xp: number; rank: number };
   ammo?: number; // aircraft ammo
   passengerTypeIds?: number[]; // transport passenger unit type IDs
+  stance?: number; // 0=aggressive, 1=defensive (default, not saved), 2=hold
+  guardPos?: { x: number; z: number }; // guard position
 }
 
 interface SaveData {
@@ -78,6 +80,8 @@ interface SaveData {
   entities: SavedEntity[];
   spice: number[][]; // [row][col]
   production?: ProductionState;
+  fogExplored?: number[]; // RLE-encoded explored tiles
+  superweaponCharge?: Array<{ playerId: number; palaceType: string; charge: number }>;
 }
 
 // ID maps
@@ -2578,6 +2582,12 @@ async function main() {
           .filter(p => Health.current[p] > 0)
           .map(p => UnitType.id[p]);
       }
+      // Save stance (skip default defensive=1)
+      const stance = combatSystem.getStance(eid);
+      if (stance !== 1) se.stance = stance;
+      // Save guard position
+      const gp = combatSystem.getGuardPosition(eid);
+      if (gp) se.guardPos = { x: gp.x, z: gp.z };
       entities.push(se);
     }
 
@@ -2617,6 +2627,8 @@ async function main() {
       entities,
       spice,
       production: productionSystem.getState(),
+      fogExplored: fogOfWar.getExploredData(),
+      superweaponCharge: superweaponSystem.getChargeState(),
     };
   }
 
@@ -2721,12 +2733,23 @@ async function main() {
             }
             if (passengers.length > 0) abilitySystem.setTransportPassengers(eid, passengers);
           }
+          // Restore stance and guard position
+          if (se.stance !== undefined) combatSystem.setStance(eid, se.stance);
+          if (se.guardPos) combatSystem.setGuardPosition(eid, se.guardPos.x, se.guardPos.z);
         }
       }
     }
     // Restore production queues and upgrade state
     if (savedGame.production) {
       productionSystem.restoreState(savedGame.production);
+    }
+    // Restore fog of war explored tiles
+    if (savedGame.fogExplored) {
+      fogOfWar.setExploredData(savedGame.fogExplored);
+    }
+    // Restore superweapon charge state
+    if (savedGame.superweaponCharge) {
+      superweaponSystem.setChargeState(savedGame.superweaponCharge);
     }
 
     console.log(`Restored ${savedGame.entities.length} entities from save (tick ${savedGame.tick})`);
