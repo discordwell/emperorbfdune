@@ -808,6 +808,12 @@ export class AbilitySystem {
         if (dx * dx + dz * dz < 64) { // 8 unit radius
           Health.current[other] = Math.min(Health.max[other],
             Health.current[other] + Health.max[other] * 0.03);
+          // Green repair sparkle on healed unit
+          this.deps.effectsManager.spawnRepairSparkle(
+            Position.x[other] + (Math.random() - 0.5) * 1.5,
+            0.5 + Math.random() * 1.5,
+            Position.z[other] + (Math.random() - 0.5) * 1.5
+          );
         }
       }
 
@@ -821,6 +827,12 @@ export class AbilitySystem {
         if (dx * dx + dz * dz < 64) {
           Health.current[bid] = Math.min(Health.max[bid],
             Health.current[bid] + Health.max[bid] * 0.02);
+          // Green repair sparkle on healed building
+          this.deps.effectsManager.spawnRepairSparkle(
+            Position.x[bid] + (Math.random() - 0.5) * 3,
+            1 + Math.random() * 2,
+            Position.z[bid] + (Math.random() - 0.5) * 3
+          );
         }
       }
     }
@@ -841,6 +853,14 @@ export class AbilitySystem {
           if (Health.current[eid] <= 0 || Health.current[eid] >= Health.max[eid]) continue;
           Health.current[eid] = Math.min(Health.max[eid],
             Health.current[eid] + Health.max[eid] * 0.01);
+          // Subtle regen sparkle (only player's units, 50% chance for subtlety)
+          if (pid === 0 && Math.random() < 0.5) {
+            this.deps.effectsManager.spawnRepairSparkle(
+              Position.x[eid] + (Math.random() - 0.5),
+              0.3 + Math.random() * 0.8,
+              Position.z[eid] + (Math.random() - 0.5)
+            );
+          }
         }
       }
 

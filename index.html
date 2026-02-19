@@ -89,6 +89,24 @@
       animation: minimap-pulse 0.8s ease-in-out 3;
     }
 
+    @keyframes attack-flash-fade {
+      0% { opacity: 0.6; }
+      100% { opacity: 0; }
+    }
+
+    #attack-flash {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      pointer-events: none;
+      z-index: 20;
+      opacity: 0;
+      box-shadow: inset 0 0 60px 20px rgba(255,0,0,0.5);
+    }
+
+    #attack-flash.active {
+      animation: attack-flash-fade 1.5s ease-out forwards;
+    }
+
     #fps-counter {
       margin-left: auto;
       color: #0f0;
@@ -210,7 +228,12 @@
         </div>
         <div class="resource-item">
           <span class="resource-label">Units:</span>
-          <span class="resource-value" id="unit-count">0/50</span>
+          <span class="resource-value" id="unit-count">0</span>
+          <span id="unit-breakdown" style="font-size:10px;color:#888;margin-left:4px;"></span>
+        </div>
+        <div class="resource-item">
+          <span class="resource-label">Tech:</span>
+          <span class="resource-value" id="tech-level" style="color:#8cf;">1</span>
         </div>
         <div id="control-groups" style="display:flex;gap:2px;margin-left:auto;margin-right:12px;"></div>
         <span style="color:#666;font-size:11px;margin-right:12px;">Press ? for help</span>
@@ -225,6 +248,7 @@
       </div>
       <div id="selection-info"></div>
       <div id="tooltip"></div>
+      <div id="attack-flash"></div>
       <div id="command-mode" style="
         display:none;position:absolute;top:40px;left:50%;transform:translateX(-50%);
         background:rgba(255,100,0,0.85);padding:4px 16px;border-radius:4px;

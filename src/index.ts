@@ -39,6 +39,7 @@ import { SubHouseSystem } from './campaign/SubHouseSystem';
 import { MentatScreen } from './ui/MentatScreen';
 import { PauseMenu } from './ui/PauseMenu';
 import { SuperweaponSystem } from './simulation/SuperweaponSystem';
+import { getDisplayName } from './config/DisplayNames';
 import { generateMissionConfig, type MissionConfigData } from './campaign/MissionConfig';
 import {
   addEntity, addComponent, removeEntity, hasComponent,
@@ -1246,6 +1247,7 @@ async function main() {
 
   // Under-attack notifications (throttled to once per 5 seconds)
   let lastAttackNotifyTime = 0;
+  const attackFlashEl = document.getElementById('attack-flash');
   EventBus.on('unit:damaged', ({ entityId, x, z, isBuilding }) => {
     if (Owner.playerId[entityId] !== 0) return; // Only notify for local player
     const now = Date.now();
@@ -1264,6 +1266,12 @@ async function main() {
       minimapEl.classList.remove('under-attack');
       void minimapEl.offsetWidth; // Force reflow to restart animation
       minimapEl.classList.add('under-attack');
+    }
+    // Screen edge red flash
+    if (attackFlashEl) {
+      attackFlashEl.classList.remove('active');
+      void attackFlashEl.offsetWidth;
+      attackFlashEl.classList.add('active');
     }
   });
 
@@ -1558,14 +1566,17 @@ async function main() {
   const powerEl = document.getElementById('power-status');
   const powerBarFill = document.getElementById('power-bar-fill');
   const unitCountEl = document.getElementById('unit-count');
+  const unitBreakdownEl = document.getElementById('unit-breakdown');
   const commandModeEl = document.getElementById('command-mode');
   const lowPowerEl = document.getElementById('low-power-warning');
   const controlGroupsEl = document.getElementById('control-groups');
   const techLevelEl = document.getElementById('tech-level');
   const musicTrackEl = document.getElementById('music-track');
+  const tooltipEl = document.getElementById('tooltip');
 
   // Objective display for campaign
   let objectiveEl: HTMLDivElement | null = null;
+  let objectiveBarFillEl: HTMLDivElement | null = null;
   if (victorySystem.getObjectiveLabel()) {
     objectiveEl = document.createElement('div');
     objectiveEl.style.cssText = `
@@ -1574,7 +1585,18 @@ async function main() {
       border-radius:3px;font-family:'Segoe UI',Tahoma,sans-serif;
       font-size:11px;color:#ff8;pointer-events:none;z-index:15;
     `;
-    objectiveEl.textContent = `Objective: ${victorySystem.getObjectiveLabel()}`;
+    const objectiveTextNode = document.createElement('span');
+    objectiveTextNode.textContent = `Objective: ${victorySystem.getObjectiveLabel()}`;
+    objectiveEl.appendChild(objectiveTextNode);
+    // Add progress bar for survival missions
+    if (victorySystem.getObjectiveLabel().includes('Survive')) {
+      const barContainer = document.createElement('div');
+      barContainer.style.cssText = `margin-top:3px;height:4px;background:#222;border-radius:2px;overflow:hidden;`;
+      objectiveBarFillEl = document.createElement('div');
+      objectiveBarFillEl.style.cssText = `height:100%;width:0%;background:linear-gradient(90deg,#f44,#ff8,#4f4);transition:width 0.5s;`;
+      barContainer.appendChild(objectiveBarFillEl);
+      objectiveEl.appendChild(barContainer);
+    }
     document.body.appendChild(objectiveEl);
   }
 
@@ -1693,15 +1715,17 @@ async function main() {
     fogOfWar.update(world);
     victorySystem.update(world);
     audioManager.updateIntensity();
-    // Update survival objective timer display
+    // Update survival objective timer display + progress bar
     if (objectiveEl && victorySystem.getObjectiveLabel().includes('Survive')) {
       const progress = victorySystem.getSurvivalProgress();
       if (progress > 0 && progress < 1) {
         const remaining = Math.ceil((1 - progress) * 8 * 60); // 8 minute survival
         const mins = Math.floor(remaining / 60);
         const secs = remaining % 60;
-        objectiveEl.textContent = `Objective: Survive (${mins}:${secs.toString().padStart(2, '0')} remaining)`;
+        const textSpan = objectiveEl.querySelector('span');
+        if (textSpan) textSpan.textContent = `Objective: Survive (${mins}:${secs.toString().padStart(2, '0')} remaining)`;
         objectiveEl.style.borderColor = progress > 0.7 ? '#4f4' : progress > 0.4 ? '#ff8' : '#f44';
+        if (objectiveBarFillEl) objectiveBarFillEl.style.width = `${Math.round(progress * 100)}%`;
       }
     }
     commandManager.setWorld(world);
@@ -1771,14 +1795,25 @@ async function main() {
       }
 
       let idleHarvesters = 0;
+      let combatCount = 0;
+      let harvesterCount = 0;
+      let aircraftCount = 0;
       const units = unitQuery(world);
       for (const eid of units) {
         if (Owner.playerId[eid] !== 0) continue;
         if (Health.current[eid] <= 0) continue;
         unitCount++;
-        // Check for idle harvesters (state=0 idle, not moving)
-        if (hasComponent(world, Harvester, eid) && Harvester.state[eid] === 0 && MoveTarget.active[eid] === 0) {
-          idleHarvesters++;
+        // Categorize units
+        const typeId = UnitType.id[eid];
+        const typeName = unitTypeNames[typeId];
+        const uDef = typeName ? gameRules.units.get(typeName) : null;
+        if (hasComponent(world, Harvester, eid)) {
+          harvesterCount++;
+          if (Harvester.state[eid] === 0 && MoveTarget.active[eid] === 0) idleHarvesters++;
+        } else if (uDef?.canFly) {
+          aircraftCount++;
+        } else if (uDef && !uDef.engineer && !uDef.repair && !typeName?.includes('MCV')) {
+          combatCount++;
         }
       }
 
@@ -1797,6 +1832,13 @@ async function main() {
         }
       }
       if (unitCountEl) unitCountEl.textContent = `${unitCount}`;
+      if (unitBreakdownEl) {
+        const parts: string[] = [];
+        if (combatCount > 0) parts.push(`${combatCount} combat`);
+        if (harvesterCount > 0) parts.push(`${harvesterCount} harv`);
+        if (aircraftCount > 0) parts.push(`${aircraftCount} air`);
+        unitBreakdownEl.textContent = parts.length > 0 ? `(${parts.join(', ')})` : '';
+      }
       // Tech level display
       if (techLevelEl) {
         const techLevel = productionSystem.getPlayerTechLevel(0);
@@ -2140,6 +2182,7 @@ async function main() {
   const MOVE_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Cpath d='M12 2 L17 8 L14 8 L14 14 L8 14 L8 8 L5 8 Z' fill='%2344ff44' stroke='%23000' stroke-width='1'/%3E%3C/svg%3E") 12 2, default`;
   let lastCursorUpdate = 0;
   let lastCursorStyle = '';
+  let lastTooltipEid = -1;
   if (gameCanvas) {
     gameCanvas.addEventListener('mousemove', (e: MouseEvent) => {
       const now = performance.now();
@@ -2152,7 +2195,55 @@ async function main() {
           gameCanvas.style.cursor = 'crosshair';
           lastCursorStyle = 'crosshair';
         }
+        if (tooltipEl) tooltipEl.style.display = 'none';
+        lastTooltipEid = -1;
         return;
+      }
+
+      // In-game hover tooltip: show unit/building info on hover
+      const hoverEid = unitRenderer.getEntityAtScreen(e.clientX, e.clientY);
+      if (hoverEid !== null && tooltipEl) {
+        const w = game.getWorld();
+        if (!w || !hasComponent(w, Health, hoverEid)) {
+          if (lastTooltipEid !== -1) { tooltipEl.style.display = 'none'; lastTooltipEid = -1; }
+        } else {
+          if (hoverEid !== lastTooltipEid) {
+            lastTooltipEid = hoverEid;
+            let name = '';
+            let isBuilding = false;
+            if (hasComponent(w, UnitType, hoverEid)) {
+              const typeId = UnitType.id[hoverEid];
+              name = unitTypeNames[typeId] ?? '';
+            } else if (hasComponent(w, BuildingType, hoverEid)) {
+              const typeId = BuildingType.id[hoverEid];
+              name = buildingTypeNames[typeId] ?? '';
+              isBuilding = true;
+            }
+            const displayName = name ? getDisplayName(name) : 'Unknown';
+            const hp = Health.current[hoverEid];
+            const maxHp = Health.max[hoverEid];
+            const hpPct = maxHp > 0 ? Math.round((hp / maxHp) * 100) : 0;
+            const hpColor = hpPct > 60 ? '#4f4' : hpPct > 30 ? '#ff8' : '#f44';
+            const owner = Owner.playerId[hoverEid];
+            const ownerLabel = owner === 0 ? 'You' : `Player ${owner}`;
+            const rank = hasComponent(w, Veterancy, hoverEid) ? Veterancy.rank[hoverEid] : 0;
+            const rankStr = rank > 0 ? ` ${'*'.repeat(rank)}` : '';
+            tooltipEl.innerHTML = `<div style="font-weight:bold;color:#fff;">${displayName}${rankStr}</div>`
+              + `<div style="color:${hpColor};">HP: ${Math.round(hp)}/${Math.round(maxHp)} (${hpPct}%)</div>`
+              + `<div style="color:#aaa;font-size:10px;">${ownerLabel}${isBuilding ? ' | Building' : ''}</div>`;
+            tooltipEl.style.display = 'block';
+          }
+          // Position tooltip near cursor, clamped to viewport
+          const tx = Math.min(e.clientX + 16, window.innerWidth - 260);
+          const ty = Math.max(10, Math.min(e.clientY - 10, window.innerHeight - 60));
+          tooltipEl.style.left = `${tx}px`;
+          tooltipEl.style.top = `${ty}px`;
+        }
+      } else {
+        if (tooltipEl && lastTooltipEid !== -1) {
+          tooltipEl.style.display = 'none';
+          lastTooltipEid = -1;
+        }
       }
 
       const selected = selectionManager.getSelectedEntities();
@@ -2164,8 +2255,7 @@ async function main() {
         return;
       }
 
-      // Check if hovering over a unit
-      const hoverEid = unitRenderer.getEntityAtScreen(e.clientX, e.clientY);
+      // Cursor style based on hover context
       if (hoverEid !== null) {
         const hoverOwner = Owner.playerId[hoverEid];
         const selOwner = Owner.playerId[selected[0]];
@@ -2189,6 +2279,11 @@ async function main() {
           lastCursorStyle = 'move';
         }
       }
+    });
+    // Hide tooltip when mouse leaves the canvas
+    gameCanvas.addEventListener('mouseleave', () => {
+      if (tooltipEl) tooltipEl.style.display = 'none';
+      lastTooltipEid = -1;
     });
   }
 
