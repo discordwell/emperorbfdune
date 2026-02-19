@@ -26,6 +26,8 @@ export class Sidebar {
   private tooltip: HTMLElement | null;
   // Maps hotkey letter to { name, isBuilding } for current tab
   private hotkeyMap = new Map<string, { name: string; isBuilding: boolean }>();
+  // Icon data URLs from 3D model renders
+  private iconMap = new Map<string, string>();
 
   constructor(rules: GameRules, production: ProductionSystem, artMap: Map<string, ArtEntry>, onBuild: BuildCallback, factionPrefix = 'AT', subhousePrefix = '') {
     this.container = document.getElementById('sidebar')!;
@@ -38,6 +40,12 @@ export class Sidebar {
     this.tooltip = document.getElementById('tooltip');
     this.render();
     window.addEventListener('keydown', this.onKeyDown);
+  }
+
+  /** Set production icons rendered from 3D models */
+  setIcons(icons: Map<string, string>): void {
+    this.iconMap = icons;
+    this.render(); // Re-render with icons
   }
 
   setConcreteCallback(cb: ConcreteCallback): void {
@@ -361,8 +369,16 @@ export class Sidebar {
     const blockDetail = (isPrereqBlock && blockDetailName)
       ? `<div style="font-size:8px;color:#a44;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Need: ${blockDetailName}</div>` : '';
 
+    // Look up 3D model icon
+    const art = this.artMap.get(name);
+    const iconKey = art?.xaf ?? name;
+    const iconUrl = this.iconMap.get(iconKey);
+    const iconHtml = iconUrl
+      ? `<img src="${iconUrl}" width="36" height="36" style="flex-shrink:0;opacity:${iconOpacity};image-rendering:auto;border-right:1px solid #333;" />`
+      : `<div style="width:6px;background:${roleColor};opacity:${iconOpacity};flex-shrink:0;"></div>`;
+
     item.innerHTML = `
-      <div style="width:6px;background:${roleColor};opacity:${iconOpacity};flex-shrink:0;"></div>
+      ${iconHtml}
       <div style="padding:4px 4px;flex:1;min-width:0;">
         ${hotkeyBadge}${repeatBadge}
         <div style="font-size:11px;font-weight:bold;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${lockIcon}${displayName}</div>

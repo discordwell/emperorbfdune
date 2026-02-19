@@ -16,6 +16,7 @@ import { CombatSystem } from './simulation/CombatSystem';
 import { HarvestSystem } from './simulation/HarvestSystem';
 import { ProductionSystem } from './simulation/ProductionSystem';
 import { Sidebar } from './ui/Sidebar';
+import { IconRenderer } from './rendering/IconRenderer';
 import { MinimapRenderer } from './rendering/MinimapRenderer';
 import { AIPlayer } from './ai/AIPlayer';
 import { EventBus } from './core/EventBus';
@@ -642,6 +643,15 @@ async function main() {
   });
   // Retry any pending model assignments that were deferred during preload
   unitRenderer.resolvePendingModels();
+
+  // Render sidebar production icons from 3D models
+  updateLoading(88, 'Rendering icons...', 'Production thumbnails');
+  const iconRenderer = new IconRenderer();
+  const iconNames = [...allUnitNames, ...allBuildingNames].map(n => {
+    const art = artMap.get(n);
+    return art?.xaf ?? n;
+  });
+  await iconRenderer.renderIcons(iconNames, modelManager);
 
   // Preload priority SFX samples (non-blocking, runs in parallel with spawn)
   updateLoading(88, 'Loading audio samples...', 'Sound effects');
@@ -2091,6 +2101,18 @@ async function main() {
     }
     sidebar.refresh();
   }, house.prefix, house.subhouse?.prefix ?? '');
+
+  // Pass rendered 3D model icons to sidebar
+  if (iconRenderer.getIcon('')) { /* noop, just check existence */ }
+  const iconMap = new Map<string, string>();
+  for (const name of [...allUnitNames, ...allBuildingNames]) {
+    const art = artMap.get(name);
+    const iconKey = art?.xaf ?? name;
+    const url = iconRenderer.getIcon(iconKey);
+    if (url) iconMap.set(iconKey, url);
+  }
+  if (iconMap.size > 0) sidebar.setIcons(iconMap);
+  iconRenderer.dispose();
 
   // Concrete slab placement
   const CONCRETE_COST = 20;

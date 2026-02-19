@@ -497,35 +497,61 @@ export class AudioManager {
   }
 
   private synthVictory(ctx: AudioContext): void {
-    const notes = [523, 659, 784, 1047]; // C5 E5 G5 C6
+    // Triumphant fanfare: C major arpeggio with harmonics + sustained chord
     const t = ctx.currentTime;
-    notes.forEach((freq, i) => {
+    const fanfare = [523, 659, 784, 1047, 1319]; // C5 E5 G5 C6 E6
+    fanfare.forEach((freq, i) => {
       const osc = ctx.createOscillator();
-      const gain = this.makeGain(ctx, 0.15);
+      const gain = this.makeGain(ctx, 0.12);
       osc.type = 'sine';
       osc.frequency.value = freq;
-      gain.gain.setValueAtTime(0.15 * this.sfxVolume, t + i * 0.15);
-      gain.gain.exponentialRampToValueAtTime(0.001, t + i * 0.15 + 0.4);
+      gain.gain.setValueAtTime(0.12 * this.sfxVolume, t + i * 0.12);
+      gain.gain.linearRampToValueAtTime(0.08 * this.sfxVolume, t + i * 0.12 + 0.15);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + i * 0.12 + 0.8);
       osc.connect(gain);
-      osc.start(t + i * 0.15);
-      osc.stop(t + i * 0.15 + 0.4);
+      osc.start(t + i * 0.12);
+      osc.stop(t + i * 0.12 + 0.8);
+    });
+    // Sustained major chord
+    [523, 659, 784].forEach(freq => {
+      const osc = ctx.createOscillator();
+      const gain = this.makeGain(ctx, 0.06);
+      osc.type = 'triangle';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0, t + 0.6);
+      gain.gain.linearRampToValueAtTime(0.06 * this.sfxVolume, t + 0.8);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 2.5);
+      osc.connect(gain);
+      osc.start(t + 0.6);
+      osc.stop(t + 2.5);
     });
   }
 
   private synthDefeat(ctx: AudioContext): void {
-    const notes = [400, 350, 300, 200]; // Descending
+    // Ominous descending minor chord with slow decay
     const t = ctx.currentTime;
+    const notes = [440, 370, 311, 233, 185]; // A4 F#4 Eb4 Bb3 F#3
     notes.forEach((freq, i) => {
       const osc = ctx.createOscillator();
-      const gain = this.makeGain(ctx, 0.15);
+      const gain = this.makeGain(ctx, 0.12);
       osc.type = 'sawtooth';
       osc.frequency.value = freq;
-      gain.gain.setValueAtTime(0.15 * this.sfxVolume, t + i * 0.2);
-      gain.gain.exponentialRampToValueAtTime(0.001, t + i * 0.2 + 0.5);
+      osc.frequency.exponentialRampToValueAtTime(freq * 0.95, t + i * 0.25 + 0.8);
+      gain.gain.setValueAtTime(0.12 * this.sfxVolume, t + i * 0.25);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + i * 0.25 + 1.0);
       osc.connect(gain);
-      osc.start(t + i * 0.2);
-      osc.stop(t + i * 0.2 + 0.5);
+      osc.start(t + i * 0.25);
+      osc.stop(t + i * 0.25 + 1.0);
     });
+    // Deep rumble undertone
+    const rumble = ctx.createOscillator();
+    const rumbleGain = this.makeGain(ctx, 0.08);
+    rumble.type = 'sine';
+    rumble.frequency.value = 50;
+    rumbleGain.gain.exponentialRampToValueAtTime(0.001, t + 2.0);
+    rumble.connect(rumbleGain);
+    rumble.start(t);
+    rumble.stop(t + 2.0);
   }
 
   // Pitch randomization factor (0.9 - 1.1)
