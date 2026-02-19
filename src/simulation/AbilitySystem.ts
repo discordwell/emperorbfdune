@@ -656,6 +656,7 @@ export class AbilitySystem {
           }
           this.leechTargets.delete(eid);
           // Leech detaches and becomes active again
+          combatSystem.setSuppressed(eid, false);
           Position.y[eid] = 0.1;
           continue;
         }
@@ -672,6 +673,7 @@ export class AbilitySystem {
           spawnUnit(this.deps.getWorld(), typeName, leechOwner,
             Position.x[parasiteTarget] + 2, Position.z[parasiteTarget] + 2);
           this.leechTargets.delete(eid);
+          combatSystem.setSuppressed(eid, false);
           Position.y[eid] = 0.1;
           if (leechOwner === 0) selectionPanel.addMessage('Leech replicated!', '#88ff44');
           else if (Owner.playerId[parasiteTarget] === 0) selectionPanel.addMessage('Vehicle destroyed by Leech!', '#ff4444');

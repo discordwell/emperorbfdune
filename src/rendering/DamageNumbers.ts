@@ -89,7 +89,7 @@ export class DamageNumbers {
       this.tempVec.project(camera);
 
       // Behind camera check
-      if (this.tempVec.z > 1) {
+      if (this.tempVec.z <= 0 || this.tempVec.z > 1) {
         num.el.style.display = 'none';
         continue;
       }
