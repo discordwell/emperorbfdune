@@ -299,7 +299,17 @@ export class BuildingPlacement {
         const snapped = tileToWorld(this.currentTile.tx, this.currentTile.tz);
         this.onPlace(this.typeName, snapped.x, snapped.z);
         this.audioManager.playSfx('build');
-        this.cancel();
+        // Clean up placement ghost without emitting placement:cancelled (cost already spent)
+        this.active = false;
+        this.typeName = '';
+        if (this.ghostMesh) {
+          this.sceneManager.scene.remove(this.ghostMesh);
+          this.ghostMesh.geometry.dispose();
+          (this.ghostMesh.material as THREE.Material).dispose();
+          this.ghostMesh = null;
+        }
+        this.disposeGridHelper();
+        document.body.style.cursor = 'default';
         e.preventDefault();
         e.stopPropagation();
       }

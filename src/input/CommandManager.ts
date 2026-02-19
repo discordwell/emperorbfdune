@@ -193,11 +193,15 @@ export class CommandManager {
       this.audioManager?.playUnitVoiceOrSfx('move', cat, selected[0]);
       this.commandMode = 'normal';
       document.body.style.cursor = 'default';
+      const modeEl1 = document.getElementById('command-mode');
+      if (modeEl1) modeEl1.style.display = 'none';
     } else if (this.commandMode === 'patrol') {
       this.issuePatrolCommand(selected, worldPos.x, worldPos.z);
       this.audioManager?.playUnitVoiceOrSfx('move', cat, selected[0]);
       this.commandMode = 'normal';
       document.body.style.cursor = 'default';
+      const modeEl2 = document.getElementById('command-mode');
+      if (modeEl2) modeEl2.style.display = 'none';
     } else if (shiftHeld) {
       this.addWaypoint(selected, worldPos.x, worldPos.z);
       this.audioManager?.playUnitVoiceOrSfx('move', cat, selected[0]);
@@ -279,6 +283,8 @@ export class CommandManager {
         if (this.commandMode !== 'normal') {
           this.commandMode = 'normal';
           document.body.style.cursor = 'default';
+          const modeEl = document.getElementById('command-mode');
+          if (modeEl) modeEl.style.display = 'none';
         }
         break;
     }

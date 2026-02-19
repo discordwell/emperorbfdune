@@ -348,9 +348,9 @@ export class SelectionPanel {
         && this.production.canUpgrade(0, typeName);
       // Don't show upgrade button if upgrade is already in progress
       const upgradeInProgress = this.production?.getUpgradeProgress(0, typeName) != null;
-      const adjustedUpgradeCost = this.production
-        ? Math.round(bDef!.upgradeCost * this.production.getCostMultiplier(0))
-        : bDef!.upgradeCost;
+      const adjustedUpgradeCost = bDef
+        ? (this.production ? Math.round(bDef.upgradeCost * this.production.getCostMultiplier(0)) : bDef.upgradeCost)
+        : 0;
       const upgradeBtn = (canUpgrade && !upgradeInProgress)
         ? `<button id="upgrade-btn" style="padding:4px 12px;background:#111144;border:1px solid #44f;color:#88f;cursor:pointer;font-size:11px;">Upgrade $${adjustedUpgradeCost}</button>`
         : '';

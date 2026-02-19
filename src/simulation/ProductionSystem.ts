@@ -570,9 +570,15 @@ export class ProductionSystem {
     return offers;
   }
 
-  /** Check if a player can afford a specific credit amount (for starport UI) */
+  /** Check if a player can afford a specific credit amount and has pop cap room (for starport UI) */
   canAffordAmount(playerId: number, amount: number): boolean {
-    return this.harvestSystem.getSolaris(playerId) >= amount;
+    if (this.harvestSystem.getSolaris(playerId) < amount) return false;
+    if (this.unitCountCallback) {
+      const queuedUnits = (this.infantryQueues.get(playerId)?.length ?? 0)
+                        + (this.vehicleQueues.get(playerId)?.length ?? 0);
+      if (this.unitCountCallback(playerId) + queuedUnits >= this.maxUnits) return false;
+    }
+    return true;
   }
 
   /** Purchase a unit from the starport (arrives after delay via normal production:complete) */
@@ -586,6 +592,13 @@ export class ProductionSystem {
 
     // Check player owns a Starport building
     if (!this.ownsAnyBuildingSuffix(playerId, 'Starport')) return false;
+
+    // Population cap check (including queued units)
+    if (this.unitCountCallback) {
+      const queuedUnits = (this.infantryQueues.get(playerId)?.length ?? 0)
+                        + (this.vehicleQueues.get(playerId)?.length ?? 0);
+      if (this.unitCountCallback(playerId) + queuedUnits >= this.maxUnits) return false;
+    }
 
     const isInf = this.isInfantryType(unitName);
     const queueMap = isInf ? this.infantryQueues : this.vehicleQueues;

@@ -178,6 +178,7 @@ export class EffectsManager {
   private wormDustGeo: THREE.SphereGeometry;
   private wormTrailGeo: THREE.SphereGeometry;
   private smokeGeo: THREE.SphereGeometry;
+  private promotionGeo: THREE.PlaneGeometry;
 
   constructor(sceneManager: SceneManager) {
     this.sceneManager = sceneManager;
@@ -192,6 +193,7 @@ export class EffectsManager {
     this.wormDustGeo = new THREE.SphereGeometry(0.3, 4, 4);
     this.wormTrailGeo = new THREE.SphereGeometry(0.2, 3, 3);
     this.smokeGeo = new THREE.SphereGeometry(0.4, 5, 5);
+    this.promotionGeo = new THREE.PlaneGeometry(0.2, 0.2);
 
     // Initialize trail particle Points system
     this.initTrailSystem();
@@ -1023,11 +1025,10 @@ export class EffectsManager {
     for (let i = 0; i < count; i++) {
       const angle = (i / count) * Math.PI * 2;
       const speed = 2 + Math.random() * 2;
-      const geo = new THREE.PlaneGeometry(0.2, 0.2);
       const mat = new THREE.MeshBasicMaterial({
         color: 0xffd700, transparent: true, opacity: 1.0, depthWrite: false, side: THREE.DoubleSide,
       });
-      const mesh = new THREE.Mesh(geo, mat);
+      const mesh = new THREE.Mesh(this.promotionGeo, mat);
       mesh.position.set(x, y + 1.5, z);
       this.sceneManager.scene.add(mesh);
       const vx = Math.cos(angle) * speed;

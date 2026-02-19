@@ -166,7 +166,7 @@ export class MinimapRenderer {
       const fogW = this.fogOfWar.getMapWidth();
       const tileScaleX = 200 / mapW;
       const tileScaleZ = 200 / mapH;
-      this.ctx.fillStyle = 'rgba(0,0,0,0.7)';
+      this.ctx.fillStyle = '#000';
       for (let tz = 0; tz < mapH; tz++) {
         for (let tx = 0; tx < mapW; tx++) {
           const v = vis[tz * fogW + tx];
