@@ -29,6 +29,7 @@ import { loadMap, getCampaignMapId } from './config/MapLoader';
 import { CampaignMap } from './ui/CampaignMap';
 import { SelectionPanel } from './ui/SelectionPanel';
 import { EffectsManager } from './rendering/EffectsManager';
+import { DamageNumbers } from './rendering/DamageNumbers';
 import { SandwormSystem } from './simulation/SandwormSystem';
 import { AbilitySystem } from './simulation/AbilitySystem';
 import { showMissionBriefing } from './ui/MissionBriefing';
@@ -361,6 +362,11 @@ async function main() {
     audioManager.playSfx('move');
     EventBus.emit('unit:move', { entityIds: selected, x: worldX, z: worldZ });
   });
+  minimapRenderer.setWorldGetter(() => game.getWorld());
+  minimapRenderer.setSelectionCallback((entityIds) => {
+    const w = game.getWorld();
+    if (w) selectionManager.selectEntities(w, entityIds);
+  });
   const fogOfWar = new FogOfWar(scene, terrain, 0);
   minimapRenderer.setFogOfWar(fogOfWar);
   unitRenderer.setFogOfWar(fogOfWar, 0);
@@ -393,6 +399,8 @@ async function main() {
     return count;
   });
   const effectsManager = new EffectsManager(scene);
+  const damageNumbers = new DamageNumbers(scene);
+  damageNumbers.setFogOfWar(fogOfWar);
   const opponentCount = house.opponents?.length ?? 1;
   const totalPlayers = 1 + opponentCount;
   const gameStats = new GameStats(totalPlayers);
@@ -1178,6 +1186,24 @@ async function main() {
     selectionPanel.addMessage('Rally point set', '#44ff44');
   });
 
+  // Rally line: show dashed line from selected building to rally point
+  EventBus.on('unit:selected', ({ entityIds }) => {
+    const w = game.getWorld();
+    if (!w) return;
+    const rally = commandManager.getRallyPoint(0);
+    if (!rally) { effectsManager.hideRallyLine(); return; }
+    // Find first building in selection
+    const bldg = entityIds.find(eid => hasComponent(w, BuildingType, eid) && Owner.playerId[eid] === 0);
+    if (bldg !== undefined) {
+      effectsManager.showRallyLine(Position.x[bldg], Position.z[bldg], rally.x, rally.z);
+    } else {
+      effectsManager.hideRallyLine();
+    }
+  });
+  EventBus.on('unit:deselected', () => {
+    effectsManager.hideRallyLine();
+  });
+
   // Projectile visuals — color and speed vary by weapon type
   EventBus.on('combat:fire', ({ attackerX, attackerZ, targetX, targetZ, weaponType, attackerEntity, targetEntity }) => {
     let color = 0xffaa00; // Default orange
@@ -1532,6 +1558,7 @@ async function main() {
     minimapRenderer.update(world);
     effectsManager.update(40); // ~40ms per tick at 25 TPS
     effectsManager.updateWormVisuals(sandwormSystem.getWorms(), 40);
+    damageNumbers.update();
     // Clean up stale bloom markers (TTL: 300 ticks = 12 seconds)
     for (const [key, marker] of bloomMarkers) {
       marker.ticks++;
@@ -1576,19 +1603,7 @@ async function main() {
       }
     }
 
-    // Update cursor based on context
-    const canvas = document.getElementById('game-canvas');
-    if (canvas) {
-      if (mode === 'attack-move') {
-        canvas.style.cursor = 'crosshair';
-      } else if (mode === 'patrol') {
-        canvas.style.cursor = 'crosshair';
-      } else if (selectionManager.getSelectedEntities().length > 0) {
-        canvas.style.cursor = 'default';
-      } else {
-        canvas.style.cursor = 'default';
-      }
-    }
+    // Cursor state is handled by mousemove handler below
 
     // Update power and unit count every 25 ticks (~1 second)
     if (game.getTickCount() % 25 === 0) {
@@ -1935,6 +1950,63 @@ async function main() {
     speedEl.style.color = color;
   }
 
+  // Contextual cursor — updates on mousemove with throttling
+  const ATTACK_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Ccircle cx='12' cy='12' r='9' stroke='%23ff3333' stroke-width='2' fill='none'/%3E%3Cline x1='12' y1='3' x2='12' y2='7' stroke='%23ff3333' stroke-width='2'/%3E%3Cline x1='12' y1='17' x2='12' y2='21' stroke='%23ff3333' stroke-width='2'/%3E%3Cline x1='3' y1='12' x2='7' y2='12' stroke='%23ff3333' stroke-width='2'/%3E%3Cline x1='17' y1='12' x2='21' y2='12' stroke='%23ff3333' stroke-width='2'/%3E%3C/svg%3E") 12 12, crosshair`;
+  const MOVE_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Cpath d='M12 2 L17 8 L14 8 L14 14 L8 14 L8 8 L5 8 Z' fill='%2344ff44' stroke='%23000' stroke-width='1'/%3E%3C/svg%3E") 12 2, default`;
+  let lastCursorUpdate = 0;
+  let lastCursorStyle = '';
+  if (gameCanvas) {
+    gameCanvas.addEventListener('mousemove', (e: MouseEvent) => {
+      const now = performance.now();
+      if (now - lastCursorUpdate < 80) return; // Throttle to ~12 fps
+      lastCursorUpdate = now;
+
+      const mode = commandManager.getCommandMode();
+      if (mode === 'attack-move' || mode === 'patrol' || mode === 'teleport') {
+        if (lastCursorStyle !== 'crosshair') {
+          gameCanvas.style.cursor = 'crosshair';
+          lastCursorStyle = 'crosshair';
+        }
+        return;
+      }
+
+      const selected = selectionManager.getSelectedEntities();
+      if (selected.length === 0) {
+        if (lastCursorStyle !== 'default') {
+          gameCanvas.style.cursor = 'default';
+          lastCursorStyle = 'default';
+        }
+        return;
+      }
+
+      // Check if hovering over a unit
+      const hoverEid = unitRenderer.getEntityAtScreen(e.clientX, e.clientY);
+      if (hoverEid !== null) {
+        const hoverOwner = Owner.playerId[hoverEid];
+        const selOwner = Owner.playerId[selected[0]];
+        if (hoverOwner !== selOwner) {
+          // Enemy — show attack cursor
+          if (lastCursorStyle !== 'attack') {
+            gameCanvas.style.cursor = ATTACK_CURSOR;
+            lastCursorStyle = 'attack';
+          }
+        } else {
+          // Friendly — show move cursor (escort)
+          if (lastCursorStyle !== 'move') {
+            gameCanvas.style.cursor = MOVE_CURSOR;
+            lastCursorStyle = 'move';
+          }
+        }
+      } else {
+        // Terrain — show move cursor
+        if (lastCursorStyle !== 'move') {
+          gameCanvas.style.cursor = MOVE_CURSOR;
+          lastCursorStyle = 'move';
+        }
+      }
+    });
+  }
+
   window.addEventListener('keydown', (e) => {
     if (e.key === '?' || (e.key === '/' && e.shiftKey)) {
       if (helpOverlay) {
@@ -2104,6 +2176,11 @@ async function main() {
     setSpeed: (speed: number) => game.setSpeed(speed),
     pause: () => game.pause(),
     buildSaveData,
+    setScrollSpeed: (m: number) => inputManager.setScrollSpeed(m),
+    setFogEnabled: (v: boolean) => fogOfWar.setEnabled(v),
+    isFogEnabled: () => fogOfWar.isEnabled(),
+    setDamageNumbers: (v: boolean) => damageNumbers.setEnabled(v),
+    isDamageNumbers: () => damageNumbers.isEnabled(),
   });
 
   // --- SPAWN INITIAL ENTITIES ---

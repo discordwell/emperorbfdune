@@ -4,14 +4,13 @@ import type { SceneManager } from '../rendering/SceneManager';
 import { EventBus } from '../core/EventBus';
 
 const EDGE_SCROLL_MARGIN = 10; // Pixels from edge
-const EDGE_SCROLL_SPEED = 1.5;
-const WASD_SCROLL_SPEED = 2.0;
 const ZOOM_SPEED = 5;
 const ROTATE_SPEED = 0.04;
 
 export class InputManager implements GameSystem {
   private sceneManager: SceneManager;
   private keys = new Set<string>();
+  private scrollSpeedMultiplier = 1.0;
   private mouseX = 0;
   private mouseY = 0;
   private mouseDown = false;
@@ -34,21 +33,27 @@ export class InputManager implements GameSystem {
 
   init(_world: World): void {}
 
+  setScrollSpeed(multiplier: number): void {
+    this.scrollSpeedMultiplier = Math.max(0.25, Math.min(2.0, multiplier));
+  }
+
   update(_world: World, _dt: number): void {
     let dx = 0;
     let dz = 0;
+    const wasdSpeed = 2.0 * this.scrollSpeedMultiplier;
+    const edgeSpeed = 1.5 * this.scrollSpeedMultiplier;
 
     // WASD scrolling
-    if (this.keys.has('w') || this.keys.has('arrowup')) dz -= WASD_SCROLL_SPEED;
-    if (this.keys.has('s') || this.keys.has('arrowdown')) dz += WASD_SCROLL_SPEED;
-    if (this.keys.has('a') || this.keys.has('arrowleft')) dx -= WASD_SCROLL_SPEED;
-    if (this.keys.has('d') || this.keys.has('arrowright')) dx += WASD_SCROLL_SPEED;
+    if (this.keys.has('w') || this.keys.has('arrowup')) dz -= wasdSpeed;
+    if (this.keys.has('s') || this.keys.has('arrowdown')) dz += wasdSpeed;
+    if (this.keys.has('a') || this.keys.has('arrowleft')) dx -= wasdSpeed;
+    if (this.keys.has('d') || this.keys.has('arrowright')) dx += wasdSpeed;
 
     // Edge scrolling
-    if (this.mouseX <= EDGE_SCROLL_MARGIN) dx -= EDGE_SCROLL_SPEED;
-    if (this.mouseX >= window.innerWidth - EDGE_SCROLL_MARGIN) dx += EDGE_SCROLL_SPEED;
-    if (this.mouseY <= EDGE_SCROLL_MARGIN) dz -= EDGE_SCROLL_SPEED;
-    if (this.mouseY >= window.innerHeight - EDGE_SCROLL_MARGIN) dz += EDGE_SCROLL_SPEED;
+    if (this.mouseX <= EDGE_SCROLL_MARGIN) dx -= edgeSpeed;
+    if (this.mouseX >= window.innerWidth - EDGE_SCROLL_MARGIN) dx += edgeSpeed;
+    if (this.mouseY <= EDGE_SCROLL_MARGIN) dz -= edgeSpeed;
+    if (this.mouseY >= window.innerHeight - EDGE_SCROLL_MARGIN) dz += edgeSpeed;
 
     // Camera rotation ([ and ] keys, or Ctrl+Q/E)
     if (this.keys.has('[')) this.sceneManager.rotateCamera(-ROTATE_SPEED);

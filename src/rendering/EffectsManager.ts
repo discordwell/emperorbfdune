@@ -98,6 +98,8 @@ export class EffectsManager {
   // Dust trails from moving units
   private dustPuffs: { mesh: THREE.Mesh; life: number; vy: number }[] = [];
   private dustGeo: THREE.SphereGeometry | null = null;
+  // Rally line from building to rally point
+  private rallyLine: THREE.Line | null = null;
 
   // Projectile trail particle system (GPU-efficient single Points object)
   private static readonly MAX_TRAIL_PARTICLES = 500;
@@ -872,6 +874,36 @@ export class EffectsManager {
       });
       this.sceneManager.scene.remove(existing);
       this.rallyMarkers.delete(playerId);
+    }
+  }
+
+  /** Show a dashed line from a building to its rally point */
+  showRallyLine(buildingX: number, buildingZ: number, rallyX: number, rallyZ: number): void {
+    this.hideRallyLine();
+    const points = [
+      new THREE.Vector3(buildingX, 0.3, buildingZ),
+      new THREE.Vector3(rallyX, 0.3, rallyZ),
+    ];
+    const geo = new THREE.BufferGeometry().setFromPoints(points);
+    const mat = new THREE.LineDashedMaterial({
+      color: 0x00ff44,
+      dashSize: 1.5,
+      gapSize: 0.8,
+      linewidth: 1,
+      transparent: true,
+      opacity: 0.7,
+    });
+    this.rallyLine = new THREE.Line(geo, mat);
+    this.rallyLine.computeLineDistances();
+    this.sceneManager.scene.add(this.rallyLine);
+  }
+
+  hideRallyLine(): void {
+    if (this.rallyLine) {
+      this.sceneManager.scene.remove(this.rallyLine);
+      this.rallyLine.geometry.dispose();
+      (this.rallyLine.material as THREE.Material).dispose();
+      this.rallyLine = null;
     }
   }
 

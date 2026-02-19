@@ -16,6 +16,11 @@ export interface PauseMenuDeps {
   setSpeed: (speed: number) => void;
   pause: () => void;
   buildSaveData: () => unknown;
+  setScrollSpeed?: (multiplier: number) => void;
+  setFogEnabled?: (enabled: boolean) => void;
+  isFogEnabled?: () => boolean;
+  setDamageNumbers?: (enabled: boolean) => void;
+  isDamageNumbers?: () => boolean;
 }
 
 export class PauseMenu {
@@ -28,6 +33,9 @@ export class PauseMenu {
     const saved = JSON.parse(localStorage.getItem('ebfd_settings') ?? '{}');
     if (saved.musicVol !== undefined) deps.audioManager.setMusicVolume(saved.musicVol);
     if (saved.sfxVol !== undefined) deps.audioManager.setSfxVolume(saved.sfxVol);
+    if (saved.scrollSpeed !== undefined) deps.setScrollSpeed?.(saved.scrollSpeed);
+    if (saved.fogEnabled !== undefined) deps.setFogEnabled?.(saved.fogEnabled);
+    if (saved.damageNumbers !== undefined) deps.setDamageNumbers?.(saved.damageNumbers);
   }
 
   get isOpen(): boolean {
@@ -219,10 +227,12 @@ export class PauseMenu {
     title.style.cssText = 'color:#d4a840;font-size:24px;font-weight:bold;text-align:center;margin-bottom:20px;';
     panel.appendChild(title);
 
-    const currentSettings = JSON.parse(localStorage.getItem('ebfd_settings') ?? '{"musicVol":0.3,"sfxVol":0.5,"scrollSpeed":1}');
+    const currentSettings = JSON.parse(localStorage.getItem('ebfd_settings') ?? '{"musicVol":0.3,"sfxVol":0.5,"scrollSpeed":1,"fogEnabled":true,"damageNumbers":true}');
     let musicVol = currentSettings.musicVol ?? 0.3;
     let sfxVol = currentSettings.sfxVol ?? 0.5;
     let scrollSpd = currentSettings.scrollSpeed ?? 1;
+    let fogEnabled = currentSettings.fogEnabled ?? (this.deps.isFogEnabled?.() ?? true);
+    let dmgNumbers = currentSettings.damageNumbers ?? (this.deps.isDamageNumbers?.() ?? true);
 
     const createSlider = (label: string, value: number, onChange: (v: number) => void): HTMLElement => {
       const row = document.createElement('div');
@@ -262,6 +272,7 @@ export class PauseMenu {
 
     panel.appendChild(createSlider('Scroll Speed', scrollSpd, (v) => {
       scrollSpd = v;
+      this.deps.setScrollSpeed?.(v);
     }));
 
     // Game speed selector
@@ -287,6 +298,34 @@ export class PauseMenu {
     speedRow.appendChild(speedBtns);
     panel.appendChild(speedRow);
 
+    // Toggle options
+    const createToggle = (label: string, checked: boolean, onChange: (v: boolean) => void): HTMLElement => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:12px;cursor:pointer;';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = checked;
+      checkbox.style.cssText = 'accent-color:#d4a840;width:16px;height:16px;cursor:pointer;';
+      checkbox.onchange = () => onChange(checkbox.checked);
+      const lbl = document.createElement('span');
+      lbl.textContent = label;
+      lbl.style.cssText = 'color:#ccc;font-size:13px;';
+      row.appendChild(checkbox);
+      row.appendChild(lbl);
+      row.onclick = (e) => { if (e.target !== checkbox) { checkbox.checked = !checkbox.checked; onChange(checkbox.checked); } };
+      return row;
+    };
+
+    panel.appendChild(createToggle('Fog of War', fogEnabled, (v) => {
+      fogEnabled = v;
+      this.deps.setFogEnabled?.(v);
+    }));
+
+    panel.appendChild(createToggle('Damage Numbers', dmgNumbers, (v) => {
+      dmgNumbers = v;
+      this.deps.setDamageNumbers?.(v);
+    }));
+
     // Back button with save
     const backBtn = document.createElement('button');
     backBtn.textContent = 'Back';
@@ -294,7 +333,7 @@ export class PauseMenu {
     backBtn.onmouseenter = () => { backBtn.style.borderColor = '#88f'; };
     backBtn.onmouseleave = () => { backBtn.style.borderColor = '#555'; };
     backBtn.onclick = () => {
-      localStorage.setItem('ebfd_settings', JSON.stringify({ musicVol, sfxVol, scrollSpeed: scrollSpd }));
+      localStorage.setItem('ebfd_settings', JSON.stringify({ musicVol, sfxVol, scrollSpeed: scrollSpd, fogEnabled, damageNumbers: dmgNumbers }));
       this.close();
       this.show();
     };

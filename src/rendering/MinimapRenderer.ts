@@ -3,7 +3,7 @@ import { TerrainType } from './TerrainRenderer';
 import type { SceneManager } from './SceneManager';
 import type { FogOfWar } from './FogOfWar';
 import { FOG_VISIBLE, FOG_EXPLORED } from './FogOfWar';
-import { Position, Owner, Health, unitQuery, buildingQuery, type World } from '../core/ECS';
+import { Position, Owner, Health, Harvester, unitQuery, buildingQuery, type World, hasComponent } from '../core/ECS';
 import { worldToTile, TILE_SIZE } from '../utils/MathUtils';
 
 const MINIMAP_COLORS: Record<TerrainType, string> = {
@@ -30,12 +30,18 @@ export class MinimapRenderer {
   private fogOfWar: FogOfWar | null = null;
   private terrainImageData: ImageData | null = null;
   private onRightClick: ((worldX: number, worldZ: number) => void) | null = null;
+  private onSelectEntities: ((entityIds: number[]) => void) | null = null;
+  private getWorld: (() => World | null) | null = null;
   // Click ping animation
   private clickPing: { x: number; y: number; age: number } | null = null;
   // Rally point for player 0
   private rallyPoint: { x: number; z: number } | null = null;
   // Attack flash pings
   private attackPings: { x: number; z: number; color: string; age: number }[] = [];
+  // Double-click detection
+  private lastClickTime = 0;
+  private lastClickX = 0;
+  private lastClickY = 0;
 
   constructor(terrain: TerrainRenderer, sceneManager: SceneManager) {
     this.canvas = document.getElementById('minimap-canvas') as HTMLCanvasElement;
@@ -45,9 +51,10 @@ export class MinimapRenderer {
     this.terrain = terrain;
     this.sceneManager = sceneManager;
 
-    // Click to navigate
+    // Click to navigate, double-click to snap
     this.canvas.addEventListener('mousedown', this.onClick);
     this.canvas.addEventListener('mousemove', this.onDrag);
+    this.canvas.addEventListener('dblclick', this.onDoubleClick);
     this.canvas.addEventListener('contextmenu', this.onContextMenu);
 
     this.renderTerrain();
@@ -55,6 +62,14 @@ export class MinimapRenderer {
 
   setRightClickCallback(cb: (worldX: number, worldZ: number) => void): void {
     this.onRightClick = cb;
+  }
+
+  setSelectionCallback(cb: (entityIds: number[]) => void): void {
+    this.onSelectEntities = cb;
+  }
+
+  setWorldGetter(fn: () => World | null): void {
+    this.getWorld = fn;
   }
 
   setFogOfWar(fog: FogOfWar): void {
@@ -230,8 +245,19 @@ export class MinimapRenderer {
   private isDragging = false;
 
   private onClick = (e: MouseEvent): void => {
+    if (e.button !== 0) return;
     this.isDragging = true;
     this.navigateTo(e);
+  };
+
+  private onDoubleClick = (e: MouseEvent): void => {
+    if (e.button !== 0) return;
+    const rect = this.canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const { worldX, worldZ } = this.minimapToWorld(mx, my);
+    this.sceneManager.snapTo(worldX, worldZ);
+    this.clickPing = { x: mx, y: my, age: 0 };
   };
 
   private onDrag = (e: MouseEvent): void => {
@@ -242,16 +268,61 @@ export class MinimapRenderer {
     this.navigateTo(e);
   };
 
-  private navigateTo(e: MouseEvent): void {
-    const rect = this.canvas.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
+  private minimapToWorld(mx: number, my: number): { worldX: number; worldZ: number } {
     const mapW = this.terrain.getMapWidth();
     const mapH = this.terrain.getMapHeight();
     const worldW = mapW * TILE_SIZE;
     const worldH = mapH * TILE_SIZE;
-    const worldX = (mx / 200) * worldW;
-    const worldZ = (my / 200) * worldH;
+    return { worldX: (mx / 200) * worldW, worldZ: (my / 200) * worldH };
+  }
+
+  /** Find friendly entities near a minimap pixel coordinate */
+  private findEntitiesNear(worldX: number, worldZ: number): number[] {
+    if (!this.getWorld) return [];
+    const world = this.getWorld();
+    if (!world) return [];
+    // Search radius in world units (corresponds to ~5px on minimap)
+    const mapW = this.terrain.getMapWidth();
+    const worldW = mapW * TILE_SIZE;
+    const pickRadius = (5 / 200) * worldW;
+    const r2 = pickRadius * pickRadius;
+    const found: number[] = [];
+    const units = unitQuery(world);
+    for (const eid of units) {
+      if (Owner.playerId[eid] !== 0) continue;
+      if (Health.current[eid] <= 0) continue;
+      const dx = Position.x[eid] - worldX;
+      const dz = Position.z[eid] - worldZ;
+      if (dx * dx + dz * dz <= r2) found.push(eid);
+    }
+    // Also check buildings
+    const buildings = buildingQuery(world);
+    for (const eid of buildings) {
+      if (Owner.playerId[eid] !== 0) continue;
+      if (Health.current[eid] <= 0) continue;
+      const dx = Position.x[eid] - worldX;
+      const dz = Position.z[eid] - worldZ;
+      if (dx * dx + dz * dz <= r2) found.push(eid);
+    }
+    return found;
+  }
+
+  private navigateTo(e: MouseEvent): void {
+    const rect = this.canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const { worldX, worldZ } = this.minimapToWorld(mx, my);
+
+    // Try to pick entities on single click (not drag)
+    if (e.type === 'mousedown' && this.onSelectEntities) {
+      const nearby = this.findEntitiesNear(worldX, worldZ);
+      if (nearby.length > 0) {
+        this.onSelectEntities(nearby);
+        this.sceneManager.panTo(worldX, worldZ);
+        this.clickPing = { x: mx, y: my, age: 0 };
+        return;
+      }
+    }
 
     // Use smooth pan for single clicks, instant for drag
     if (this.isDragging && e.type === 'mousemove') {

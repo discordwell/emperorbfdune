@@ -53,14 +53,39 @@ export class Sidebar {
   }
 
   private onKeyDown = (e: KeyboardEvent): void => {
-    if (e.ctrlKey || e.altKey || e.metaKey) return;
+    if (e.altKey || e.metaKey) return;
     // Don't fire in text inputs or when help overlay is shown
     const tag = (e.target as HTMLElement)?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA') return;
     const help = document.getElementById('help-overlay');
     if (help && help.style.display !== 'none') return;
 
-    const entry = this.hotkeyMap.get(e.key.toLowerCase());
+    const key = e.key.toLowerCase();
+
+    // Z: cycle sidebar tabs
+    if (key === 'z' && !e.ctrlKey && !e.shiftKey) {
+      const tabs: typeof this.currentTab[] = ['Buildings', 'Units', 'Infantry'];
+      const starportOffers = this.production.getStarportOffers(this.factionPrefix);
+      if (starportOffers.length > 0) tabs.push('Starport');
+      const idx = tabs.indexOf(this.currentTab);
+      this.currentTab = tabs[(idx + 1) % tabs.length];
+      this.render();
+      return;
+    }
+
+    // Ctrl+hotkey: toggle repeat mode (units only)
+    if (e.ctrlKey) {
+      const entry = this.hotkeyMap.get(key);
+      if (entry && !entry.isBuilding) {
+        e.preventDefault();
+        this.production.toggleRepeat(this.playerId, entry.name);
+        this.onBuild(entry.name, entry.isBuilding);
+        this.render();
+      }
+      return;
+    }
+
+    const entry = this.hotkeyMap.get(key);
     if (entry) {
       // Shift+hotkey: queue 5 at once
       const count = e.shiftKey ? 5 : 1;
