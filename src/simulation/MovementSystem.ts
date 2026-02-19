@@ -82,9 +82,10 @@ export class MovementSystem implements GameSystem {
     this.tickCount++;
     const doIdleSep = this.tickCount % 5 === 0; // Idle separation every 5 ticks
 
-    // Rebuild spatial grid for efficient neighbor queries (includes all units for combat)
+    // Rebuild spatial grid for efficient neighbor queries (skip dead entities)
     this.spatialGrid.clear();
     for (const eid of entities) {
+      if (hasComponent(world, Health, eid) && Health.current[eid] <= 0) continue;
       this.spatialGrid.insert(eid, Position.x[eid], Position.z[eid]);
     }
 

@@ -122,7 +122,7 @@ export class AbilitySystem {
     // Dismount worm if rider dies
     sandwormSystem.dismountWorm(entityId);
 
-    // If this entity was being leeched, detach the leech(es)
+    // If this entity was being leeched, detach leech(es) and trigger replication
     const leechesToDetach: number[] = [];
     for (const [leechEid, targetEid] of this.leechTargets) {
       if (targetEid === entityId) leechesToDetach.push(leechEid);
@@ -131,6 +131,15 @@ export class AbilitySystem {
       this.leechTargets.delete(leechEid);
       combatSystem.setSuppressed(leechEid, false);
       Position.y[leechEid] = 0.1;
+      // Replicate: spawn new leech at dead target's position
+      const leechOwner = Owner.playerId[leechEid];
+      const leechTypeId = UnitType.id[leechEid];
+      const leechTypeName = this.deps.unitTypeNames[leechTypeId];
+      if (leechTypeName && Position.x[entityId] > -900) {
+        this.deps.spawnUnit(this.deps.getWorld(), leechTypeName, leechOwner,
+          Position.x[entityId] + 2, Position.z[entityId] + 2);
+        if (leechOwner === 0) this.deps.selectionPanel.addMessage('Leech replicated!', '#88ff44');
+      }
     }
   }
 
@@ -1180,8 +1189,11 @@ export class AbilitySystem {
         const attackerOwner = Owner.playerId[attackerEntity];
         const originalOwner = Owner.playerId[targetEntity];
         if (originalOwner !== attackerOwner) {
-          // Store original owner for revert
-          if (!this.deviatedUnits.has(targetEntity)) {
+          // Store original owner for revert, or refresh timer if already deviated
+          const existing = this.deviatedUnits.get(targetEntity);
+          if (existing) {
+            existing.revertTick = this.deps.getTickCount() + 400;
+          } else {
             this.deviatedUnits.set(targetEntity, { originalOwner, revertTick: this.deps.getTickCount() + 400 });
           }
           Owner.playerId[targetEntity] = attackerOwner;

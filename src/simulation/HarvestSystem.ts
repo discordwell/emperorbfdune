@@ -131,6 +131,13 @@ export class HarvestSystem implements GameSystem {
     }
 
     for (const eid of entities) {
+      // Skip dead harvesters (in death animation)
+      if (Health.current[eid] <= 0) {
+        this.harvestTimers.delete(eid);
+        this.airlifting.delete(eid);
+        continue;
+      }
+
       const state = Harvester.state[eid];
 
       // Clean up airlift state if harvester left RETURNING

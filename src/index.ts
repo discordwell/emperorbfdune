@@ -1653,14 +1653,16 @@ async function main() {
           const uDef = gameRules.units.get(unitType);
           if (uDef?.infantry && productionSystem.isUpgraded(owner, `${ownerPrefix}Barracks`)) {
             if (hasComponent(world, Veterancy, eid) && Veterancy.rank[eid] < 1) {
-              combatSystem.addXp(eid, 1); // Applies rank + health bonus properly
+              // Use actual rank 1 threshold so unit reliably promotes
+              const threshold = uDef.veterancy?.[0]?.scoreThreshold ?? 1;
+              combatSystem.addXp(eid, threshold);
             }
           }
         }
       }
 
-      // Send to rally point if player has one set
-      if (owner === 0 && eid >= 0) {
+      // Send to rally point if player has one set (but not starport descending units)
+      if (owner === 0 && eid >= 0 && !fromStarport) {
         const rally = commandManager.getRallyPoint(0);
         if (rally) {
           MoveTarget.x[eid] = rally.x;
@@ -1820,6 +1822,15 @@ async function main() {
         Position.y[eid] = groundY;
         combatSystem.setSuppressed(eid, false);
         descendingUnits.delete(eid);
+        // Now safe to send to rally point (after descent completes)
+        if (Owner.playerId[eid] === 0) {
+          const rally = commandManager.getRallyPoint(0);
+          if (rally) {
+            MoveTarget.x[eid] = rally.x;
+            MoveTarget.z[eid] = rally.z;
+            MoveTarget.active[eid] = 1;
+          }
+        }
       }
     }
 

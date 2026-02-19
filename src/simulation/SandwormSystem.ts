@@ -300,6 +300,9 @@ export class SandwormSystem implements GameSystem {
           worm.x = nextX;
           worm.z = nextZ;
         }
+      } else {
+        // Arrived at destination — clear move target so rider can idle/heal
+        MoveTarget.active[worm.riderEid] = 0;
       }
     }
 

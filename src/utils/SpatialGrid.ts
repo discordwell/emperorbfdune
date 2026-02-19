@@ -6,6 +6,9 @@ export class SpatialGrid {
   private cellSize: number;
   private invCellSize: number;
   private cells = new Map<number, number[]>();
+  // Reusable result arrays to avoid GC pressure in hot loops
+  private nearbyResult: number[] = [];
+  private radiusResult: number[] = [];
 
   constructor(cellSize: number) {
     this.cellSize = cellSize;
@@ -33,11 +36,13 @@ export class SpatialGrid {
     cell.push(eid);
   }
 
-  /** Get all entities in the same and adjacent cells (3x3 neighborhood) */
+  /** Get all entities in the same and adjacent cells (3x3 neighborhood).
+   *  WARNING: returned array is reused between calls — do not store references. */
   getNearby(x: number, z: number): number[] {
     const cx = Math.floor(x * this.invCellSize);
     const cz = Math.floor(z * this.invCellSize);
-    const result: number[] = [];
+    const result = this.nearbyResult;
+    result.length = 0;
     for (let dz = -1; dz <= 1; dz++) {
       for (let dx = -1; dx <= 1; dx++) {
         const cell = this.cells.get(this.key(cx + dx, cz + dz));
@@ -51,12 +56,14 @@ export class SpatialGrid {
     return result;
   }
 
-  /** Get all entities within a radius (checks 3x3+ cells as needed) */
+  /** Get all entities within a radius (checks 3x3+ cells as needed).
+   *  WARNING: returned array is reused between calls — do not store references. */
   getInRadius(x: number, z: number, radius: number): number[] {
     const cellSpan = Math.ceil(radius * this.invCellSize);
     const cx = Math.floor(x * this.invCellSize);
     const cz = Math.floor(z * this.invCellSize);
-    const result: number[] = [];
+    const result = this.radiusResult;
+    result.length = 0;
     for (let dz = -cellSpan; dz <= cellSpan; dz++) {
       for (let dx = -cellSpan; dx <= cellSpan; dx++) {
         const cell = this.cells.get(this.key(cx + dx, cz + dz));
