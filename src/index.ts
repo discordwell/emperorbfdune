@@ -84,6 +84,7 @@ interface SaveData {
   fogExplored?: number[]; // RLE-encoded explored tiles
   superweaponCharge?: Array<{ playerId: number; palaceType: string; charge: number }>;
   victoryTick?: number;
+  controlGroups?: Record<number, number[]>;
 }
 
 // ID maps
@@ -1048,13 +1049,13 @@ async function main() {
       // Spawn free unit when building completes (e.g. Harvester from Refinery)
       if (def?.getUnitWhenBuilt) {
         const freeUnitName = def.getUnitWhenBuilt;
-        setTimeout(() => {
+        deferAction(duration, () => {
           const w = game.getWorld();
           const freeEid = spawnUnit(w, freeUnitName, 0, x + 3, z + 3);
           if (freeEid >= 0) {
             audioManager.getDialogManager()?.trigger('unitReady');
           }
-        }, duration * 40); // Match construction duration (40ms per tick at 25 TPS)
+        });
       }
     }
   });
@@ -1151,6 +1152,18 @@ async function main() {
     }
   });
 
+  // Tick-based deferred actions (replaces setTimeout for game-state operations)
+  const deferredActions: Array<{ tick: number; action: () => void }> = [];
+  function deferAction(delayTicks: number, action: () => void): void {
+    deferredActions.push({ tick: game.getTickCount() + delayTicks, action });
+  }
+
+  // Starport descent tracking (tick-based instead of setTimeout)
+  const descendingUnits = new Map<number, { startTick: number; duration: number }>();
+
+  // Death tilt animation tracking (tick-based instead of setTimeout)
+  const dyingTilts = new Map<number, { obj: THREE.Object3D; tiltDir: number; startTick: number; startY: number }>();
+
   const processedDeaths = new Set<number>();
   EventBus.on('unit:died', ({ entityId }) => {
     if (processedDeaths.has(entityId)) return;
@@ -1201,21 +1214,11 @@ async function main() {
       movement.invalidateAllPaths(); // Building removed — paths may have changed
     }
 
-    // Death animation: play explode clip if available, otherwise procedural tilt
+    // Death animation: play explode clip if available, otherwise procedural tilt (tick-based)
     const hasDeathClip = unitRenderer.playDeathAnim(entityId);
     const obj = unitRenderer.getEntityObject(entityId);
     if (obj && !isBuilding && !hasDeathClip) {
-      const tiltDir = Math.random() * Math.PI * 2;
-      let frame = 0;
-      const animateDeath = () => {
-        if (!obj.parent || frame >= 8) return;
-        frame++;
-        obj.rotation.x = Math.sin(tiltDir) * frame * 0.1;
-        obj.rotation.z = Math.cos(tiltDir) * frame * 0.1;
-        obj.position.y -= 0.05;
-        if (frame < 8) setTimeout(animateDeath, 50);
-      };
-      animateDeath();
+      dyingTilts.set(entityId, { obj, tiltDir: Math.random() * Math.PI * 2, startTick: game.getTickCount(), startY: obj.position.y });
     }
 
     // Clean up building from production prerequisites
@@ -1264,9 +1267,9 @@ async function main() {
       }
     }
 
-    setTimeout(() => {
-      try { removeEntity(world, entityId); } catch {}
-    }, 500);
+    deferAction(13, () => { // ~0.5 seconds at 25 TPS
+      try { removeEntity(game.getWorld(), entityId); } catch {}
+    });
   });
 
   // Veterancy promotion
@@ -1612,24 +1615,12 @@ async function main() {
       const z = baseZ! + (Math.random() - 0.5) * 10;
       const eid = spawnUnit(world, unitType, owner, x, z);
 
-      // Starport arrival: descent animation from above
+      // Starport arrival: descent animation from above (tick-based)
       if (fromStarport && eid >= 0) {
         Position.y[eid] = 15; // Start high
         MoveTarget.active[eid] = 0; // Don't move during descent
         combatSystem.setSuppressed(eid, true);
-        let frame = 0;
-        const descend = () => {
-          if (Health.current[eid] <= 0 || frame >= 30) {
-            Position.y[eid] = terrain.getHeightAt(Position.x[eid], Position.z[eid]) + 0.1;
-            combatSystem.setSuppressed(eid, false);
-            return;
-          }
-          frame++;
-          const groundY = terrain.getHeightAt(Position.x[eid], Position.z[eid]) + 0.1;
-          Position.y[eid] = groundY + (15 - groundY) * (1 - frame / 30); // Descend to ground
-          setTimeout(descend, 33); // ~30fps
-        };
-        descend();
+        descendingUnits.set(eid, { startTick: game.getTickCount(), duration: 25 }); // ~1 second descent
         effectsManager.spawnExplosion(starportX, 8, starportZ, 'small');
         if (owner === 0) {
           audioManager.playSfx('build');
@@ -1787,6 +1778,44 @@ async function main() {
   EventBus.on('game:tick', () => {
     processedDeaths.clear();
     const world = game.getWorld();
+    const currentTick = game.getTickCount();
+
+    // Process deferred actions (tick-based replacement for setTimeout)
+    for (let i = deferredActions.length - 1; i >= 0; i--) {
+      if (currentTick >= deferredActions[i].tick) {
+        deferredActions[i].action();
+        deferredActions.splice(i, 1);
+      }
+    }
+
+    // Process starport descent animations (tick-based replacement for setTimeout)
+    for (const [eid, desc] of descendingUnits) {
+      if (Health.current[eid] <= 0 || !hasComponent(world, Position, eid)) {
+        descendingUnits.delete(eid);
+        continue;
+      }
+      const elapsed = currentTick - desc.startTick;
+      const progress = Math.min(elapsed / desc.duration, 1);
+      const groundY = terrain.getHeightAt(Position.x[eid], Position.z[eid]) + 0.1;
+      Position.y[eid] = groundY + (15 - groundY) * (1 - progress);
+      if (progress >= 1) {
+        Position.y[eid] = groundY;
+        combatSystem.setSuppressed(eid, false);
+        descendingUnits.delete(eid);
+      }
+    }
+
+    // Process death tilt animations (tick-based replacement for setTimeout)
+    for (const [eid, tilt] of dyingTilts) {
+      const frame = currentTick - tilt.startTick + 1; // 1-indexed to match original code (frames 1-8)
+      if (!tilt.obj.parent || frame > 8) {
+        dyingTilts.delete(eid);
+        continue;
+      }
+      tilt.obj.rotation.x = Math.sin(tilt.tiltDir) * frame * 0.1;
+      tilt.obj.rotation.z = Math.cos(tilt.tiltDir) * frame * 0.1;
+      tilt.obj.position.y = tilt.startY - frame * 0.05; // Absolute position for tick-skip resilience
+    }
 
     productionSystem.update();
     productionSystem.updateStarportPrices();
@@ -2648,11 +2677,13 @@ async function main() {
   function buildSaveData(): SaveData {
     const w = game.getWorld();
     const entities: SavedEntity[] = [];
+    const eidToIndex = new Map<number, number>(); // entity ID → index in entities array
 
     // Save all units
     const allUnits = unitQuery(w);
     for (const eid of allUnits) {
       if (Health.current[eid] <= 0) continue;
+      eidToIndex.set(eid, entities.length);
       const se: SavedEntity = {
         x: Position.x[eid], z: Position.z[eid], y: Position.y[eid],
         rotY: Rotation.y[eid],
@@ -2668,7 +2699,7 @@ async function main() {
       if (hasComponent(w, Harvester, eid)) {
         se.harvester = {
           spice: Harvester.spiceCarried[eid], maxCap: Harvester.maxCapacity[eid],
-          state: Harvester.state[eid], refEid: 0,
+          state: Harvester.state[eid], refEid: 0, // Not used on restore; spawnUnit assigns nearest refinery
         };
       }
       // Save aircraft ammo
@@ -2695,6 +2726,7 @@ async function main() {
     const allBuildings = buildingQuery(w);
     for (const eid of allBuildings) {
       if (Health.current[eid] <= 0) continue;
+      eidToIndex.set(eid, entities.length);
       entities.push({
         x: Position.x[eid], z: Position.z[eid], y: Position.y[eid],
         rotY: Rotation.y[eid],
@@ -2730,6 +2762,17 @@ async function main() {
       fogExplored: fogOfWar.getExploredData(),
       superweaponCharge: superweaponSystem.getChargeState(),
       victoryTick: victorySystem.getTickCounter(),
+      controlGroups: (() => {
+        const cg: Record<number, number[]> = {};
+        for (const [key, eids] of selectionManager.getControlGroups()) {
+          const indices = eids
+            .filter(e => hasComponent(w, Health, e) && Health.current[e] > 0)
+            .map(e => eidToIndex.get(e))
+            .filter((idx): idx is number => idx !== undefined);
+          if (indices.length > 0) cg[key] = indices;
+        }
+        return Object.keys(cg).length > 0 ? cg : undefined;
+      })(),
     };
   }
 
@@ -2782,8 +2825,12 @@ async function main() {
     }
     terrain.updateSpiceVisuals();
 
+    // Index-to-entity-ID mapping for control group restoration
+    const indexToEid = new Map<number, number>();
+
     // Restore entities - buildings first (so refineries exist for harvesters)
-    for (const se of savedGame.entities) {
+    for (let idx = 0; idx < savedGame.entities.length; idx++) {
+      const se = savedGame.entities[idx];
       if (se.buildingTypeId !== undefined) {
         const bName = buildingTypeNames[se.buildingTypeId];
         if (!bName) continue;
@@ -2793,11 +2840,13 @@ async function main() {
           Health.current[eid] = se.hp;
           Position.y[eid] = se.y;
           Rotation.y[eid] = se.rotY;
+          indexToEid.set(idx, eid);
         }
       }
     }
     // Then units
-    for (const se of savedGame.entities) {
+    for (let idx = 0; idx < savedGame.entities.length; idx++) {
+      const se = savedGame.entities[idx];
       if (se.unitTypeId !== undefined) {
         const uName = unitTypeNames[se.unitTypeId];
         if (!uName) continue;
@@ -2807,6 +2856,7 @@ async function main() {
           Health.current[eid] = se.hp;
           Position.y[eid] = se.y;
           Rotation.y[eid] = se.rotY;
+          indexToEid.set(idx, eid);
           if (se.vet) {
             Veterancy.xp[eid] = se.vet.xp;
             Veterancy.rank[eid] = se.vet.rank;
@@ -2861,6 +2911,17 @@ async function main() {
     // Restore victory system tick counter
     if (savedGame.victoryTick !== undefined) {
       victorySystem.setTickCounter(savedGame.victoryTick);
+    }
+    // Restore control groups (remap saved indices to new entity IDs)
+    if (savedGame.controlGroups) {
+      const restoredGroups = new Map<number, number[]>();
+      for (const [key, indices] of Object.entries(savedGame.controlGroups)) {
+        const eids = indices
+          .map((idx: number) => indexToEid.get(idx))
+          .filter((eid): eid is number => eid !== undefined);
+        if (eids.length > 0) restoredGroups.set(Number(key), eids);
+      }
+      selectionManager.setControlGroups(restoredGroups);
     }
 
     console.log(`Restored ${savedGame.entities.length} entities from save (tick ${savedGame.tick})`);

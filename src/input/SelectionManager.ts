@@ -59,6 +59,10 @@ export class SelectionManager {
     return this.controlGroups;
   }
 
+  setControlGroups(groups: Map<number, number[]>): void {
+    this.controlGroups = groups;
+  }
+
   clearSelection(world: World): void {
     for (const eid of this.selectedEntities) {
       Selectable.selected[eid] = 0;
