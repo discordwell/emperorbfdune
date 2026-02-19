@@ -1644,6 +1644,8 @@ async function main() {
     effectsManager.updateWormVisuals(sandwormSystem.getWorms(), 40);
     // Flush pending spice visual changes from external sources (sandworms, etc.)
     if (game.getTickCount() % 50 === 0) terrain.flushSpiceVisuals();
+    // Day/night cycle: update lighting every second
+    if (game.getTickCount() % 25 === 0) scene.updateDayNightCycle(game.getTickCount());
     damageNumbers.update();
     // Clean up stale bloom markers (TTL: 300 ticks = 12 seconds)
     for (const [key, marker] of bloomMarkers) {

@@ -31,6 +31,8 @@ export class SceneManager implements RenderSystem {
 
   // Sun light for shadow tracking
   private sunLight: THREE.DirectionalLight | null = null;
+  private ambientLight: THREE.AmbientLight | null = null;
+  private hemiLight: THREE.HemisphereLight | null = null;
 
   // Map bounds for camera clamping (world units)
   private mapBoundsX = 128 * 2;
@@ -88,8 +90,8 @@ export class SceneManager implements RenderSystem {
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     // Lighting - desert sun
-    const ambientLight = new THREE.AmbientLight(0xffe4b5, 0.4);
-    this.scene.add(ambientLight);
+    this.ambientLight = new THREE.AmbientLight(0xffe4b5, 0.4);
+    this.scene.add(this.ambientLight);
 
     this.sunLight = new THREE.DirectionalLight(0xffeedd, 1.2);
     this.sunLight.position.set(100, 150, 80);
@@ -104,8 +106,8 @@ export class SceneManager implements RenderSystem {
     this.scene.add(this.sunLight);
 
     // Hemisphere light for ambient sky/ground color
-    const hemiLight = new THREE.HemisphereLight(0x87CEEB, 0xC2B280, 0.3);
-    this.scene.add(hemiLight);
+    this.hemiLight = new THREE.HemisphereLight(0x87CEEB, 0xC2B280, 0.3);
+    this.scene.add(this.hemiLight);
 
     // Drifting sand particles
     this.createSandParticles();
@@ -280,6 +282,55 @@ export class SceneManager implements RenderSystem {
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
   };
+
+  /**
+   * Subtle ambient lighting shift based on game time.
+   * Full cycle = 15000 ticks (~10 minutes).
+   * Stays bright enough for clear unit identification at all times.
+   * Dawn=warm gold, Midday=bright white, Dusk=orange, Night=cool blue-tinted.
+   */
+  updateDayNightCycle(tick: number): void {
+    const CYCLE_LENGTH = 15000;
+    const phase = (tick % CYCLE_LENGTH) / CYCLE_LENGTH; // 0-1
+
+    // Smooth cosine: 1.0 at midday (phase 0.25), -1.0 at midnight (phase 0.75)
+    const sunPhase = Math.cos((phase - 0.25) * Math.PI * 2);
+
+    // Sun intensity: subtle range 0.9 to 1.2 (never too dark)
+    const sunIntensity = 1.05 + sunPhase * 0.15;
+
+    // Ambient: 0.3 to 0.45
+    const ambIntensity = 0.37 + sunPhase * 0.08;
+
+    // Color tint: subtle shift - always near desert-white, with slight hue changes
+    // Base desert color: R=1.0 G=0.93 B=0.85
+    const warmth = Math.max(0, sunPhase); // 0-1, higher = warmer
+    const coolness = Math.max(0, -sunPhase); // 0-1, higher = cooler
+
+    // Dawn/dusk detection for golden hour tinting
+    const dawnDusk = Math.max(0, 1 - Math.abs(sunPhase) * 2.5); // peaks at transitions
+
+    const sunR = 1.0;
+    const sunG = 0.93 - coolness * 0.08 + dawnDusk * 0.02;
+    const sunB = 0.85 - coolness * 0.05 - dawnDusk * 0.15 + warmth * 0.02;
+
+    if (this.sunLight) {
+      this.sunLight.intensity = sunIntensity;
+      this.sunLight.color.setRGB(sunR, sunG, sunB);
+    }
+    if (this.ambientLight) {
+      this.ambientLight.intensity = ambIntensity;
+      // Ambient picks up slight cool/warm tint
+      this.ambientLight.color.setRGB(
+        1.0 - coolness * 0.05,
+        0.9 - coolness * 0.05 + dawnDusk * 0.03,
+        0.75 + coolness * 0.1 - dawnDusk * 0.1
+      );
+    }
+    if (this.hemiLight) {
+      this.hemiLight.intensity = 0.25 + sunPhase * 0.05;
+    }
+  }
 
   dispose(): void {
     window.removeEventListener('resize', this.onResize);
