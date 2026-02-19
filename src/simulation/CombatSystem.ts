@@ -33,6 +33,8 @@ export class CombatSystem implements GameSystem {
   private stealthedEntities = new Set<number>();
   // Guard positions: units return here after combat
   private guardPositions = new Map<number, { x: number; z: number }>();
+  // Escort targets: units follow and protect this entity
+  private escortTargets = new Map<number, number>(); // escorter eid -> target eid
   // Faction prefix per player (for faction-specific damage bonuses)
   private playerFactions = new Map<number, string>();
   // Suppressed entities: skip combat entirely (rearming aircraft, etc.)
@@ -88,6 +90,18 @@ export class CombatSystem implements GameSystem {
     this.guardPositions.delete(eid);
   }
 
+  setEscortTarget(eid: number, targetEid: number): void {
+    this.escortTargets.set(eid, targetEid);
+  }
+
+  clearEscortTarget(eid: number): void {
+    this.escortTargets.delete(eid);
+  }
+
+  getEscortTarget(eid: number): number | undefined {
+    return this.escortTargets.get(eid);
+  }
+
   init(_world: World): void {
     this.armourTypes = this.rules.armourTypes;
   }
@@ -102,6 +116,11 @@ export class CombatSystem implements GameSystem {
     this.attackMoveDestinations.delete(eid);
     this.stances.delete(eid);
     this.guardPositions.delete(eid);
+    this.escortTargets.delete(eid);
+    // Clear any units escorting this entity
+    for (const [escorter, target] of this.escortTargets) {
+      if (target === eid) this.escortTargets.delete(escorter);
+    }
   }
 
   setAttackMove(eids: number[]): void {
@@ -123,6 +142,34 @@ export class CombatSystem implements GameSystem {
 
   update(world: World, _dt: number): void {
     this.world = world;
+
+    // Update escort targets: follow the escorted unit
+    for (const [escorter, targetEid] of this.escortTargets) {
+      if (!hasComponent(world, Health, targetEid) || Health.current[targetEid] <= 0) {
+        this.escortTargets.delete(escorter);
+        this.guardPositions.delete(escorter);
+        continue;
+      }
+      // Update guard position to target's current position
+      const tx = Position.x[targetEid];
+      const tz = Position.z[targetEid];
+      this.guardPositions.set(escorter, { x: tx, z: tz });
+
+      // If not in combat and too far from target, follow
+      if (hasComponent(world, MoveTarget, escorter) &&
+          hasComponent(world, AttackTarget, escorter) &&
+          AttackTarget.active[escorter] === 0 &&
+          MoveTarget.active[escorter] === 0) {
+        const dx = Position.x[escorter] - tx;
+        const dz = Position.z[escorter] - tz;
+        if (dx * dx + dz * dz > 25) { // Follow if > 5 units away
+          MoveTarget.x[escorter] = tx + (Math.random() - 0.5) * 3;
+          MoveTarget.z[escorter] = tz + (Math.random() - 0.5) * 3;
+          MoveTarget.active[escorter] = 1;
+        }
+      }
+    }
+
     const entities = combatQuery(world);
 
     for (const eid of entities) {

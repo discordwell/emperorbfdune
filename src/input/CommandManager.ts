@@ -113,11 +113,20 @@ export class CommandManager {
 
     const shiftHeld = e.shiftKey;
 
-    // Check if right-clicked on an enemy unit
+    // Check if right-clicked on a unit
     const targetEid = this.unitRenderer.getEntityAtScreen(e.clientX, e.clientY);
     if (targetEid !== null) {
-      this.issueAttackCommand(selected, targetEid);
-      this.audioManager?.playUnitVoiceOrSfx('attack', this.getSelectedCategory(selected), selected[0]);
+      const targetOwner = Owner.playerId[targetEid];
+      const selectedOwner = Owner.playerId[selected[0]];
+      if (targetOwner === selectedOwner && !selected.includes(targetEid)) {
+        // Right-click on friendly unit = escort
+        this.issueEscortCommand(selected, targetEid);
+        this.audioManager?.playUnitVoiceOrSfx('move', this.getSelectedCategory(selected), selected[0]);
+      } else if (targetOwner !== selectedOwner) {
+        // Right-click on enemy = attack
+        this.issueAttackCommand(selected, targetEid);
+        this.audioManager?.playUnitVoiceOrSfx('attack', this.getSelectedCategory(selected), selected[0]);
+      }
       return;
     }
 
@@ -221,11 +230,12 @@ export class CommandManager {
   };
 
   issueMoveCommand(entityIds: number[], x: number, z: number): void {
-    // Clear waypoints, patrols, guard positions, and attack-move state
+    // Clear waypoints, patrols, guard positions, escort, and attack-move state
     for (const eid of entityIds) {
       this.waypointQueues.delete(eid);
       this.patrolEntities.delete(eid);
       this.combatSystem?.clearGuardPosition(eid);
+      this.combatSystem?.clearEscortTarget(eid);
     }
     this.combatSystem?.clearAttackMove(entityIds);
 
@@ -330,10 +340,27 @@ export class CommandManager {
       MoveTarget.active[eid] = 0;
       this.waypointQueues.delete(eid);
       this.patrolEntities.delete(eid);
+      this.combatSystem?.clearEscortTarget(eid);
       // Store current position as guard point — unit returns here after combat
       this.combatSystem?.setGuardPosition(eid, Position.x[eid], Position.z[eid]);
     }
     this.combatSystem?.clearAttackMove(entityIds);
     this.audioManager?.playSfx('select');
+  }
+
+  private issueEscortCommand(entityIds: number[], targetEid: number): void {
+    for (const eid of entityIds) {
+      this.waypointQueues.delete(eid);
+      this.patrolEntities.delete(eid);
+      this.combatSystem?.clearAttackMove([eid]);
+      this.combatSystem?.setEscortTarget(eid, targetEid);
+      // Set initial guard position to target's current position
+      this.combatSystem?.setGuardPosition(eid, Position.x[targetEid], Position.z[targetEid]);
+      // Start moving toward the target
+      MoveTarget.x[eid] = Position.x[targetEid] + (Math.random() - 0.5) * 3;
+      MoveTarget.z[eid] = Position.z[targetEid] + (Math.random() - 0.5) * 3;
+      MoveTarget.active[eid] = 1;
+      AttackTarget.active[eid] = 0;
+    }
   }
 }

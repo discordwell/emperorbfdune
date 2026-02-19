@@ -245,6 +245,16 @@ export class AIPlayer implements GameSystem {
     // Scale difficulty over time (ramps up over 5 minutes)
     this.difficulty = 1.0 + Math.min(2.0, this.tickCounter / 7500);
 
+    // Difficulty-based income bonus/penalty (every 10 seconds)
+    if (t % 250 === 0 && this.harvestSystem) {
+      if (this.difficultyLevel === 'hard') {
+        this.harvestSystem.addSolaris(this.playerId, Math.floor(50 * this.difficulty));
+      } else if (this.difficultyLevel === 'easy') {
+        // Easy AI gets slower income ramp
+        this.harvestSystem.addSolaris(this.playerId, 10);
+      }
+    }
+
     // Building decisions
     if (this.tickCounter - this.lastBuildTick > this.buildCooldown && this.production && this.harvestSystem) {
       this.makeBuildDecision(world);
@@ -1367,6 +1377,8 @@ export class AIPlayer implements GameSystem {
           MoveTarget.z[eid] = target.z + Math.sin(angle1 + 1.57) * spread;
           MoveTarget.active[eid] = 1;
         }
+        // Set attack-move so units engage enemies while marching
+        this.combatSystem.setAttackMove([...group1]);
         if (group2.length > 0) {
           const flankDist = 30;
           for (const eid of group2) {
@@ -1374,6 +1386,7 @@ export class AIPlayer implements GameSystem {
             MoveTarget.z[eid] = target.z + Math.sin(angle2) * flankDist + randomFloat(-8, 8);
             MoveTarget.active[eid] = 1;
           }
+          this.combatSystem.setAttackMove([...group2]);
         }
       } else {
         // Multi-front: assign units to closest objective to minimize travel
@@ -1411,6 +1424,7 @@ export class AIPlayer implements GameSystem {
             MoveTarget.z[eid] = obj.z + Math.sin(approachAngle + 1.57) * spread;
             MoveTarget.active[eid] = 1;
           }
+          this.combatSystem.setAttackMove([...group]);
         }
       }
 

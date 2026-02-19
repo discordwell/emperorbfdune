@@ -36,6 +36,9 @@ export class FogOfWar {
   private buildingViewRange = 8;
 
   private enabled = true;
+  private tickCounter = 0;
+  private lastPositionHash = 0;
+  private updateInterval = 5; // Only recalculate every 5 ticks (200ms)
 
   constructor(sceneManager: SceneManager, terrain: TerrainRenderer, localPlayerId = 0) {
     this.sceneManager = sceneManager;
@@ -141,6 +144,36 @@ export class FogOfWar {
   update(world: World): void {
     if (!this.enabled) return;
 
+    // Throttle: only check for changes every N ticks
+    this.tickCounter++;
+    if (this.tickCounter < this.updateInterval) return;
+    this.tickCounter = 0;
+
+    // Quick position hash to detect if any units moved
+    let hash = 0;
+    let entityCount = 0;
+    const units = unitQuery(world);
+    for (const eid of units) {
+      if (Owner.playerId[eid] !== this.localPlayerId) continue;
+      if (Health.current[eid] <= 0) continue;
+      // Use tile coords for hash (position changes within same tile don't matter)
+      const tile = worldToTile(Position.x[eid], Position.z[eid]);
+      hash = (hash * 31 + tile.tx * 997 + tile.tz * 1009 + eid) | 0;
+      entityCount++;
+    }
+    const buildings = buildingQuery(world);
+    for (const eid of buildings) {
+      if (Owner.playerId[eid] !== this.localPlayerId) continue;
+      if (Health.current[eid] <= 0) continue;
+      hash = (hash * 31 + eid * 503) | 0;
+      entityCount++;
+    }
+    hash = (hash * 31 + entityCount) | 0;
+
+    // Skip if nothing changed
+    if (hash === this.lastPositionHash) return;
+    this.lastPositionHash = hash;
+
     const tileCount = this.mapW * this.mapH;
 
     // Reset visibility (keep explored state)
@@ -149,7 +182,6 @@ export class FogOfWar {
     }
 
     // Reveal around player units
-    const units = unitQuery(world);
     for (const eid of units) {
       if (Owner.playerId[eid] !== this.localPlayerId) continue;
       if (Health.current[eid] <= 0) continue;
@@ -159,7 +191,6 @@ export class FogOfWar {
     }
 
     // Reveal around player buildings
-    const buildings = buildingQuery(world);
     for (const eid of buildings) {
       if (Owner.playerId[eid] !== this.localPlayerId) continue;
       if (Health.current[eid] <= 0) continue;
