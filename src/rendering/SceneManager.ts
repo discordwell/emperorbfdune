@@ -230,7 +230,8 @@ export class SceneManager implements RenderSystem {
   }
 
   rotateCamera(delta: number): void {
-    this.cameraRotation += delta;
+    const TWO_PI = Math.PI * 2;
+    this.cameraRotation = ((this.cameraRotation + delta) % TWO_PI + TWO_PI) % TWO_PI;
     this.updateCameraPosition();
   }
 

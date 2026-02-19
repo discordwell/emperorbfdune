@@ -200,15 +200,7 @@ export class MinimapRenderer {
       this.ctx.fillStyle = '#aa3333';
       this.ctx.fillText('Build Outpost', 100, 112);
       this.ctx.textAlign = 'start';
-      // Still draw camera viewport
-      const camTarget = this.sceneManager.cameraTarget;
-      if (camTarget) {
-        const camX = camTarget.x * (200 / (mapW * TILE_SIZE));
-        const camZ = camTarget.z * (200 / (mapH * TILE_SIZE));
-        this.ctx.strokeStyle = '#fff';
-        this.ctx.lineWidth = 1;
-        this.ctx.strokeRect(camX - 15, camZ - 10, 30, 20);
-      }
+      // Don't show camera viewport when radar is disabled
       return;
     }
 

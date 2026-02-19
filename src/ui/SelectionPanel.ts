@@ -168,6 +168,8 @@ export class SelectionPanel {
 
   private renderSingle(eid: number): void {
     if (!this.world) return;
+    // Don't render info for dead entities (prevents sell/repair on corpses)
+    if (Health.current[eid] <= 0) return;
     const isBuilding = hasComponent(this.world, BuildingType, eid);
     const isUnit = hasComponent(this.world, UnitType, eid);
 
@@ -448,6 +450,7 @@ export class SelectionPanel {
     const typeCounts = new Map<string, number>();
     let totalHp = 0, totalMaxHp = 0;
     for (const eid of this.selectedEntities) {
+      if (Health.current[eid] <= 0) continue; // Skip dead entities
       const isUnit = hasComponent(this.world, UnitType, eid);
       let name = 'Unit';
       if (isUnit) {
@@ -473,7 +476,7 @@ export class SelectionPanel {
 
     // Build portrait grid (max 20 shown)
     let gridHtml = '';
-    const shown = this.selectedEntities.slice(0, 20);
+    const shown = this.selectedEntities.filter(eid => Health.current[eid] > 0).slice(0, 20);
     for (const eid of shown) {
       const isUnit = hasComponent(this.world, UnitType, eid);
       let name = 'Unit';
