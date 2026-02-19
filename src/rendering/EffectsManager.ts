@@ -101,6 +101,10 @@ export class EffectsManager {
   private dustGeo: THREE.SphereGeometry | null = null;
   // Rally line from building to rally point
   private rallyLine: THREE.Line | null = null;
+  // Spice shimmer particles
+  private spiceShimmerParticles: { mesh: THREE.Mesh; life: number; baseY: number }[] = [];
+  private shimmerGeo: THREE.PlaneGeometry | null = null;
+  private shimmerTickCounter = 0;
 
   // Projectile trail particle system (GPU-efficient single Points object)
   private static readonly MAX_TRAIL_PARTICLES = 500;
@@ -872,6 +876,92 @@ export class EffectsManager {
     );
     this.sceneManager.scene.add(mesh);
     this.dustPuffs.push({ mesh, life: 0.8, vy: 0.3 + Math.random() * 0.3 });
+  }
+
+  /** Update spice shimmer: periodically spawn sparkle particles over spice fields */
+  updateSpiceShimmer(terrain: import('../rendering/TerrainRenderer').TerrainRenderer): void {
+    this.shimmerTickCounter++;
+    if (this.shimmerTickCounter % 3 !== 0) return; // Every 3 ticks
+
+    // Cap total shimmer particles
+    if (this.spiceShimmerParticles.length > 30) return;
+
+    // Randomly sample a few tiles to see if they have spice
+    const mw = terrain.getMapWidth(), mh = terrain.getMapHeight();
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const tx = Math.floor(Math.random() * mw);
+      const tz = Math.floor(Math.random() * mh);
+      const spice = terrain.getSpice(tx, tz);
+      if (spice <= 0) continue;
+
+      // Only spawn if near camera (within ~40 world units)
+      const cam = this.sceneManager.cameraTarget;
+      const wx = tx * 2 + 1; // TILE_SIZE=2
+      const wz = tz * 2 + 1;
+      const dx = wx - cam.x, dz = wz - cam.z;
+      if (dx * dx + dz * dz > 1600) continue; // 40^2
+
+      if (!this.shimmerGeo) this.shimmerGeo = new THREE.PlaneGeometry(0.15, 0.15);
+      const brightness = 0.6 + spice * 0.4;
+      const mat = new THREE.MeshBasicMaterial({
+        color: new THREE.Color(1.0 * brightness, 0.7 * brightness, 0.2 * brightness),
+        transparent: true, opacity: 0.8, depthWrite: false, side: THREE.DoubleSide,
+      });
+      const mesh = new THREE.Mesh(this.shimmerGeo, mat);
+      mesh.position.set(
+        wx + (Math.random() - 0.5) * 1.8,
+        0.3 + Math.random() * 0.5,
+        wz + (Math.random() - 0.5) * 1.8,
+      );
+      mesh.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, 0);
+      this.sceneManager.scene.add(mesh);
+      this.spiceShimmerParticles.push({ mesh, life: 0.8 + Math.random() * 0.6, baseY: mesh.position.y });
+    }
+
+    // Update existing shimmer particles
+    for (let i = this.spiceShimmerParticles.length - 1; i >= 0; i--) {
+      const p = this.spiceShimmerParticles[i];
+      p.life -= 0.04; // ~1 second at 25 TPS
+      if (p.life <= 0) {
+        this.sceneManager.scene.remove(p.mesh);
+        (p.mesh.material as THREE.Material).dispose();
+        this.spiceShimmerParticles.splice(i, 1);
+      } else {
+        p.mesh.position.y = p.baseY + Math.sin(p.life * 8) * 0.1;
+        (p.mesh.material as THREE.MeshBasicMaterial).opacity = Math.min(0.8, p.life * 2);
+        p.mesh.rotation.y += 0.05;
+      }
+    }
+  }
+
+  /** Gold star burst for unit promotion */
+  spawnPromotionBurst(x: number, y: number, z: number): void {
+    const count = 8;
+    for (let i = 0; i < count; i++) {
+      const angle = (i / count) * Math.PI * 2;
+      const speed = 2 + Math.random() * 2;
+      const geo = new THREE.PlaneGeometry(0.2, 0.2);
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0xffd700, transparent: true, opacity: 1.0, depthWrite: false, side: THREE.DoubleSide,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set(x, y + 1.5, z);
+      this.sceneManager.scene.add(mesh);
+      const vx = Math.cos(angle) * speed;
+      const vz = Math.sin(angle) * speed;
+      this.explosions.push({
+        particles: [{
+          mesh, velocity: new THREE.Vector3(vx, 3 + Math.random() * 2, vz),
+          life: 0.8, maxLife: 0.8, gravity: 6,
+        }],
+        flash: null, flashLife: 0,
+      });
+    }
+    // Central flash
+    const flash = new THREE.PointLight(0xffd700, 8, 10);
+    flash.position.set(x, y + 2, z);
+    this.sceneManager.scene.add(flash);
+    this.explosions.push({ particles: [], flash, flashLife: 0.3 });
   }
 
   setRallyPoint(playerId: number, x: number, z: number): void {

@@ -1105,8 +1105,8 @@ async function main() {
       selectionPanel.addMessage(`Unit promoted to ${rankNames[rank]}!`, '#ffd700');
       audioManager.playSfx('select');
     }
-    // Visual effect at unit position
-    effectsManager.spawnExplosion(Position.x[entityId], 0.5, Position.z[entityId], 'small');
+    // Gold star burst at unit position
+    effectsManager.spawnPromotionBurst(Position.x[entityId], 0, Position.z[entityId]);
   });
 
   // Sandworm events
@@ -1649,6 +1649,9 @@ async function main() {
         effectsManager.clearWaypointLines();
       }
     }
+
+    // Spice shimmer particles over spice fields
+    effectsManager.updateSpiceShimmer(terrain);
 
     buildingPlacement.updateOccupiedTiles(world);
     pathfinder.updateBlockedTiles(buildingPlacement.getOccupiedTiles());
