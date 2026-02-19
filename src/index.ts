@@ -342,6 +342,7 @@ async function main() {
   const movement = new MovementSystem(pathfinder);
   const combatSystem = new CombatSystem(gameRules);
   commandManager.setCombatSystem(combatSystem);
+  commandManager.setMoveMarkerFn((x, z) => effectsManager.spawnMoveMarker(x, z));
   const harvestSystem = new HarvestSystem(terrain);
   commandManager.setForceReturnFn((eid) => harvestSystem.forceReturn(eid));
   const productionSystem = new ProductionSystem(gameRules, harvestSystem);

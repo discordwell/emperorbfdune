@@ -18,6 +18,7 @@ export class CommandManager {
   private world: any = null;
 
   private commandMode: CommandMode = 'normal';
+  private moveMarkerFn: ((x: number, z: number) => void) | null = null;
   private unitClassifier: ((eid: number) => UnitCategory) | null = null;
   private forceReturnFn: ((eid: number) => void) | null = null;
 
@@ -43,6 +44,10 @@ export class CommandManager {
 
   setCombatSystem(combat: CombatSystem): void {
     this.combatSystem = combat;
+  }
+
+  setMoveMarkerFn(fn: (x: number, z: number) => void): void {
+    this.moveMarkerFn = fn;
   }
 
   setForceReturnFn(fn: (eid: number) => void): void {
@@ -289,6 +294,7 @@ export class CommandManager {
     }
 
     EventBus.emit('unit:move', { entityIds: [...entityIds], x, z });
+    this.moveMarkerFn?.(x, z);
   }
 
   private addWaypoint(entityIds: number[], x: number, z: number): void {

@@ -86,7 +86,8 @@ export class EffectsManager {
   private explosions: Explosion[] = [];
   private projectiles: Projectile[] = [];
   private beams: Beam[] = [];
-  private wreckages: THREE.Mesh[] = [];
+  private wreckages: { mesh: THREE.Mesh; age: number; maxAge: number }[] = [];
+  private moveMarkers: { mesh: THREE.Mesh; age: number }[] = [];
   private wormVisuals = new Map<number, WormVisual>();
   // Rally point markers per player
   private rallyMarkers = new Map<number, THREE.Group>();
@@ -416,6 +417,19 @@ export class EffectsManager {
     this.explosions.push({ particles, flash, flashLife: 0.15 });
   }
 
+  /** Spawn a brief move order marker on the ground */
+  spawnMoveMarker(x: number, z: number): void {
+    const geo = new THREE.RingGeometry(0.3, 0.6, 16);
+    geo.rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0x44ff44, transparent: true, opacity: 0.7, side: THREE.DoubleSide,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(x, 0.15, z);
+    this.sceneManager.scene.add(mesh);
+    this.moveMarkers.push({ mesh, age: 0 });
+  }
+
   spawnWreckage(x: number, y: number, z: number, isBuilding: boolean): void {
     const size = isBuilding ? 2.5 : 1.0;
     const geo = new THREE.BoxGeometry(
@@ -423,21 +437,12 @@ export class EffectsManager {
       size * 0.3,
       size * (0.5 + Math.random() * 0.5)
     );
-    const mat = new THREE.MeshLambertMaterial({ color: 0x222222 });
+    const mat = new THREE.MeshLambertMaterial({ color: 0x222222, transparent: true, opacity: 1.0 });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(x, y + size * 0.15, z);
     mesh.rotation.y = Math.random() * Math.PI * 2;
     this.sceneManager.scene.add(mesh);
-    this.wreckages.push(mesh);
-
-    // Auto-remove wreckage after 30 seconds
-    setTimeout(() => {
-      this.sceneManager.scene.remove(mesh);
-      geo.dispose();
-      mat.dispose();
-      const idx = this.wreckages.indexOf(mesh);
-      if (idx >= 0) this.wreckages.splice(idx, 1);
-    }, 30000);
+    this.wreckages.push({ mesh, age: 0, maxAge: 750 }); // 750 ticks = 30 seconds at 25 TPS
   }
 
   spawnProjectile(
@@ -781,6 +786,42 @@ export class EffectsManager {
 
       if (allDead && !explosion.flash) {
         this.explosions.splice(i, 1);
+      }
+    }
+
+    // Animate move markers (expand + fade out over ~0.5s = 12 ticks)
+    for (let i = this.moveMarkers.length - 1; i >= 0; i--) {
+      const m = this.moveMarkers[i];
+      m.age++;
+      const t = m.age / 12;
+      if (t >= 1) {
+        this.sceneManager.scene.remove(m.mesh);
+        m.mesh.geometry.dispose();
+        (m.mesh.material as THREE.Material).dispose();
+        this.moveMarkers.splice(i, 1);
+      } else {
+        const scale = 1 + t * 2.5;
+        m.mesh.scale.set(scale, 1, scale);
+        (m.mesh.material as THREE.MeshBasicMaterial).opacity = 0.7 * (1 - t);
+      }
+    }
+
+    // Animate wreckages (fade out during last 20% of life, sink into ground)
+    for (let i = this.wreckages.length - 1; i >= 0; i--) {
+      const w = this.wreckages[i];
+      w.age++;
+      if (w.age >= w.maxAge) {
+        this.sceneManager.scene.remove(w.mesh);
+        w.mesh.geometry.dispose();
+        (w.mesh.material as THREE.Material).dispose();
+        this.wreckages.splice(i, 1);
+      } else {
+        const fadeStart = w.maxAge * 0.8;
+        if (w.age > fadeStart) {
+          const fadeT = (w.age - fadeStart) / (w.maxAge - fadeStart);
+          (w.mesh.material as THREE.MeshBasicMaterial).opacity = 1 - fadeT;
+          w.mesh.position.y -= 0.003; // Slowly sink into sand
+        }
       }
     }
 

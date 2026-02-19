@@ -22,6 +22,8 @@ export class SelectionManager {
 
   // Control groups (Ctrl+1-9 to assign, 1-9 to recall)
   private controlGroups = new Map<number, number[]>(); // key 1-9 -> entity IDs
+  private lastGroupNum = -1;
+  private lastGroupTime = 0;
 
   // Double-click tracking
   private lastClickTime = 0;
@@ -286,7 +288,7 @@ export class SelectionManager {
         }
         e.preventDefault();
       } else {
-        // Recall group
+        // Recall group - double-tap centers camera on the group
         const group = this.controlGroups.get(groupNum);
         if (group && group.length > 0) {
           const world = (window as any).game?.getWorld();
@@ -297,7 +299,22 @@ export class SelectionManager {
             });
             this.controlGroups.set(groupNum, alive);
             if (alive.length > 0) {
+              const now = Date.now();
+              const isDoubleTap = this.lastGroupNum === groupNum && now - this.lastGroupTime < 400;
+              this.lastGroupNum = groupNum;
+              this.lastGroupTime = now;
+
               this.selectEntities(world, alive);
+
+              // Double-tap: center camera on group center of mass
+              if (isDoubleTap) {
+                let cx = 0, cz = 0;
+                for (const eid of alive) {
+                  cx += Position.x[eid];
+                  cz += Position.z[eid];
+                }
+                this.sceneManager.panTo(cx / alive.length, cz / alive.length);
+              }
             }
           }
         }

@@ -1,6 +1,6 @@
 import {
   Position, Health, Owner, UnitType, BuildingType, Veterancy,
-  Combat, Armour, Speed,
+  Combat, Armour, Speed, Harvester,
   hasComponent, type World,
 } from '../core/ECS';
 import type { GameRules } from '../config/RulesParser';
@@ -174,6 +174,28 @@ export class SelectionPanel {
       if (tags.length > 0) roleHtml = `<div style="font-size:10px;margin-bottom:2px;">${tags.join(' ')}</div>`;
     }
 
+    // Harvester spice load and state display
+    let harvesterHtml = '';
+    if (isUnit && hasComponent(this.world, Harvester, eid)) {
+      const carried = Harvester.spiceCarried[eid];
+      const maxCap = Harvester.maxCapacity[eid];
+      const loadPct = maxCap > 0 ? Math.round((carried / maxCap) * 100) : 0;
+      const stateNames = ['Idle', 'Moving to Spice', 'Harvesting', 'Returning', 'Unloading'];
+      const stateColors = ['#888', '#ff8', '#FFD700', '#4af', '#4f4'];
+      const state = Harvester.state[eid];
+      harvesterHtml = `
+        <div style="margin-bottom:3px;">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:1px;">
+            <span style="font-size:10px;color:#FFD700;">Spice Load:</span>
+            <div style="flex:1;height:5px;background:#333;border-radius:2px;overflow:hidden;">
+              <div style="height:100%;width:${loadPct}%;background:#FFD700;"></div>
+            </div>
+            <span style="font-size:10px;color:#FFD700;">${loadPct}%</span>
+          </div>
+          <span style="font-size:10px;color:${stateColors[state] ?? '#888'};">${stateNames[state] ?? 'Unknown'}</span>
+        </div>`;
+    }
+
     // Stats row
     let statsHtml = '';
     const statStyle = 'display:inline-block;margin-right:12px;font-size:11px;';
@@ -258,6 +280,7 @@ export class SelectionPanel {
           </div>
           <span style="font-size:11px;color:${hpColor};">${Math.ceil(hp)}/${maxHp}</span>
         </div>
+        ${harvesterHtml}
         <div>${statsHtml}</div>
         ${stanceHtml ? `<div style="margin-top:2px;">${stanceHtml}</div>` : ''}
       </div>
