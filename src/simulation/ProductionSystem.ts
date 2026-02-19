@@ -171,6 +171,33 @@ export class ProductionSystem {
     return false;
   }
 
+  /** Count buildings with a given suffix for production speed bonuses */
+  private countBuildingSuffix(playerId: number, suffix: string): number {
+    const owned = this.playerBuildings.get(playerId);
+    if (!owned) return 0;
+    let total = 0;
+    for (const [bType, count] of owned) {
+      if (bType.endsWith(suffix) && count > 0) total += count;
+    }
+    return total;
+  }
+
+  /** Get production speed multiplier from multiple factories */
+  private getFactorySpeedBonus(playerId: number, queueType: 'building' | 'infantry' | 'vehicle'): number {
+    let count: number;
+    if (queueType === 'building') {
+      count = this.countBuildingSuffix(playerId, 'ConYard');
+    } else if (queueType === 'infantry') {
+      count = this.countBuildingSuffix(playerId, 'Barracks');
+    } else {
+      // Vehicle: count both Factory and Heavy Factory variants
+      count = this.countBuildingSuffix(playerId, 'Factory');
+    }
+    // Diminishing returns: 1st factory = 1x, 2nd = +0.5x, 3rd+ = +0.25x each
+    if (count <= 1) return 1.0;
+    return 1.0 + 0.5 + (count - 2) * 0.25;
+  }
+
   addPlayerBuilding(playerId: number, buildingType: string): void {
     if (!this.playerBuildings.has(playerId)) {
       this.playerBuildings.set(playerId, new Map());
@@ -414,7 +441,7 @@ export class ProductionSystem {
     for (const [playerId, queue] of this.buildingQueues) {
       if (queue.length === 0) continue;
       const item = queue[0];
-      const mult = this.powerMultipliers.get(playerId) ?? 1.0;
+      const mult = (this.powerMultipliers.get(playerId) ?? 1.0) * this.getFactorySpeedBonus(playerId, 'building');
       item.elapsed += mult;
       if (item.elapsed >= item.totalTime) {
         queue.shift();
@@ -426,7 +453,7 @@ export class ProductionSystem {
     for (const [playerId, queue] of this.infantryQueues) {
       if (queue.length === 0) continue;
       const item = queue[0];
-      const mult = this.powerMultipliers.get(playerId) ?? 1.0;
+      const mult = (this.powerMultipliers.get(playerId) ?? 1.0) * this.getFactorySpeedBonus(playerId, 'infantry');
       item.elapsed += mult;
       if (item.elapsed >= item.totalTime) {
         const completedName = item.typeName;
@@ -442,7 +469,7 @@ export class ProductionSystem {
     for (const [playerId, queue] of this.vehicleQueues) {
       if (queue.length === 0) continue;
       const item = queue[0];
-      const mult = this.powerMultipliers.get(playerId) ?? 1.0;
+      const mult = (this.powerMultipliers.get(playerId) ?? 1.0) * this.getFactorySpeedBonus(playerId, 'vehicle');
       item.elapsed += mult;
       if (item.elapsed >= item.totalTime) {
         const completedName = item.typeName;

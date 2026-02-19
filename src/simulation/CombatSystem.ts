@@ -9,6 +9,7 @@ import type { GameRules } from '../config/RulesParser';
 import type { BulletDef } from '../config/WeaponDefs';
 import { distance2D, worldToTile, angleBetween, lerpAngle } from '../utils/MathUtils';
 import { EventBus } from '../core/EventBus';
+import type { VeterancyLevel } from '../config/UnitDefs';
 import type { FogOfWar } from '../rendering/FogOfWar';
 import type { TerrainRenderer } from '../rendering/TerrainRenderer';
 import { TerrainType } from '../rendering/TerrainRenderer';
@@ -453,6 +454,17 @@ export class CombatSystem implements GameSystem {
     return bullet;
   }
 
+  /** Get veterancy level data for an entity at its current rank */
+  private getVetLevel(eid: number): VeterancyLevel | null {
+    const typeName = this.unitTypeMap.get(eid);
+    if (!typeName) return null;
+    const unitDef = this.rules.units.get(typeName);
+    if (!unitDef || !unitDef.veterancy.length) return null;
+    const rank = Veterancy.rank[eid];
+    if (rank <= 0 || rank > unitDef.veterancy.length) return null;
+    return unitDef.veterancy[rank - 1]; // rank 1 = index 0
+  }
+
   /** Apply warhead multiplier based on target's armor type. Returns adjusted damage. */
   private applyWarheadMultiplier(baseDamage: number, warheadName: string, targetEid: number): number {
     if (!warheadName || !hasComponent(this.world!, Armour, targetEid)) return baseDamage;
@@ -535,10 +547,29 @@ export class CombatSystem implements GameSystem {
         Veterancy.xp[attackerEid]++;
         const xp = Veterancy.xp[attackerEid];
         const oldRank = Veterancy.rank[attackerEid];
-        // Promote: rank 1=1 kill, rank 2=3 kills, rank 3=5 kills
-        const newRank = xp >= 5 ? 3 : xp >= 3 ? 2 : xp >= 1 ? 1 : 0;
+        // Promote using per-unit scoreThreshold from rules.txt, or fallback defaults
+        const aTypeName = this.unitTypeMap.get(attackerEid);
+        const aDef = aTypeName ? this.rules.units.get(aTypeName) : null;
+        let newRank = oldRank;
+        if (aDef && aDef.veterancy.length > 0) {
+          for (let r = aDef.veterancy.length - 1; r >= 0; r--) {
+            if (xp >= aDef.veterancy[r].scoreThreshold) { newRank = r + 1; break; }
+          }
+        } else {
+          newRank = xp >= 5 ? 3 : xp >= 3 ? 2 : xp >= 1 ? 1 : 0;
+        }
         if (newRank > oldRank) {
           Veterancy.rank[attackerEid] = newRank;
+          // Apply health bonus for each rank gained (handles multi-rank jumps)
+          if (aDef && aDef.veterancy.length > 0) {
+            for (let r = oldRank; r < newRank; r++) {
+              const lvl = aDef.veterancy[r]; // r=0 is rank 1 data
+              if (lvl?.health) {
+                Health.max[attackerEid] += lvl.health;
+                Health.current[attackerEid] += lvl.health;
+              }
+            }
+          }
           EventBus.emit('unit:promoted', { entityId: attackerEid, rank: newRank });
         }
       }
@@ -599,10 +630,11 @@ export class CombatSystem implements GameSystem {
 
       damage = Math.round(damage);
 
-      // Apply veterancy defense bonus per target
+      // Apply veterancy defense bonus per target (per-unit extraArmour from rules.txt)
       if (hasComponent(world, Veterancy, eid)) {
-        const defRank = Veterancy.rank[eid];
-        const defBonus = [1.0, 0.9, 0.8, 0.7][defRank] ?? 1.0;
+        const dVetLevel = this.getVetLevel(eid);
+        const extraArmour = dVetLevel ? dVetLevel.extraArmour : 0;
+        const defBonus = extraArmour > 0 ? Math.max(0.1, 1.0 - extraArmour / 100) : ([1.0, 0.9, 0.8, 0.7][Veterancy.rank[eid]] ?? 1.0);
         damage = Math.round(damage * defBonus);
       }
 
@@ -620,10 +652,11 @@ export class CombatSystem implements GameSystem {
       bulletName = bullet.name;
     }
 
-    // Veterancy damage bonus: +15%/+30%/+50% per rank
+    // Veterancy damage bonus: use per-unit extraDamage from rules.txt
     if (hasComponent(world, Veterancy, attackerEid)) {
-      const rank = Veterancy.rank[attackerEid];
-      const vetBonus = [1.0, 1.15, 1.30, 1.50][rank] ?? 1.0;
+      const vetLevel = this.getVetLevel(attackerEid);
+      const extraDmg = vetLevel ? vetLevel.extraDamage : 0;
+      const vetBonus = extraDmg > 0 ? 1.0 + extraDmg / 100 : ([1.0, 1.15, 1.30, 1.50][Veterancy.rank[attackerEid]] ?? 1.0);
       baseDamage = Math.round(baseDamage * vetBonus);
     }
 
@@ -673,10 +706,11 @@ export class CombatSystem implements GameSystem {
       baseDamage = this.applyWarheadMultiplier(baseDamage, bullet.warhead, targetEid);
     }
 
-    // Veterancy defense bonus on target: -10%/-20%/-30% damage taken
+    // Veterancy defense bonus on target (per-unit extraArmour from rules.txt)
     if (hasComponent(world, Veterancy, targetEid)) {
-      const defRank = Veterancy.rank[targetEid];
-      const defBonus = [1.0, 0.9, 0.8, 0.7][defRank] ?? 1.0;
+      const tVetLevel = this.getVetLevel(targetEid);
+      const tExtraArmour = tVetLevel ? tVetLevel.extraArmour : 0;
+      const defBonus = tExtraArmour > 0 ? Math.max(0.1, 1.0 - tExtraArmour / 100) : ([1.0, 0.9, 0.8, 0.7][Veterancy.rank[targetEid]] ?? 1.0);
       baseDamage = Math.round(baseDamage * defBonus);
     }
 

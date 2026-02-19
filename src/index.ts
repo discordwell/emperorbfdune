@@ -1496,7 +1496,8 @@ async function main() {
     if (isBuilding) {
       // Start building placement mode for player buildings
       if (owner === 0) {
-        buildingPlacement.startPlacement(unitType);
+        const placeDef = gameRules.buildings.get(unitType);
+        buildingPlacement.startPlacement(unitType, 3, 3, placeDef?.terrain);
       } else {
         // AI strategically places buildings based on type
         const bDef = gameRules.buildings.get(unitType);

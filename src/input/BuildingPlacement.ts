@@ -19,6 +19,7 @@ export class BuildingPlacement {
   private active = false;
   private typeName = '';
   private buildingSize = { w: 3, h: 3 }; // Tiles
+  private allowedTerrain = new Set<TerrainType>(); // Per-building terrain requirements
   private concreteMode = false; // Special mode for placing concrete slabs
   private onConcrete: ((tx: number, tz: number) => boolean) | null = null;
 
@@ -50,11 +51,22 @@ export class BuildingPlacement {
     window.addEventListener('keydown', this.onKeyDown);
   }
 
-  startPlacement(typeName: string, sizeW = 3, sizeH = 3): void {
+  startPlacement(typeName: string, sizeW = 3, sizeH = 3, terrainTypes?: string[]): void {
     this.cancel();
     this.active = true;
     this.typeName = typeName;
     this.buildingSize = { w: sizeW, h: sizeH };
+
+    // Map terrain requirement strings to TerrainType enum values
+    this.allowedTerrain.clear();
+    const terrainList = terrainTypes ?? ['Rock'];
+    for (const t of terrainList) {
+      const lower = t.trim().toLowerCase();
+      if (lower === 'rock') { this.allowedTerrain.add(TerrainType.Rock); this.allowedTerrain.add(TerrainType.InfantryRock); }
+      else if (lower === 'sand') { this.allowedTerrain.add(TerrainType.Sand); this.allowedTerrain.add(TerrainType.Dunes); }
+    }
+    // Concrete slab is always valid terrain for building placement
+    this.allowedTerrain.add(TerrainType.ConcreteSlab);
 
     // Create ghost preview mesh
     const geo = new THREE.BoxGeometry(
@@ -166,14 +178,9 @@ export class BuildingPlacement {
           return false;
         }
 
-        // Terrain must be buildable (sand, dunes, concrete)
+        // Terrain must match building's allowed terrain types
         const terrain = this.terrain.getTerrainType(checkX, checkZ);
-        if (terrain === TerrainType.Cliff || terrain === TerrainType.Rock || terrain === TerrainType.InfantryRock) {
-          return false;
-        }
-
-        // Can't build on spice
-        if (terrain === TerrainType.SpiceLow || terrain === TerrainType.SpiceHigh) {
+        if (!this.allowedTerrain.has(terrain)) {
           return false;
         }
 
@@ -336,8 +343,7 @@ export class BuildingPlacement {
   private isTileValid(tx: number, tz: number): boolean {
     if (tx < 2 || tx >= this.terrain.getMapWidth() - 2 || tz < 2 || tz >= this.terrain.getMapHeight() - 2) return false;
     const terrain = this.terrain.getTerrainType(tx, tz);
-    if (terrain === TerrainType.Cliff || terrain === TerrainType.Rock || terrain === TerrainType.InfantryRock) return false;
-    if (terrain === TerrainType.SpiceLow || terrain === TerrainType.SpiceHigh) return false;
+    if (!this.allowedTerrain.has(terrain)) return false;
     if (this.occupiedTiles.has(`${tx},${tz}`)) return false;
     return true;
   }
