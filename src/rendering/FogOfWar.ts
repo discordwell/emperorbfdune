@@ -97,6 +97,9 @@ export class FogOfWar {
     this.fogTexture.minFilter = THREE.LinearFilter;
     this.fogTexture.needsUpdate = true;
 
+    this.tickCounter = 0;
+    this.lastPositionHash = -1;
+
     // Remove old fog mesh and create new one
     if (this.fogMesh) {
       this.sceneManager.scene.remove(this.fogMesh);

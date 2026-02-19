@@ -35,6 +35,10 @@ export class BuildingPlacement {
   private occupiedTiles = new Set<string>(); // All buildings (for overlap check)
   private ownedTiles = new Set<string>(); // Player-owned buildings (for proximity check)
 
+  // Building context for footprint lookup
+  private buildingTypeNames: string[] = [];
+  private buildingFootprints = new Map<string, { w: number; h: number }>(); // typeName -> size
+
   constructor(
     sceneManager: SceneManager,
     terrain: TerrainRenderer,
@@ -49,6 +53,11 @@ export class BuildingPlacement {
     window.addEventListener('mousemove', this.onMouseMove);
     window.addEventListener('mousedown', this.onMouseDown);
     window.addEventListener('keydown', this.onKeyDown);
+  }
+
+  setBuildingContext(buildingTypeNames: string[], footprints: Map<string, { w: number; h: number }>): void {
+    this.buildingTypeNames = buildingTypeNames;
+    this.buildingFootprints = footprints;
   }
 
   startPlacement(typeName: string, sizeW = 3, sizeH = 3, terrainTypes?: string[]): void {
@@ -162,9 +171,12 @@ export class BuildingPlacement {
       if (Health.current[eid] <= 0) continue;
       const tile = worldToTile(Position.x[eid], Position.z[eid]);
       const isOwned = Owner.playerId[eid] === 0;
-      // Mark 3x3 area as occupied (approximate building footprint)
-      for (let dz = -1; dz <= 1; dz++) {
-        for (let dx = -1; dx <= 1; dx++) {
+      const typeName = this.buildingTypeNames[BuildingType.id[eid]] ?? '';
+      const fp = this.buildingFootprints.get(typeName) ?? { w: 3, h: 3 };
+      const startX = -Math.floor((fp.w - 1) / 2);
+      const startZ = -Math.floor((fp.h - 1) / 2);
+      for (let dz = startZ; dz < startZ + fp.h; dz++) {
+        for (let dx = startX; dx < startX + fp.w; dx++) {
           const key = `${tile.tx + dx},${tile.tz + dz}`;
           this.occupiedTiles.add(key);
           if (isOwned) this.ownedTiles.add(key);
@@ -175,11 +187,11 @@ export class BuildingPlacement {
 
   private checkValidity(tx: number, tz: number): boolean {
     const { w, h } = this.buildingSize;
-    const halfW = Math.floor(w / 2);
-    const halfH = Math.floor(h / 2);
+    const startX = -Math.floor((w - 1) / 2);
+    const startZ = -Math.floor((h - 1) / 2);
 
-    for (let dz = -halfH; dz <= halfH; dz++) {
-      for (let dx = -halfW; dx <= halfW; dx++) {
+    for (let dz = startZ; dz < startZ + h; dz++) {
+      for (let dx = startX; dx < startX + w; dx++) {
         const checkX = tx + dx;
         const checkZ = tz + dz;
 
@@ -240,15 +252,15 @@ export class BuildingPlacement {
     // Per-tile validity coloring for detailed feedback
     if (!this.concreteMode) {
       const { w, h } = this.buildingSize;
-      const halfW = Math.floor(w / 2);
-      const halfH = Math.floor(h / 2);
+      const startX = -Math.floor((w - 1) / 2);
+      const startZ = -Math.floor((h - 1) / 2);
       let idx = 0;
       for (let dz = 0; dz < h; dz++) {
         for (let dx = 0; dx < w; dx++) {
           const child = this.gridHelper.children[idx++];
           if (child instanceof THREE.Mesh) {
-            const checkTx = tile.tx + dx - halfW;
-            const checkTz = tile.tz + dz - halfH;
+            const checkTx = tile.tx + startX + dx;
+            const checkTz = tile.tz + startZ + dz;
             (child.material as THREE.MeshBasicMaterial).color.copy(
               this.isTileValid(checkTx, checkTz) ? this.validColor : this.invalidColor
             );

@@ -1058,6 +1058,15 @@ async function main() {
     }
   });
 
+  // Build footprint map from game rules for building placement
+  const buildingFootprints = new Map<string, { w: number; h: number }>();
+  for (const [name, def] of gameRules.buildings) {
+    const h = def.occupy.length || 3;
+    const w = def.occupy[0]?.length || 3;
+    buildingFootprints.set(name, { w, h });
+  }
+  buildingPlacement.setBuildingContext(buildingTypeNames, buildingFootprints);
+
   // --- SELECTION PANEL ---
 
   const selectionPanel = new SelectionPanel(
@@ -1517,7 +1526,8 @@ async function main() {
       // Start building placement mode for player buildings
       if (owner === 0) {
         const placeDef = gameRules.buildings.get(unitType);
-        buildingPlacement.startPlacement(unitType, 3, 3, placeDef?.terrain);
+        const fp = buildingFootprints.get(unitType) ?? { w: 3, h: 3 };
+        buildingPlacement.startPlacement(unitType, fp.w, fp.h, placeDef?.terrain);
       } else {
         // AI strategically places buildings based on type
         const bDef = gameRules.buildings.get(unitType);
@@ -2723,9 +2733,13 @@ async function main() {
 
   function saveGame(): void {
     const save = buildSaveData();
-    localStorage.setItem('ebfd_save', JSON.stringify(save));
-    localStorage.setItem('ebfd_save_time', new Date().toLocaleString());
-    selectionPanel.addMessage('Game saved! (F8 to load)', '#44ff44');
+    try {
+      localStorage.setItem('ebfd_save', JSON.stringify(save));
+      localStorage.setItem('ebfd_save_time', new Date().toLocaleString());
+      selectionPanel.addMessage('Game saved! (F8 to load)', '#44ff44');
+    } catch {
+      selectionPanel.addMessage('Save failed: storage full', '#ff4444');
+    }
   }
 
   // Pause menu (extracted to PauseMenu module)

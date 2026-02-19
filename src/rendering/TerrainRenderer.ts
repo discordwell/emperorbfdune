@@ -134,6 +134,7 @@ const terrainFragmentShader = /* glsl */ `
 export class TerrainRenderer {
   private sceneManager: SceneManager;
   private terrainData: Uint8Array; // TerrainType per tile
+  private baseTerrain: Uint8Array; // Original terrain before spice overlay
   private spiceAmount: Float32Array; // Spice density 0-1 per tile
   private mesh: THREE.Mesh | null = null;
   private splatmapTexture: THREE.DataTexture | null = null;
@@ -154,6 +155,7 @@ export class TerrainRenderer {
   constructor(sceneManager: SceneManager) {
     this.sceneManager = sceneManager;
     this.terrainData = new Uint8Array(this.mapWidth * this.mapHeight);
+    this.baseTerrain = new Uint8Array(this.mapWidth * this.mapHeight);
     this.spiceAmount = new Float32Array(this.mapWidth * this.mapHeight);
   }
 
@@ -227,8 +229,8 @@ export class TerrainRenderer {
     } else if (amount > 0) {
       this.terrainData[idx] = TerrainType.SpiceLow;
     } else {
-      // Spice depleted - revert to sand
-      this.terrainData[idx] = TerrainType.Sand;
+      // Spice depleted - revert to original terrain
+      this.terrainData[idx] = this.baseTerrain[idx] || TerrainType.Sand;
     }
     if (this.terrainData[idx] !== oldType) {
       this.spiceVisualsDirty = true;
@@ -260,6 +262,7 @@ export class TerrainRenderer {
 
     const tileCount = this.mapWidth * this.mapHeight;
     this.terrainData = new Uint8Array(tileCount);
+    this.baseTerrain = new Uint8Array(tileCount);
     this.spiceAmount = new Float32Array(tileCount);
     this.heightData = new Uint8Array(tileCount);
 
@@ -273,9 +276,13 @@ export class TerrainRenderer {
 
       // Initialize spice amounts from terrain type
       if (this.terrainData[i] === TerrainType.SpiceLow) {
+        this.baseTerrain[i] = TerrainType.Sand;
         this.spiceAmount[i] = 0.4;
       } else if (this.terrainData[i] === TerrainType.SpiceHigh) {
+        this.baseTerrain[i] = TerrainType.Sand;
         this.spiceAmount[i] = 0.8;
+      } else {
+        this.baseTerrain[i] = this.terrainData[i];
       }
     }
 
@@ -292,6 +299,7 @@ export class TerrainRenderer {
     this.mapWidth = DEFAULT_MAP_SIZE;
     this.mapHeight = DEFAULT_MAP_SIZE;
     this.terrainData = new Uint8Array(this.mapWidth * this.mapHeight);
+    this.baseTerrain = new Uint8Array(this.mapWidth * this.mapHeight);
     this.spiceAmount = new Float32Array(this.mapWidth * this.mapHeight);
     this.heightData = null;
 
@@ -557,6 +565,7 @@ export class TerrainRenderer {
         }
 
         this.terrainData[idx] = terrain;
+        this.baseTerrain[idx] = terrain;
 
         if (terrain === TerrainType.Sand || terrain === TerrainType.Dunes) {
           if (spiceNoise > spiceThreshold) {

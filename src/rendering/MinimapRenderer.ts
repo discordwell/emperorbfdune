@@ -62,6 +62,7 @@ export class MinimapRenderer {
     // Click to navigate, double-click to snap
     this.canvas.addEventListener('mousedown', this.onClick);
     this.canvas.addEventListener('mousemove', this.onDrag);
+    window.addEventListener('mouseup', this.onMouseUp);
     this.canvas.addEventListener('dblclick', this.onDoubleClick);
     this.canvas.addEventListener('contextmenu', this.onContextMenu);
 
@@ -384,6 +385,10 @@ export class MinimapRenderer {
     const { worldX, worldZ } = this.minimapToWorld(mx, my);
     this.sceneManager.snapTo(worldX, worldZ);
     this.clickPing = { x: mx, y: my, age: 0 };
+  };
+
+  private onMouseUp = (): void => {
+    this.isDragging = false;
   };
 
   private onDrag = (e: MouseEvent): void => {
