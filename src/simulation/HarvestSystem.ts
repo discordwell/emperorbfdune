@@ -23,9 +23,17 @@ export class HarvestSystem implements GameSystem {
   private solaris = new Map<number, number>(); // playerId -> credits
   private harvestTimers = new Map<number, number>(); // eid -> ticks spent harvesting
   private tickCounter = 0;
-  private bloomInterval = 500; // ~20 seconds between bloom checks
-  // Pending bloom: coordinates of upcoming spice bloom (for pre-warning effect)
-  private pendingBloom: { tx: number; tz: number; ticksLeft: number } | null = null;
+  // Spice mound lifecycle (faithful to original rules.txt [SpiceMound])
+  // A mound appears, lives for 1000-1500 ticks, then erupts creating spice bloom
+  private activeMound: { tx: number; tz: number; ticksLeft: number; totalLife: number } | null = null;
+  // Regrow cooldown: delay after eruption before next mound can spawn (200-2000 ticks)
+  private regrowCooldown = 0;
+  // Cash fallback: when all spice is gone, deliver credits periodically
+  private noSpiceTimer = 0;
+  private noSpiceDeliveryInterval = 0; // randomized each cycle
+  private playerCount = 2;
+  // Spice spread/growth tracking
+  private spiceDirty = false; // Splatmap needs update flag
   // Carryall: players that have a Hanger get auto-airlift for harvesters
   private playersWithCarryall = new Set<number>();
   // Harvesters being airlifted: eid -> ticks remaining
@@ -90,6 +98,7 @@ export class HarvestSystem implements GameSystem {
   }
 
   init(_world: World, playerCount = 2): void {
+    this.playerCount = playerCount;
     // Start all players with initial credits
     for (let i = 0; i < playerCount; i++) {
       this.solaris.set(i, 5000);
@@ -146,25 +155,53 @@ export class HarvestSystem implements GameSystem {
       }
     }
 
-    // Spice bloom: periodically regenerate spice on sand tiles
+    // Dynamic spice system (faithful to original Emperor: Battle for Dune)
     this.tickCounter++;
 
-    // Process pending bloom countdown
-    if (this.pendingBloom) {
-      this.pendingBloom.ticksLeft--;
-      // Emit tremor events during countdown for visual effects
-      if (this.pendingBloom.ticksLeft % 25 === 0 && this.pendingBloom.ticksLeft > 0) {
-        const wx = tileToWorld(this.pendingBloom.tx, this.pendingBloom.tz);
-        EventBus.emit('bloom:tremor', { x: wx.x, z: wx.z, intensity: 1 - this.pendingBloom.ticksLeft / 125 });
+    // 1) Spice mound lifecycle: mound appears → warning → tremors → eruption → bloom
+    if (this.activeMound) {
+      this.activeMound.ticksLeft--;
+      const totalLife = this.activeMound.totalLife;
+      const progress = 1 - this.activeMound.ticksLeft / totalLife;
+
+      // Warning phase: emit tremors as mound nears eruption (last 30% of life)
+      if (this.activeMound.ticksLeft < totalLife * 0.3 && this.activeMound.ticksLeft % 25 === 0) {
+        const wx = tileToWorld(this.activeMound.tx, this.activeMound.tz);
+        EventBus.emit('bloom:tremor', { x: wx.x, z: wx.z, intensity: progress });
       }
-      if (this.pendingBloom.ticksLeft <= 0) {
-        this.executeBloom(this.pendingBloom.tx, this.pendingBloom.tz);
-        this.pendingBloom = null;
+
+      if (this.activeMound.ticksLeft <= 0) {
+        // Eruption!
+        this.executeBloom(this.activeMound.tx, this.activeMound.tz);
+        this.activeMound = null;
+        // Set regrow cooldown (200-2000 ticks from rules.txt)
+        this.regrowCooldown = GameConstants.SPICE_MOUND_REGROW_MIN +
+          Math.floor(Math.random() * (GameConstants.SPICE_MOUND_REGROW_MAX - GameConstants.SPICE_MOUND_REGROW_MIN));
       }
+    } else if (this.regrowCooldown > 0) {
+      this.regrowCooldown--;
+    } else if (this.tickCounter % 250 === 0) {
+      // Try to spawn a new spice mound
+      this.spawnMound();
     }
 
-    if (this.tickCounter % this.bloomInterval === 0 && !this.pendingBloom) {
-      this.scheduleBloom();
+    // 2) Spice spreading: existing spice tiles grow outward to adjacent sand
+    if (this.tickCounter % GameConstants.SPICE_SPREAD_INTERVAL === 0) {
+      this.spreadSpice();
+    }
+
+    // 3) Spice growth: existing spice tiles slowly increase in density
+    if (this.tickCounter % 50 === 0) {
+      this.growSpice();
+    }
+
+    // 4) Cash fallback when all spice is depleted (from rules.txt [General])
+    this.updateCashFallback();
+
+    // 5) Update 3D visuals if spice changed
+    if (this.spiceDirty && this.tickCounter % 25 === 0) {
+      this.terrain.updateSpiceVisuals();
+      this.spiceDirty = false;
     }
 
     // Update UI with flash animation
@@ -204,26 +241,23 @@ export class HarvestSystem implements GameSystem {
     }
   }
 
-  private scheduleBloom(): void {
-    // Count current spice tiles
+  /** Spawn a spice mound on a sand tile if conditions are met */
+  private spawnMound(): void {
     const mw = this.terrain.getMapWidth(), mh = this.terrain.getMapHeight();
-    let spiceTileCount = 0;
-    for (let tz = 0; tz < mh; tz++) {
-      for (let tx = 0; tx < mw; tx++) {
-        if (this.terrain.getSpice(tx, tz) > 0) spiceTileCount++;
-      }
-    }
 
-    if (spiceTileCount >= 20) return;
-
-    // Find a valid sand tile for the bloom
+    // Find a valid sand tile away from edges
     for (let attempt = 0; attempt < 50; attempt++) {
-      const tx = 10 + Math.floor(Math.random() * Math.max(1, mw - 20));
-      const tz = 10 + Math.floor(Math.random() * Math.max(1, mh - 20));
+      const margin = Math.min(10, Math.floor(Math.min(mw, mh) * 0.1));
+      const tx = margin + Math.floor(Math.random() * Math.max(1, mw - margin * 2));
+      const tz = margin + Math.floor(Math.random() * Math.max(1, mh - margin * 2));
       const type = this.terrain.getTerrainType(tx, tz);
-      if (type === TerrainType.Sand) {
-        // Schedule bloom with 5-second warning (125 ticks)
-        this.pendingBloom = { tx, tz, ticksLeft: 125 };
+      // Mound can appear on sand or existing spice
+      if (type === TerrainType.Sand || type === TerrainType.Dunes ||
+          type === TerrainType.SpiceLow || type === TerrainType.SpiceHigh) {
+        // Duration: Size + random(Cost) from rules.txt = 1000 + random(500) ticks
+        const duration = GameConstants.SPICE_MOUND_MIN_DURATION +
+          Math.floor(Math.random() * GameConstants.SPICE_MOUND_RANDOM_DURATION);
+        this.activeMound = { tx, tz, ticksLeft: duration, totalLife: duration };
         const wx = tileToWorld(tx, tz);
         EventBus.emit('bloom:warning', { x: wx.x, z: wx.z });
         return;
@@ -231,21 +265,164 @@ export class HarvestSystem implements GameSystem {
     }
   }
 
+  /** Execute a spice bloom eruption with faithful radius and damage */
   private executeBloom(tx: number, tz: number): void {
-    // Create a small spice patch (3x3 to 5x5)
-    const radius = 1 + Math.floor(Math.random() * 2);
+    const radius = GameConstants.SPICE_BLOOM_RADIUS; // 6 tiles from rules.txt
+    const mw = this.terrain.getMapWidth(), mh = this.terrain.getMapHeight();
+
+    // Create spice patch in circular radius
     for (let dz = -radius; dz <= radius; dz++) {
       for (let dx = -radius; dx <= radius; dx++) {
+        // Circular falloff
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        if (dist > radius) continue;
+
         const stx = tx + dx;
         const stz = tz + dz;
-        if (stx < 0 || stx >= this.terrain.getMapWidth() || stz < 0 || stz >= this.terrain.getMapHeight()) continue;
-        if (this.terrain.getTerrainType(stx, stz) !== TerrainType.Sand) continue;
-        const amount = 0.3 + Math.random() * 0.7;
+        if (stx < 0 || stx >= mw || stz < 0 || stz >= mh) continue;
+
+        const type = this.terrain.getTerrainType(stx, stz);
+        // Only place spice on sand/dunes (not on rock/cliff/concrete)
+        if (type !== TerrainType.Sand && type !== TerrainType.Dunes &&
+            type !== TerrainType.SpiceLow && type !== TerrainType.SpiceHigh) continue;
+
+        // Density falls off from center: center is rich, edges are thin
+        const falloff = 1 - (dist / radius);
+        const existing = this.terrain.getSpice(stx, stz);
+        const amount = Math.min(1.0, existing + 0.3 + falloff * 0.7);
         this.terrain.setSpice(stx, stz, amount);
       }
     }
+
+    this.spiceDirty = true;
+
     const wx = tileToWorld(tx, tz);
-    EventBus.emit('bloom:eruption', { x: wx.x, z: wx.z });
+    EventBus.emit('bloom:eruption', { x: wx.x, z: wx.z, radius });
+  }
+
+  /** Spice spreading: each spice tile has a chance to grow into adjacent sand */
+  private spreadSpice(): void {
+    const mw = this.terrain.getMapWidth(), mh = this.terrain.getMapHeight();
+    const chance = GameConstants.SPICE_SPREAD_CHANCE;
+    // Collect spread targets to avoid modifying during iteration
+    const newSpice: { tx: number; tz: number; amount: number }[] = [];
+
+    for (let tz = 1; tz < mh - 1; tz++) {
+      for (let tx = 1; tx < mw - 1; tx++) {
+        const spice = this.terrain.getSpice(tx, tz);
+        if (spice <= 0.2) continue; // Only spread from established tiles
+
+        if (Math.random() > chance) continue;
+
+        // Pick a random adjacent tile (4-directional)
+        const dirs = [[0, -1], [0, 1], [-1, 0], [1, 0]];
+        const [ddx, ddz] = dirs[Math.floor(Math.random() * 4)];
+        const ntx = tx + ddx;
+        const ntz = tz + ddz;
+
+        if (ntx < 0 || ntx >= mw || ntz < 0 || ntz >= mh) continue;
+        const nType = this.terrain.getTerrainType(ntx, ntz);
+        // Only spread to sand or dunes
+        if (nType !== TerrainType.Sand && nType !== TerrainType.Dunes) continue;
+
+        // New spice starts thin
+        newSpice.push({ tx: ntx, tz: ntz, amount: 0.1 + Math.random() * 0.15 });
+      }
+    }
+
+    for (const s of newSpice) {
+      const existing = this.terrain.getSpice(s.tx, s.tz);
+      if (existing <= 0) {
+        this.terrain.setSpice(s.tx, s.tz, s.amount);
+        this.spiceDirty = true;
+      }
+    }
+  }
+
+  /** Spice growth: existing spice tiles slowly increase in density */
+  private growSpice(): void {
+    const mw = this.terrain.getMapWidth(), mh = this.terrain.getMapHeight();
+    const rate = GameConstants.SPICE_GROWTH_RATE;
+    let changed = false;
+
+    for (let tz = 0; tz < mh; tz++) {
+      for (let tx = 0; tx < mw; tx++) {
+        const spice = this.terrain.getSpice(tx, tz);
+        if (spice <= 0 || spice >= 1.0) continue;
+
+        // Grow towards max density, faster when surrounded by more spice
+        let neighbors = 0;
+        if (this.terrain.getSpice(tx - 1, tz) > 0) neighbors++;
+        if (this.terrain.getSpice(tx + 1, tz) > 0) neighbors++;
+        if (this.terrain.getSpice(tx, tz - 1) > 0) neighbors++;
+        if (this.terrain.getSpice(tx, tz + 1) > 0) neighbors++;
+
+        const growAmount = rate * (1 + neighbors * 0.25);
+        const newAmount = Math.min(1.0, spice + growAmount);
+        if (newAmount !== spice) {
+          this.terrain.setSpice(tx, tz, newAmount);
+          changed = true;
+        }
+      }
+    }
+
+    if (changed) this.spiceDirty = true;
+  }
+
+  /** Cash fallback: deliver credits to all players when no spice exists */
+  private updateCashFallback(): void {
+    // Only check every 100 ticks (cash delivery is on 4000-8000 tick intervals)
+    if (this.tickCounter % 100 !== 0) {
+      if (this.noSpiceTimer > 0) this.noSpiceTimer++;
+      return;
+    }
+
+    // Full scan to check if ANY spice exists
+    const mw = this.terrain.getMapWidth(), mh = this.terrain.getMapHeight();
+    let hasSpice = false;
+    for (let tz = 0; tz < mh && !hasSpice; tz++) {
+      for (let tx = 0; tx < mw && !hasSpice; tx++) {
+        if (this.terrain.getSpice(tx, tz) > 0) hasSpice = true;
+      }
+    }
+
+    if (hasSpice) {
+      this.noSpiceTimer = 0;
+      return;
+    }
+
+    // No spice on map - count towards delivery
+    this.noSpiceTimer++;
+
+    if (this.noSpiceDeliveryInterval === 0) {
+      // Randomize next delivery interval
+      this.noSpiceDeliveryInterval = GameConstants.CASH_NO_SPICE_FREQ_MIN +
+        Math.floor(Math.random() * (GameConstants.CASH_NO_SPICE_FREQ_MAX - GameConstants.CASH_NO_SPICE_FREQ_MIN));
+    }
+
+    if (this.noSpiceTimer >= this.noSpiceDeliveryInterval) {
+      const amount = GameConstants.CASH_NO_SPICE_AMOUNT_MIN +
+        Math.floor(Math.random() * (GameConstants.CASH_NO_SPICE_AMOUNT_MAX - GameConstants.CASH_NO_SPICE_AMOUNT_MIN));
+      // Deliver to all players
+      for (let i = 0; i < this.playerCount; i++) {
+        this.addSolaris(i, amount);
+      }
+      EventBus.emit('spice:cashFallback', { amount });
+      this.noSpiceTimer = 0;
+      this.noSpiceDeliveryInterval = 0; // Re-randomize next time
+    }
+  }
+
+  /** Get current spice tile count for UI/debug */
+  getSpiceTileCount(): number {
+    const mw = this.terrain.getMapWidth(), mh = this.terrain.getMapHeight();
+    let count = 0;
+    for (let tz = 0; tz < mh; tz++) {
+      for (let tx = 0; tx < mw; tx++) {
+        if (this.terrain.getSpice(tx, tz) > 0) count++;
+      }
+    }
+    return count;
   }
 
   private handleIdle(eid: number): void {
@@ -296,6 +473,7 @@ export class HarvestSystem implements GameSystem {
     const harvestAmount = Math.min(0.05, spice);
     this.terrain.setSpice(tile.tx, tile.tz, spice - harvestAmount);
     Harvester.spiceCarried[eid] += harvestAmount;
+    this.spiceDirty = true;
   }
 
   private handleReturning(eid: number): void {

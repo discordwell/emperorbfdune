@@ -131,6 +131,7 @@ export class TerrainRenderer {
   private splatmapTexture: THREE.DataTexture | null = null;
   private splatmapData: Uint8Array | null = null;
   private texturesLoaded = false;
+  private spiceVisualsDirty = false;
   private sandTex: THREE.Texture | null = null;
   private rockTex: THREE.Texture | null = null;
   private spiceTex: THREE.Texture | null = null;
@@ -168,12 +169,27 @@ export class TerrainRenderer {
 
   setSpice(tx: number, tz: number, amount: number): void {
     if (tx < 0 || tx >= this.mapWidth || tz < 0 || tz >= this.mapHeight) return;
-    this.spiceAmount[tz * this.mapWidth + tx] = amount;
     const idx = tz * this.mapWidth + tx;
+    this.spiceAmount[idx] = Math.max(0, amount);
+    const oldType = this.terrainData[idx];
     if (amount > 0.6) {
       this.terrainData[idx] = TerrainType.SpiceHigh;
     } else if (amount > 0) {
       this.terrainData[idx] = TerrainType.SpiceLow;
+    } else {
+      // Spice depleted - revert to sand
+      this.terrainData[idx] = TerrainType.Sand;
+    }
+    if (this.terrainData[idx] !== oldType) {
+      this.spiceVisualsDirty = true;
+    }
+  }
+
+  /** Check and flush pending spice visual updates (call from game loop) */
+  flushSpiceVisuals(): void {
+    if (this.spiceVisualsDirty) {
+      this.updateSpiceVisuals();
+      this.spiceVisualsDirty = false;
     }
   }
 
@@ -270,9 +286,19 @@ export class TerrainRenderer {
   private generateSplatmap(): void {
     const splatW = this.mapWidth;
     const splatH = this.mapHeight;
-    // RGBA DataTexture: R=sand, G=rock, B=spice, A=unused
-    const data = new Uint8Array(splatW * splatH * 4);
-    this.splatmapData = data;
+    const expectedSize = splatW * splatH * 4;
+
+    // Reuse existing buffer if same size, only allocate on first call or size change
+    if (!this.splatmapData || this.splatmapData.length !== expectedSize) {
+      this.splatmapData = new Uint8Array(expectedSize);
+      // Need a new texture if size changed
+      if (this.splatmapTexture) {
+        this.splatmapTexture.dispose();
+        this.splatmapTexture = null;
+      }
+    }
+
+    const data = this.splatmapData;
 
     for (let tz = 0; tz < splatH; tz++) {
       for (let tx = 0; tx < splatW; tx++) {
@@ -308,15 +334,13 @@ export class TerrainRenderer {
       }
     }
 
-    if (this.splatmapTexture) {
-      // Recreate if size changed
-      this.splatmapTexture.dispose();
+    if (!this.splatmapTexture) {
+      this.splatmapTexture = new THREE.DataTexture(
+        data, splatW, splatH, THREE.RGBAFormat
+      );
+      this.splatmapTexture.magFilter = THREE.LinearFilter;
+      this.splatmapTexture.minFilter = THREE.LinearFilter;
     }
-    this.splatmapTexture = new THREE.DataTexture(
-      data, splatW, splatH, THREE.RGBAFormat
-    );
-    this.splatmapTexture.magFilter = THREE.LinearFilter;
-    this.splatmapTexture.minFilter = THREE.LinearFilter;
     this.splatmapTexture.needsUpdate = true;
   }
 

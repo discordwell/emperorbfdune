@@ -23,6 +23,21 @@ export const GameConstants = {
   GUARD_TILE_RANGE: 12,
   STEALTH_DELAY: 30,
   DEVIATE_DURATION: 500,
+  // Spice mound / bloom mechanics (from rules.txt [SpiceMound] + [General])
+  SPICE_MOUND_MIN_DURATION: 1000, // Min ticks before mound bursts
+  SPICE_MOUND_RANDOM_DURATION: 500, // Randomness added to mound lifespan
+  SPICE_BLOOM_RADIUS: 6, // Radius of spice bloom patch (in tiles)
+  SPICE_MOUND_REGROW_MIN: 200, // Min delay before mound starts regrowing
+  SPICE_MOUND_REGROW_MAX: 2000, // Max delay before mound starts regrowing
+  SPICE_BLOOM_DAMAGE: 10, // Damage to nearby units on eruption
+  SPICE_BLOOM_DAMAGE_RADIUS: 12, // Bloom damage radius in world units (matches 6-tile bloom radius)
+  SPICE_SPREAD_INTERVAL: 100, // Ticks between spread attempts
+  SPICE_SPREAD_CHANCE: 0.03, // Chance per spice tile per spread tick
+  SPICE_GROWTH_RATE: 0.002, // Density increase per growth tick
+  CASH_NO_SPICE_AMOUNT_MIN: 10000,
+  CASH_NO_SPICE_AMOUNT_MAX: 20000,
+  CASH_NO_SPICE_FREQ_MIN: 4000,
+  CASH_NO_SPICE_FREQ_MAX: 8000,
   // Difficulty multipliers (percentage values from rules.txt [General])
   EASY_BUILD_COST: 50,
   NORMAL_BUILD_COST: 100,
@@ -59,6 +74,10 @@ export function loadConstants(general: Record<string, string>): void {
   GameConstants.GUARD_TILE_RANGE = g('GuardTileRange', 12);
   GameConstants.STEALTH_DELAY = g('StealthDelay', 30);
   GameConstants.DEVIATE_DURATION = g('DeviateDuration', 500);
+  GameConstants.CASH_NO_SPICE_AMOUNT_MIN = g('CashDeliveryWhenNoSpiceAmountMin', 10000);
+  GameConstants.CASH_NO_SPICE_AMOUNT_MAX = g('CashDeliveryWhenNoSpiceAmountMax', 20000);
+  GameConstants.CASH_NO_SPICE_FREQ_MIN = g('CashDeliveryWhenNoSpiceFrequencyMin', 4000);
+  GameConstants.CASH_NO_SPICE_FREQ_MAX = g('CashDeliveryWhenNoSpiceFrequencyMax', 8000);
   GameConstants.EASY_BUILD_COST = g('EasyBuildCost', 50);
   GameConstants.NORMAL_BUILD_COST = g('NormalBuildCost', 100);
   GameConstants.HARD_BUILD_COST = g('HardBuildCost', 125);

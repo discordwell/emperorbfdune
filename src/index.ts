@@ -1151,7 +1151,7 @@ async function main() {
     scene.shake(0.3);
     selectionPanel.addMessage('Spice bloom detected!', '#ff8800');
     audioManager.playSfx('worm'); // Rumble sound
-    terrain.updateSpiceVisuals();
+    terrain.updateSpiceVisuals(); // Immediate visual update for bloom
     // Remove bloom marker
     const key = `${Math.floor(x)},${Math.floor(z)}`;
     const marker = bloomMarkers.get(key);
@@ -1161,6 +1161,26 @@ async function main() {
       (marker.mesh.material as THREE.Material).dispose();
       bloomMarkers.delete(key);
     }
+    // Bloom eruption damages nearby units (SpicePuff damage within bloom radius)
+    const dmgRadius = GameConstants.SPICE_BLOOM_DAMAGE_RADIUS;
+    const r2 = dmgRadius * dmgRadius;
+    const allUnits = unitQuery(world);
+    for (const eid of allUnits) {
+      if (Health.current[eid] <= 0) continue;
+      const dx = Position.x[eid] - x;
+      const dz = Position.z[eid] - z;
+      if (dx * dx + dz * dz <= r2) {
+        Health.current[eid] = Math.max(0, Health.current[eid] - GameConstants.SPICE_BLOOM_DAMAGE);
+        if (Health.current[eid] <= 0) {
+          EventBus.emit('unit:died', { entityId: eid, killerEntity: -1 });
+        }
+      }
+    }
+  });
+
+  // Cash fallback notification
+  EventBus.on('spice:cashFallback', ({ amount }) => {
+    selectionPanel.addMessage(`Emergency spice reserves: +${amount} credits`, '#FFD700');
   });
 
   // Under-attack notifications (throttled to once per 5 seconds)
@@ -1578,6 +1598,8 @@ async function main() {
     minimapRenderer.update(world);
     effectsManager.update(40); // ~40ms per tick at 25 TPS
     effectsManager.updateWormVisuals(sandwormSystem.getWorms(), 40);
+    // Flush pending spice visual changes from external sources (sandworms, etc.)
+    if (game.getTickCount() % 50 === 0) terrain.flushSpiceVisuals();
     damageNumbers.update();
     // Clean up stale bloom markers (TTL: 300 ticks = 12 seconds)
     for (const [key, marker] of bloomMarkers) {

@@ -9,8 +9,8 @@ import { worldToTile, TILE_SIZE } from '../utils/MathUtils';
 const MINIMAP_COLORS: Record<TerrainType, string> = {
   [TerrainType.Sand]: '#C2A54F',
   [TerrainType.Rock]: '#6B5B45',
-  [TerrainType.SpiceLow]: '#D4842A',
-  [TerrainType.SpiceHigh]: '#B85C1E',
+  [TerrainType.SpiceLow]: '#E89030',
+  [TerrainType.SpiceHigh]: '#FF6600',
   [TerrainType.Dunes]: '#D4B86A',
   [TerrainType.Cliff]: '#3A3025',
   [TerrainType.ConcreteSlab]: '#808080',
@@ -103,7 +103,15 @@ export class MinimapRenderer {
     this.terrainImageData = this.ctx.getImageData(0, 0, 200, 200);
   }
 
+  private updateCounter = 0;
+
   update(world: World): void {
+    // Re-render terrain periodically to reflect spice field changes
+    this.updateCounter++;
+    if (this.updateCounter % 125 === 0) {
+      this.renderTerrain();
+    }
+
     // Restore terrain base
     if (this.terrainImageData) {
       this.ctx.putImageData(this.terrainImageData, 0, 0);

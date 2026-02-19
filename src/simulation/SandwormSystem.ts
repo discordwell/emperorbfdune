@@ -95,6 +95,15 @@ export class SandwormSystem implements GameSystem {
           // Remove on next tick
           break;
       }
+
+      // Sandworm destroys spice on tiles it passes through (RemoveSpice=200 from rules.txt)
+      if (worm.state !== 'emerging' && worm.state !== 'submerging') {
+        const wormTile = worldToTile(worm.x, worm.z);
+        const spice = this.terrain.getSpice(wormTile.tx, wormTile.tz);
+        if (spice > 0) {
+          this.terrain.setSpice(wormTile.tx, wormTile.tz, Math.max(0, spice - 0.1));
+        }
+      }
     }
   }
 
