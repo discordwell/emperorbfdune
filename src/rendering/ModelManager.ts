@@ -132,7 +132,11 @@ export class ModelManager {
     // Deep clone materials to allow per-instance coloring
     clone.traverse((child) => {
       if (child instanceof THREE.Mesh) {
-        child.material = (child.material as THREE.Material).clone();
+        if (Array.isArray(child.material)) {
+          child.material = child.material.map(m => m.clone());
+        } else {
+          child.material = (child.material as THREE.Material).clone();
+        }
       }
     });
     return clone;

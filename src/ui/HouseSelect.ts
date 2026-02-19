@@ -813,8 +813,10 @@ export class HouseSelect {
           opponents.push({ prefix: enemyHouse.prefix, difficulty: house.difficulty });
         }
         house.opponents = opponents;
-        // Keep enemyPrefix for backward compat (first opponent)
+        // Keep enemyPrefix/enemyName for backward compat (first opponent)
+        const prefixToName: Record<string, string> = { AT: 'Atreides', HK: 'Harkonnen', OR: 'Ordos' };
         house.enemyPrefix = opponents[0].prefix;
+        house.enemyName = prefixToName[opponents[0].prefix] ?? house.enemyName;
         this.overlay.remove();
         resolve(house);
       };
