@@ -443,6 +443,40 @@ export class UnitRenderer {
     return sprite;
   }
 
+  // Cached rank textures (1 chevron, 2 chevrons, 3 chevrons)
+  private static rankTextures: THREE.Texture[] | null = null;
+
+  private static getRankTextures(): THREE.Texture[] {
+    if (UnitRenderer.rankTextures) return UnitRenderer.rankTextures;
+    const colors = ['#CD7F32', '#C0C0C0', '#FFD700']; // bronze, silver, gold
+    UnitRenderer.rankTextures = colors.map((color, idx) => {
+      const count = idx + 1;
+      const canvas = document.createElement('canvas');
+      canvas.width = 32;
+      canvas.height = 32;
+      const ctx = canvas.getContext('2d')!;
+      ctx.clearRect(0, 0, 32, 32);
+      // Draw chevrons (V shapes stacked vertically)
+      ctx.strokeStyle = color;
+      ctx.fillStyle = color;
+      ctx.lineWidth = 2;
+      const startY = 16 - count * 4;
+      for (let i = 0; i < count; i++) {
+        const y = startY + i * 8;
+        ctx.beginPath();
+        ctx.moveTo(6, y);
+        ctx.lineTo(16, y + 6);
+        ctx.lineTo(26, y);
+        ctx.lineWidth = 3;
+        ctx.stroke();
+      }
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.needsUpdate = true;
+      return tex;
+    });
+    return UnitRenderer.rankTextures;
+  }
+
   private updateRankSprite(eid: number): void {
     if (!this.currentWorld || !hasComponent(this.currentWorld, Veterancy, eid)) return;
     const rank = Veterancy.rank[eid];
@@ -453,9 +487,11 @@ export class UnitRenderer {
     }
 
     let sprite = this.rankSprites.get(eid);
+    const textures = UnitRenderer.getRankTextures();
+    const tex = textures[Math.min(rank, 3) - 1];
+
     if (!sprite) {
-      // Gold chevron/star for rank
-      const mat = new THREE.SpriteMaterial({ color: 0xffd700 });
+      const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
       sprite = new THREE.Sprite(mat);
       const obj = this.entityObjects.get(eid);
       if (obj) {
@@ -463,15 +499,13 @@ export class UnitRenderer {
         sprite.position.y = 2.5;
       }
       this.rankSprites.set(eid, sprite);
+    } else {
+      (sprite.material as THREE.SpriteMaterial).map = tex;
+      (sprite.material as THREE.SpriteMaterial).needsUpdate = true;
     }
 
     sprite.visible = true;
-    // Scale stars by rank: 1=small, 2=medium, 3=large
-    const size = 0.2 + rank * 0.1;
-    sprite.scale.set(size * rank, size, 1);
-    // Color by rank: bronze -> silver -> gold
-    const colors = [0, 0xCD7F32, 0xC0C0C0, 0xFFD700];
-    (sprite.material as THREE.SpriteMaterial).color.setHex(colors[rank] ?? 0xFFD700);
+    sprite.scale.set(0.8, 0.8, 1);
   }
 
   private removeVisual(eid: number): void {

@@ -100,8 +100,10 @@ export class SandwormSystem implements GameSystem {
 
   private spawnWorm(): void {
     // Spawn on sand tile away from any buildings
-    const x = randomFloat(20, 480);
-    const z = randomFloat(20, 480);
+    const worldW = this.terrain.getMapWidth() * 2;
+    const worldH = this.terrain.getMapHeight() * 2;
+    const x = randomFloat(20, worldW - 20);
+    const z = randomFloat(20, worldH - 20);
     const tile = worldToTile(x, z);
     const terrainType = this.terrain.getTerrainType(tile.tx, tile.tz);
 
@@ -140,8 +142,10 @@ export class SandwormSystem implements GameSystem {
       // Pick new random target on sand
       worm.targetX = worm.x + randomFloat(-60, 60);
       worm.targetZ = worm.z + randomFloat(-60, 60);
-      worm.targetX = Math.max(10, Math.min(500, worm.targetX));
-      worm.targetZ = Math.max(10, Math.min(500, worm.targetZ));
+      const wW = this.terrain.getMapWidth() * 2;
+      const wH = this.terrain.getMapHeight() * 2;
+      worm.targetX = Math.max(10, Math.min(wW - 10, worm.targetX));
+      worm.targetZ = Math.max(10, Math.min(wH - 10, worm.targetZ));
     } else if (dist > 0.1) {
       worm.x += (dx / dist) * worm.speed;
       worm.z += (dz / dist) * worm.speed;
