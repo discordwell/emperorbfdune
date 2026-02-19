@@ -4,7 +4,7 @@ import type { ModelManager, LoadedModel } from './ModelManager';
 import type { ArtEntry } from '../config/ArtIniParser';
 import {
   Position, Rotation, Renderable, Health, Selectable, Owner,
-  BuildingType, UnitType, MoveTarget, Veterancy, hasComponent,
+  BuildingType, UnitType, MoveTarget, Veterancy, Combat, hasComponent,
   renderQuery, renderEnter, renderExit,
   type World,
 } from '../core/ECS';
@@ -57,6 +57,12 @@ export class UnitRenderer {
   private unitCategoryFn: ((eid: number) => 'infantry' | 'vehicle' | 'aircraft' | 'building') | null = null;
   // Attack-move status checker
   private isAttackMoveFn: ((eid: number) => boolean) | null = null;
+  // Attack range circles (shown when selected)
+  private rangeCircles = new Map<number, THREE.Line>();
+  private rangeCircleEnabled = true;
+  // Rearm progress callback: returns 0-1 progress or null if not rearming
+  private rearmProgressFn: ((eid: number) => number | null) | null = null;
+  private rearmBars = new Map<number, THREE.Sprite>();
 
   constructor(sceneManager: SceneManager, modelManager: ModelManager, artMap: Map<string, ArtEntry>) {
     this.sceneManager = sceneManager;
@@ -75,6 +81,26 @@ export class UnitRenderer {
 
   setAttackMoveFn(fn: (eid: number) => boolean): void {
     this.isAttackMoveFn = fn;
+  }
+
+  isRangeCircleEnabled(): boolean {
+    return this.rangeCircleEnabled;
+  }
+
+  setRangeCircleEnabled(enabled: boolean): void {
+    this.rangeCircleEnabled = enabled;
+    if (!enabled) {
+      for (const [, line] of this.rangeCircles) {
+        this.sceneManager.scene.remove(line);
+        line.geometry.dispose();
+        (line.material as THREE.Material).dispose();
+      }
+      this.rangeCircles.clear();
+    }
+  }
+
+  setRearmProgressFn(fn: (eid: number) => number | null): void {
+    this.rearmProgressFn = fn;
   }
 
   /** Mark a building as under construction — will animate from scaffold to solid */
@@ -306,8 +332,48 @@ export class UnitRenderer {
         }
       }
 
+      // Update attack range circle
+      if (this.rangeCircleEnabled) {
+        const selected = Selectable.selected[eid] === 1;
+        if (selected && obj.visible && this.currentWorld && hasComponent(this.currentWorld, Combat, eid)) {
+          const range = Combat.attackRange[eid];
+          if (range > 0) {
+            let rc = this.rangeCircles.get(eid);
+            if (!rc) {
+              rc = this.createRangeCircle(range);
+              this.sceneManager.scene.add(rc);
+              this.rangeCircles.set(eid, rc);
+            }
+            rc.position.set(Position.x[eid], 0.15, Position.z[eid]);
+            rc.visible = true;
+            // Recreate if range changed (veterancy bonus)
+            const currentRadius = (rc.userData as any).range;
+            if (Math.abs(currentRadius - range) > 0.5) {
+              this.sceneManager.scene.remove(rc);
+              rc.geometry.dispose();
+              (rc.material as THREE.Material).dispose();
+              rc = this.createRangeCircle(range);
+              this.sceneManager.scene.add(rc);
+              rc.position.set(Position.x[eid], 0.15, Position.z[eid]);
+              this.rangeCircles.set(eid, rc);
+            }
+          }
+        } else {
+          const rc = this.rangeCircles.get(eid);
+          if (rc) {
+            this.sceneManager.scene.remove(rc);
+            rc.geometry.dispose();
+            (rc.material as THREE.Material).dispose();
+            this.rangeCircles.delete(eid);
+          }
+        }
+      }
+
       // Update health bar
       this.updateHealthBar(eid);
+
+      // Update rearm progress bar
+      this.updateRearmBar(eid);
 
       // Update veterancy indicator
       this.updateRankSprite(eid);
@@ -454,6 +520,47 @@ export class UnitRenderer {
     return sprite;
   }
 
+  private updateRearmBar(eid: number): void {
+    if (!this.rearmProgressFn) return;
+    const progress = this.rearmProgressFn(eid);
+    if (progress === null || progress >= 1) {
+      const bar = this.rearmBars.get(eid);
+      if (bar) bar.visible = false;
+      return;
+    }
+
+    let bar = this.rearmBars.get(eid);
+    if (!bar) {
+      const obj = this.entityObjects.get(eid);
+      if (!obj) return; // Don't create orphan sprites
+      const mat = new THREE.SpriteMaterial({ color: 0x4488ff });
+      bar = new THREE.Sprite(mat);
+      obj.add(bar);
+      bar.position.y = 2.3; // Above health bar
+      this.rearmBars.set(eid, bar);
+    }
+    bar.visible = true;
+    bar.scale.set(progress * 1.5, 0.1, 1);
+  }
+
+  private createRangeCircle(range: number): THREE.Line {
+    const segments = 48;
+    const points: THREE.Vector3[] = [];
+    for (let i = 0; i <= segments; i++) {
+      const theta = (i / segments) * Math.PI * 2;
+      points.push(new THREE.Vector3(Math.cos(theta) * range, 0, Math.sin(theta) * range));
+    }
+    const geo = new THREE.BufferGeometry().setFromPoints(points);
+    const mat = new THREE.LineBasicMaterial({
+      color: 0x4488ff,
+      transparent: true,
+      opacity: 0.25,
+    });
+    const line = new THREE.Line(geo, mat);
+    (line.userData as any).range = range;
+    return line;
+  }
+
   // Cached rank textures (1 chevron, 2 chevrons, 3 chevrons)
   private static rankTextures: THREE.Texture[] | null = null;
 
@@ -527,6 +634,8 @@ export class UnitRenderer {
       if (circle) { obj.remove(circle); circle.geometry.dispose(); (circle.material as THREE.Material).dispose(); }
       const bar = this.healthBars.get(eid);
       if (bar) { obj.remove(bar); (bar.material as THREE.Material).dispose(); }
+      const rearmBar = this.rearmBars.get(eid);
+      if (rearmBar) { obj.remove(rearmBar); (rearmBar.material as THREE.Material).dispose(); }
       const rank = this.rankSprites.get(eid);
       if (rank) { obj.remove(rank); (rank.material as THREE.Material).dispose(); }
 
@@ -542,9 +651,12 @@ export class UnitRenderer {
     }
     this.selectionCircles.delete(eid);
     this.healthBars.delete(eid);
+    this.rearmBars.delete(eid);
     this.rankSprites.delete(eid);
     this.pendingModels.delete(eid);
     this.deconstructing.delete(eid);
+    const rc = this.rangeCircles.get(eid);
+    if (rc) { this.sceneManager.scene.remove(rc); rc.geometry.dispose(); (rc.material as THREE.Material).dispose(); this.rangeCircles.delete(eid); }
   }
 
   /** Animate dying entities (call each frame) */

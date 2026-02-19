@@ -1448,6 +1448,11 @@ async function main() {
         }
       }
 
+      // Flash minimap ping at spawn location for player units
+      if (owner === 0 && eid >= 0) {
+        minimapRenderer.flashPing(Position.x[eid], Position.z[eid], '#44ff44');
+      }
+
       // AI auto-deploys MCVs into ConYards
       if (owner !== 0 && eid >= 0 && unitType.endsWith('MCV')) {
         const prefix = unitType.substring(0, 2);
@@ -1500,6 +1505,13 @@ async function main() {
   const MAX_AMMO = 6;
   const aircraftAmmo = new Map<number, number>(); // eid -> shots remaining
   const rearmingAircraft = new Set<number>(); // aircraft currently at a pad rearming
+
+  // Wire rearm progress to UnitRenderer
+  unitRenderer.setRearmProgressFn((eid: number) => {
+    if (!rearmingAircraft.has(eid)) return null;
+    const ammo = aircraftAmmo.get(eid) ?? 0;
+    return ammo / MAX_AMMO;
+  });
 
   // Ability state maps moved to AbilitySystem
 
@@ -1593,6 +1605,28 @@ async function main() {
     }
     commandManager.setWorld(world);
     commandManager.updateWaypoints();
+
+    // Update waypoint path lines for selected units (every 10 ticks for perf)
+    if (game.getTickCount() % 10 === 0) {
+      const selected = selectionManager.getSelectedEntities();
+      if (selected.length > 0 && selected.length <= 20) {
+        const positions = new Map<number, { x: number; z: number }>();
+        const moveTargets = new Map<number, { x: number; z: number; active: boolean }>();
+        for (const eid of selected) {
+          positions.set(eid, { x: Position.x[eid], z: Position.z[eid] });
+          moveTargets.set(eid, { x: MoveTarget.x[eid], z: MoveTarget.z[eid], active: MoveTarget.active[eid] === 1 });
+        }
+        effectsManager.updateWaypointLines(
+          selected, positions,
+          commandManager.getWaypointQueues(),
+          commandManager.getPatrolEntities(),
+          moveTargets
+        );
+      } else {
+        effectsManager.clearWaypointLines();
+      }
+    }
+
     buildingPlacement.updateOccupiedTiles(world);
     pathfinder.updateBlockedTiles(buildingPlacement.getOccupiedTiles());
     selectionPanel.setWorld(world);
@@ -2206,6 +2240,8 @@ async function main() {
     isFogEnabled: () => fogOfWar.isEnabled(),
     setDamageNumbers: (v: boolean) => damageNumbers.setEnabled(v),
     isDamageNumbers: () => damageNumbers.isEnabled(),
+    setRangeCircles: (v: boolean) => unitRenderer.setRangeCircleEnabled(v),
+    isRangeCircles: () => unitRenderer.isRangeCircleEnabled(),
   });
 
   // --- SPAWN INITIAL ENTITIES ---

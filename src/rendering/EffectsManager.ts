@@ -907,6 +907,110 @@ export class EffectsManager {
     }
   }
 
+  // Waypoint path lines per entity
+  private waypointLines = new Map<number, THREE.Line>();
+  private waypointLineMat = new THREE.LineDashedMaterial({
+    color: 0x44ff44,
+    dashSize: 1.0,
+    gapSize: 0.6,
+    transparent: true,
+    opacity: 0.6,
+  });
+  private patrolLineMat = new THREE.LineDashedMaterial({
+    color: 0x44aaff,
+    dashSize: 1.0,
+    gapSize: 0.6,
+    transparent: true,
+    opacity: 0.6,
+  });
+
+  /** Show waypoint path lines for selected units */
+  updateWaypointLines(
+    selectedEids: number[],
+    positions: Map<number, { x: number; z: number }>,
+    waypointQueues: Map<number, Array<{ x: number; z: number }>>,
+    patrolEntities: Map<number, { startX: number; startZ: number; endX: number; endZ: number }>,
+    moveTargets: Map<number, { x: number; z: number; active: boolean }>
+  ): void {
+    const selectedSet = new Set(selectedEids);
+
+    // Remove lines for entities no longer selected
+    for (const [eid, line] of this.waypointLines) {
+      if (!selectedSet.has(eid)) {
+        this.sceneManager.scene.remove(line);
+        line.geometry.dispose();
+        this.waypointLines.delete(eid);
+      }
+    }
+
+    for (const eid of selectedEids) {
+      const pos = positions.get(eid);
+      if (!pos) continue;
+
+      const queue = waypointQueues.get(eid);
+      const patrol = patrolEntities.get(eid);
+      const mt = moveTargets.get(eid);
+
+      // Build path: current position -> current move target -> waypoints
+      const points: THREE.Vector3[] = [];
+      points.push(new THREE.Vector3(pos.x, 0.4, pos.z));
+
+      if (patrol) {
+        // Patrol: show patrol path (current pos -> end -> start -> end)
+        points.push(new THREE.Vector3(patrol.endX, 0.4, patrol.endZ));
+        points.push(new THREE.Vector3(patrol.startX, 0.4, patrol.startZ));
+      } else {
+        // Regular waypoints
+        if (mt && mt.active) {
+          points.push(new THREE.Vector3(mt.x, 0.4, mt.z));
+        }
+        if (queue) {
+          for (const wp of queue) {
+            points.push(new THREE.Vector3(wp.x, 0.4, wp.z));
+          }
+        }
+      }
+
+      // Need at least 2 points for a line
+      if (points.length < 2) {
+        const existing = this.waypointLines.get(eid);
+        if (existing) {
+          this.sceneManager.scene.remove(existing);
+          existing.geometry.dispose();
+          this.waypointLines.delete(eid);
+        }
+        continue;
+      }
+
+      const isPatrol = !!patrol;
+      const existingLine = this.waypointLines.get(eid);
+
+      if (existingLine) {
+        // Update existing line geometry
+        const newGeo = new THREE.BufferGeometry().setFromPoints(points);
+        existingLine.geometry.dispose();
+        existingLine.geometry = newGeo;
+        existingLine.material = isPatrol ? this.patrolLineMat : this.waypointLineMat;
+        existingLine.computeLineDistances();
+      } else {
+        // Create new line
+        const geo = new THREE.BufferGeometry().setFromPoints(points);
+        const line = new THREE.Line(geo, isPatrol ? this.patrolLineMat : this.waypointLineMat);
+        line.computeLineDistances();
+        this.sceneManager.scene.add(line);
+        this.waypointLines.set(eid, line);
+      }
+    }
+  }
+
+  clearWaypointLines(): void {
+    for (const [, line] of this.waypointLines) {
+      this.sceneManager.scene.remove(line);
+      line.geometry.dispose();
+    }
+    this.waypointLines.clear();
+  }
+
   /** Update building damage smoke/fire based on health ratio */
   updateBuildingDamage(eid: number, x: number, y: number, z: number, healthRatio: number): void {
     const existing = this.buildingDamageEffects.get(eid);

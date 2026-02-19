@@ -21,6 +21,8 @@ export interface PauseMenuDeps {
   isFogEnabled?: () => boolean;
   setDamageNumbers?: (enabled: boolean) => void;
   isDamageNumbers?: () => boolean;
+  setRangeCircles?: (enabled: boolean) => void;
+  isRangeCircles?: () => boolean;
 }
 
 export class PauseMenu {
@@ -36,6 +38,7 @@ export class PauseMenu {
     if (saved.scrollSpeed !== undefined) deps.setScrollSpeed?.(saved.scrollSpeed);
     if (saved.fogEnabled !== undefined) deps.setFogEnabled?.(saved.fogEnabled);
     if (saved.damageNumbers !== undefined) deps.setDamageNumbers?.(saved.damageNumbers);
+    if (saved.rangeCircles !== undefined) deps.setRangeCircles?.(saved.rangeCircles);
   }
 
   get isOpen(): boolean {
@@ -233,6 +236,7 @@ export class PauseMenu {
     let scrollSpd = currentSettings.scrollSpeed ?? 1;
     let fogEnabled = currentSettings.fogEnabled ?? (this.deps.isFogEnabled?.() ?? true);
     let dmgNumbers = currentSettings.damageNumbers ?? (this.deps.isDamageNumbers?.() ?? true);
+    let rangeCircles = currentSettings.rangeCircles ?? (this.deps.isRangeCircles?.() ?? true);
 
     const createSlider = (label: string, value: number, onChange: (v: number) => void): HTMLElement => {
       const row = document.createElement('div');
@@ -326,6 +330,11 @@ export class PauseMenu {
       this.deps.setDamageNumbers?.(v);
     }));
 
+    panel.appendChild(createToggle('Attack Range Circles', rangeCircles, (v) => {
+      rangeCircles = v;
+      this.deps.setRangeCircles?.(v);
+    }));
+
     // Back button with save
     const backBtn = document.createElement('button');
     backBtn.textContent = 'Back';
@@ -333,7 +342,7 @@ export class PauseMenu {
     backBtn.onmouseenter = () => { backBtn.style.borderColor = '#88f'; };
     backBtn.onmouseleave = () => { backBtn.style.borderColor = '#555'; };
     backBtn.onclick = () => {
-      localStorage.setItem('ebfd_settings', JSON.stringify({ musicVol, sfxVol, scrollSpeed: scrollSpd, fogEnabled, damageNumbers: dmgNumbers }));
+      localStorage.setItem('ebfd_settings', JSON.stringify({ musicVol, sfxVol, scrollSpeed: scrollSpd, fogEnabled, damageNumbers: dmgNumbers, rangeCircles }));
       this.close();
       this.show();
     };

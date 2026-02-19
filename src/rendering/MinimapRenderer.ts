@@ -152,7 +152,9 @@ export class MinimapRenderer {
       }
       const px = Position.x[eid] * scaleWx;
       const pz = Position.z[eid] * scaleWz;
-      this.ctx.fillStyle = PLAYER_COLORS[owner] ?? '#fff';
+      // Harvesters shown in yellow for friendly, otherwise player color
+      const isHarvester = hasComponent(world, Harvester, eid);
+      this.ctx.fillStyle = (isHarvester && owner === 0) ? '#FFD700' : (PLAYER_COLORS[owner] ?? '#fff');
       this.ctx.fillRect(px - 1, pz - 1, 3, 3);
     }
 

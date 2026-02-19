@@ -409,10 +409,17 @@ export class Sidebar {
       ? `<div style="position:absolute;bottom:0;left:0;height:3px;width:${Math.round(progress!.progress * 100)}%;background:#0f0;transition:width 0.3s;"></div>`
       : '';
 
+    // Queue count badge (shown on icon area)
+    const queue = this.production.getQueue(this.playerId, isBuilding);
+    const queuedCount = queue.filter(q => q.typeName === name).length;
+    const queueBadge = queuedCount > 0
+      ? `<span style="position:absolute;top:1px;left:1px;font-size:9px;color:#4f4;background:rgba(0,0,0,0.7);padding:0 2px;border-radius:2px;font-weight:bold;">x${queuedCount}</span>`
+      : '';
+
     item.innerHTML = `
       ${iconHtml}
       <div style="padding:4px 4px;flex:1;min-width:0;">
-        ${hotkeyBadge}${repeatBadge}
+        ${hotkeyBadge}${repeatBadge}${queueBadge}
         <div style="font-size:11px;font-weight:bold;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${lockIcon}${displayName}</div>
         <div style="color:${costColor};font-size:10px;">$${cost}</div>
         ${blockDetail}

@@ -70,6 +70,14 @@ export class CommandManager {
     return this.commandMode;
   }
 
+  getWaypointQueues(): Map<number, Array<{ x: number; z: number }>> {
+    return this.waypointQueues;
+  }
+
+  getPatrolEntities(): Map<number, { startX: number; startZ: number; endX: number; endZ: number }> {
+    return this.patrolEntities;
+  }
+
   enterCommandMode(mode: CommandMode, label?: string): void {
     this.commandMode = mode;
     document.body.style.cursor = 'crosshair';
