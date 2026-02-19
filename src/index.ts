@@ -1056,6 +1056,7 @@ async function main() {
     // Animate construction over ~3 seconds (75 ticks at 25 TPS)
     if (eid >= 0) {
       audioManager.playSfx('place');
+      EventBus.emit('building:placed', { entityId: eid, buildingType: typeName, owner: 0 });
       const def = gameRules.buildings.get(typeName);
       const duration = def ? Math.max(25, Math.floor(def.buildTime * 0.5)) : 75;
       unitRenderer.startConstruction(eid, duration);
@@ -1552,8 +1553,11 @@ async function main() {
         const ownerAi = aiPlayers[owner - 1];
         if (bDef && ownerAi) {
           const pos = ownerAi.getNextBuildingPlacement(unitType, bDef);
-          spawnBuilding(world, unitType, owner, pos.x, pos.z);
+          const aiBldgEid = spawnBuilding(world, unitType, owner, pos.x, pos.z);
           movement.invalidateAllPaths(); // AI building placed
+          if (aiBldgEid >= 0) {
+            EventBus.emit('building:placed', { entityId: aiBldgEid, buildingType: unitType, owner });
+          }
           // Spawn free unit for AI buildings (e.g. Harvester from Refinery)
           if (bDef.getUnitWhenBuilt) {
             spawnUnit(world, bDef.getUnitWhenBuilt, owner, pos.x + 3, pos.z + 3);
@@ -2943,6 +2947,55 @@ async function main() {
         if (eids.length > 0) restoredGroups.set(Number(key), eids);
       }
       selectionManager.setControlGroups(restoredGroups);
+    }
+
+    // Restore AI base positions from saved buildings (placedBuildings is empty after load)
+    for (let i = 0; i < aiPlayers.length; i++) {
+      const playerId = i + 1;
+      let sumX = 0, sumZ = 0, count = 0;
+      const buildings = buildingQuery(world);
+      for (const eid of buildings) {
+        if (Owner.playerId[eid] !== playerId || Health.current[eid] <= 0) continue;
+        sumX += Position.x[eid];
+        sumZ += Position.z[eid];
+        count++;
+      }
+      if (count > 0) {
+        aiPlayers[i].setBasePosition(sumX / count, sumZ / count);
+      }
+      // Set attack target to player's base (find player's ConYard or center of buildings)
+      let pBaseX = 0, pBaseZ = 0, pCount = 0;
+      for (const eid of buildings) {
+        if (Owner.playerId[eid] !== 0 || Health.current[eid] <= 0) continue;
+        pBaseX += Position.x[eid];
+        pBaseZ += Position.z[eid];
+        pCount++;
+      }
+      if (pCount > 0) {
+        aiPlayers[i].setTargetPosition(pBaseX / pCount, pBaseZ / pCount);
+      }
+    }
+
+    // Position camera at player's base after load
+    const playerBuildings = buildingQuery(world);
+    let camX = 0, camZ = 0, camCount = 0;
+    for (const eid of playerBuildings) {
+      if (Owner.playerId[eid] !== 0 || Health.current[eid] <= 0) continue;
+      const typeId = BuildingType.id[eid];
+      const bName = buildingTypeNames[typeId] ?? '';
+      if (bName.includes('ConYard')) {
+        camX = Position.x[eid];
+        camZ = Position.z[eid];
+        camCount = 1;
+        break; // Prefer ConYard
+      }
+      camX += Position.x[eid];
+      camZ += Position.z[eid];
+      camCount++;
+    }
+    if (camCount > 0) {
+      scene.cameraTarget.set(camX / camCount, 0, camZ / camCount);
+      scene.updateCameraPosition();
     }
 
     console.log(`Restored ${savedGame.entities.length} entities from save (tick ${savedGame.tick})`);
