@@ -291,9 +291,10 @@ export class CombatSystem implements GameSystem {
       if (targetEid < 0) {
         const isMoving = hasComponent(world, MoveTarget, eid) && MoveTarget.active[eid] === 1;
         const isBuilding = hasComponent(world, BuildingType, eid);
-        // Only auto-acquire if: idle, building, attack-moving, or AI unit
-        if (isMoving && !isBuilding && !this.attackMoveEntities.has(eid) && Owner.playerId[eid] === this.localPlayerId) {
-          // Normal move — don't auto-acquire
+        const stance = this.stances.get(eid) ?? 1; // Default defensive
+        // Skip auto-acquire for non-aggressive units that are actively moving
+        // Aggressive (0) always fights; Defensive (1) and Hold (2) don't interrupt movement
+        if (isMoving && !isBuilding && !this.attackMoveEntities.has(eid) && stance !== 0) {
           continue;
         }
         targetEid = this.findNearestEnemy(world, eid, entities);

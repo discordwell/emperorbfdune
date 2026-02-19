@@ -933,7 +933,9 @@ async function main() {
     const typeId = BuildingType.id[eid];
     const typeName = buildingTypeNames[typeId];
     const def = typeName ? gameRules.buildings.get(typeName) : null;
-    const refund = def ? Math.floor(def.cost * 0.5) : 0;
+    // Refund scales by building HP ratio (damaged buildings return less)
+    const hpRatio = Health.max[eid] > 0 ? Health.current[eid] / Health.max[eid] : 1;
+    const refund = def ? Math.floor(def.cost * 0.5 * hpRatio) : 0;
 
     harvestSystem.addSolaris(0, refund);
     selectionPanel.addMessage(`Sold for ${refund} Solaris`, '#f0c040');
@@ -946,12 +948,20 @@ async function main() {
       productionSystem.removePlayerBuilding(0, typeName);
     }
     combatSystem.unregisterUnit(eid);
+
+    const bx = Position.x[eid];
+    const bz = Position.z[eid];
+
     // Prevent combat targeting this building
     Health.current[eid] = 0;
 
+    // Notify systems that building is gone (path invalidation, AI tracking, etc.)
+    EventBus.emit('building:destroyed', { entityId: eid, owner: 0, x: bx, z: bz });
+    movement.invalidateAllPaths();
+
     // Animate deconstruction over ~2 seconds (50 ticks), then remove
     unitRenderer.startDeconstruction(eid, 50, () => {
-      effectsManager.spawnExplosion(Position.x[eid], Position.y[eid], Position.z[eid], 'small');
+      effectsManager.spawnExplosion(bx, Position.y[eid], bz, 'small');
       try { removeEntity(world, eid); } catch {}
     });
   }

@@ -1189,11 +1189,12 @@ export class AIPlayer implements GameSystem {
       { name: `${px}Refinery`, minSolaris: 1600, phase: 1 },
       { name: `${px}Barracks`, minSolaris: 300, phase: 2 },
       { name: `${px}Factory`, minSolaris: 1100, phase: 3 },
-      { name: `${px}SmWindtrap`, minSolaris: 300, phase: 4 },
+      { name: `${px}Outpost`, minSolaris: 400, phase: 4 }, // Radar + tech unlock
       { name: `${px}SmWindtrap`, minSolaris: 300, phase: 5 },
-      { name: `${px}Refinery`, minSolaris: 1600, phase: 6 }, // Second refinery
-      { name: `${px}Hanger`, minSolaris: 1000, phase: 7 },
-      { name: `${px}SmWindtrap`, minSolaris: 300, phase: 8 },
+      { name: `${px}SmWindtrap`, minSolaris: 300, phase: 6 },
+      { name: `${px}Refinery`, minSolaris: 1600, phase: 7 }, // Second refinery
+      { name: `${px}Hanger`, minSolaris: 1000, phase: 8 },
+      { name: `${px}SmWindtrap`, minSolaris: 300, phase: 9 },
     ];
 
     if (this.buildPhase < buildOrder.length) {
@@ -1337,7 +1338,7 @@ export class AIPlayer implements GameSystem {
 
       // Priority 6: Advanced structures (starport, hangar, palace)
       if (totalBuildings < 20 && solaris > 2000) {
-        const advBuildings = [`${px}Starport`, `${px}Hanger`, `${px}Palace`];
+        const advBuildings = [`${px}Outpost`, `${px}Starport`, `${px}Hanger`, `${px}Palace`];
         for (const name of advBuildings) {
           if (this.production.canBuild(this.playerId, name, true)) {
             this.production.startProduction(this.playerId, name, true);

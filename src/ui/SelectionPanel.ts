@@ -354,7 +354,8 @@ export class SelectionPanel {
       const upgradeBtn = (canUpgrade && !upgradeInProgress)
         ? `<button id="upgrade-btn" style="padding:4px 12px;background:#111144;border:1px solid #44f;color:#88f;cursor:pointer;font-size:11px;">Upgrade $${adjustedUpgradeCost}</button>`
         : '';
-      const refund = def ? Math.floor(def.cost * 0.5) : 0;
+      const sellHpRatio = maxHp > 0 ? hp / maxHp : 1;
+      const refund = def ? Math.floor(def.cost * 0.5 * sellHpRatio) : 0;
       const isSellConfirm = this.sellConfirmEid === eid;
       const sellLabel = isSellConfirm ? `Confirm Sell ($${refund})` : `Sell ($${refund})`;
       const sellBg = isSellConfirm ? '#661111' : '#441111';
