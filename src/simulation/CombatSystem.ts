@@ -9,6 +9,7 @@ import type { BulletDef } from '../config/WeaponDefs';
 import { distance2D, worldToTile, angleBetween, lerpAngle } from '../utils/MathUtils';
 import { EventBus } from '../core/EventBus';
 import type { FogOfWar } from '../rendering/FogOfWar';
+import type { SpatialGrid } from '../utils/SpatialGrid';
 
 const TILE_SIZE = 2;
 
@@ -41,6 +42,8 @@ export class CombatSystem implements GameSystem {
   private suppressedEntities = new Set<number>();
   // Bullet definition lookup cache: turret name -> BulletDef (null if not found)
   private bulletCache = new Map<string, BulletDef | null>();
+  // Spatial grid from MovementSystem for efficient neighbor queries
+  private spatialGrid: SpatialGrid | null = null;
 
   constructor(rules: GameRules) {
     this.rules = rules;
@@ -48,6 +51,10 @@ export class CombatSystem implements GameSystem {
 
   setPlayerFaction(playerId: number, prefix: string): void {
     this.playerFactions.set(playerId, prefix);
+  }
+
+  setSpatialGrid(grid: SpatialGrid): void {
+    this.spatialGrid = grid;
   }
 
   setFogOfWar(fog: FogOfWar, localPlayerId = 0): void {
@@ -541,16 +548,24 @@ export class CombatSystem implements GameSystem {
     this.applyDamageToEntity(world, attackerEid, targetEid, baseDamage);
   }
 
-  private findNearestEnemy(world: World, eid: number, entities: readonly number[]): number {
+  private findNearestEnemy(world: World, eid: number, _entities: readonly number[]): number {
     const myOwner = Owner.playerId[eid];
     const viewRange = Combat.attackRange[eid] * 2; // Auto-acquire at 2x attack range
-    let bestDist = viewRange * 2; // In world units (tiles * TILE_SIZE)
+    let bestScore = Infinity;
     let bestTarget = -1;
 
     const px = Position.x[eid];
     const pz = Position.z[eid];
 
-    for (const other of entities) {
+    // Use spatial grid if available for O(n*k) lookup, else fall back to full scan
+    const candidates = this.spatialGrid
+      ? this.spatialGrid.getInRadius(px, pz, viewRange)
+      : _entities as number[];
+
+    // Get attacker's bullet def for warhead effectiveness scoring
+    const bullet = this.getBulletDef(eid);
+
+    for (const other of candidates) {
       if (Owner.playerId[other] === myOwner) continue;
       if (!hasComponent(world, Health, other)) continue;
       if (Health.current[other] <= 0) continue;
@@ -569,8 +584,33 @@ export class CombatSystem implements GameSystem {
       }
 
       const dist = distance2D(px, pz, Position.x[other], Position.z[other]);
-      if (dist < bestDist) {
-        bestDist = dist;
+      if (dist > viewRange) continue;
+
+      // Weighted scoring: lower = better target
+      let score = dist; // Base: distance
+
+      // Bonus: prefer nearly-dead targets (focus fire)
+      const hpRatio = Health.max[other] > 0 ? Health.current[other] / Health.max[other] : 1;
+      score -= (1 - hpRatio) * 8; // Up to 8 units bonus for low-HP targets
+
+      // Bonus: prefer targets we deal extra damage to (warhead effectiveness)
+      if (bullet?.warhead && hasComponent(world, Armour, other)) {
+        const warhead = this.rules.warheads.get(bullet.warhead);
+        if (warhead) {
+          const armourIdx = Armour.type[other];
+          const armourName = this.armourTypes[armourIdx] ?? 'None';
+          const mult = (warhead.vs[armourName] ?? 100) / 100;
+          score -= (mult - 1) * 6; // Bonus for targets we're effective against
+        }
+      }
+
+      // Penalty: deprioritize buildings (prefer mobile threats)
+      if (hasComponent(world, BuildingType, other)) {
+        score += 10;
+      }
+
+      if (score < bestScore) {
+        bestScore = score;
         bestTarget = other;
       }
     }

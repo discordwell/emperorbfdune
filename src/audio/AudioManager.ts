@@ -50,6 +50,10 @@ export class AudioManager {
   private sfxCooldowns = new Map<string, number>(); // SfxType -> last play timestamp
   private samplesPreloaded = false;
   private unitTypeResolver: ((eid: number) => string) | null = null;
+  // Camera position for positional audio
+  private listenerX = 55;
+  private listenerZ = 55;
+  private maxAudioRange = 60; // World units beyond which sounds are silent
   // Ambient wind
   private windNode: AudioBufferSourceNode | null = null;
   private windGain: GainNode | null = null;
@@ -208,11 +212,15 @@ export class AudioManager {
       this.playSfx('deathBuilding');
       this.bumpCombatIntensity(0.25);
     });
-    EventBus.on('combat:fire', () => {
+    EventBus.on('combat:fire', ({ attackerX, attackerZ }: { attackerX: number; attackerZ: number }) => {
       const now = Date.now();
       if (now - this.lastShotTime > 100) { // Max 10 shot sounds/sec
         this.lastShotTime = now;
-        this.playSfx('shot');
+        if (attackerX !== undefined && attackerZ !== undefined) {
+          this.playSfxAt('shot', attackerX, attackerZ);
+        } else {
+          this.playSfx('shot');
+        }
       }
       this.bumpCombatIntensity(0.02);
     });
@@ -373,8 +381,10 @@ export class AudioManager {
     return true;
   }
 
-  /** Route to the appropriate synth method (extracted from old playSfx). */
-  private playSynthSfx(type: SfxType, ctx: AudioContext): void {
+  /** Route to the appropriate synth method. volumeScale attenuates for positional audio. */
+  private _volumeScale = 1.0;
+  private playSynthSfx(type: SfxType, ctx: AudioContext, volumeScale = 1.0): void {
+    this._volumeScale = volumeScale;
     switch (type) {
       case 'select': this.synthSelect(ctx); break;
       case 'move': this.synthMove(ctx); break;
@@ -397,11 +407,12 @@ export class AudioManager {
       case 'superweaponReady': this.synthSuperweaponReady(ctx); break;
       case 'superweaponLaunch': this.synthSuperweaponLaunch(ctx); break;
     }
+    this._volumeScale = 1.0; // Reset after synth call
   }
 
   private makeGain(ctx: AudioContext, volume: number): GainNode {
     const gain = ctx.createGain();
-    gain.gain.value = volume * this.sfxVolume;
+    gain.gain.value = volume * this.sfxVolume * this._volumeScale;
     gain.connect(ctx.destination);
     return gain;
   }
@@ -994,6 +1005,56 @@ export class AudioManager {
     osc2.connect(gain2);
     osc2.start(t + 0.3);
     osc2.stop(t + 0.9);
+  }
+
+  // --- Positional Audio ---
+
+  /** Update the listener position (call from game loop with camera position) */
+  updateListenerPosition(x: number, z: number): void {
+    this.listenerX = x;
+    this.listenerZ = z;
+  }
+
+  /** Play a synth SFX with distance-based volume attenuation */
+  playSfxAt(type: SfxType, worldX: number, worldZ: number): void {
+    if (this.muted) return;
+    const dx = worldX - this.listenerX;
+    const dz = worldZ - this.listenerZ;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    if (dist > this.maxAudioRange) return; // Too far away
+
+    // Linear falloff: full volume at 0, silent at maxRange
+    const volumeScale = Math.max(0, 1 - dist / this.maxAudioRange);
+    if (volumeScale < 0.05) return; // Negligible
+
+    try {
+      const ctx = this.getContext();
+      if (ctx.state === 'suspended') ctx.resume();
+
+      // Try sampled audio with distance scaling
+      if (this.playSampleAt(type, volumeScale)) return;
+
+      // Fall back to synth with distance-attenuated volume
+      this.playSynthSfx(type, ctx, volumeScale);
+    } catch {
+      // Audio not available
+    }
+  }
+
+  /** Play a sampled SFX with volume scaling */
+  private playSampleAt(type: string, volumeScale: number): boolean {
+    const entry = SFX_MANIFEST[type];
+    if (!entry || entry.paths.length === 0 || !this.sampleBank) return false;
+    if (entry.cooldown) {
+      const now = Date.now();
+      const lastPlay = this.sfxCooldowns.get(type) ?? 0;
+      if (now - lastPlay < entry.cooldown) return true;
+      this.sfxCooldowns.set(type, now);
+    }
+    const path = entry.paths[Math.floor(Math.random() * entry.paths.length)];
+    if (!this.sampleBank.has(path)) return false;
+    this.sampleBank.play(path, entry.volume * volumeScale, entry.pitchVariation);
+    return true;
   }
 
   // --- Ambient Wind ---

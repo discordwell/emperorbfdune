@@ -408,6 +408,7 @@ async function main() {
     return hasComponent(world, Harvester, eid) && Harvester.state[eid] === 0 && MoveTarget.active[eid] === 0;
   });
   combatSystem.setFogOfWar(fogOfWar, 0);
+  combatSystem.setSpatialGrid(movement.getSpatialGrid());
   combatSystem.setPlayerFaction(0, house.prefix);
   combatSystem.setPlayerFaction(1, house.enemyPrefix);  // AI player 1 (additional AIs registered below)
 
@@ -1725,6 +1726,9 @@ async function main() {
     fogOfWar.update(world);
     victorySystem.update(world);
     audioManager.updateIntensity();
+    // Sync audio listener position to camera for positional audio
+    const camPos = scene.getCameraTarget();
+    audioManager.updateListenerPosition(camPos.x, camPos.z);
     // Update survival objective timer display + progress bar
     if (objectiveEl && victorySystem.getObjectiveLabel().includes('Survive')) {
       const progress = victorySystem.getSurvivalProgress();

@@ -5,6 +5,7 @@ import {
   movableQuery,
 } from '../core/ECS';
 import { PathfindingSystem } from './PathfindingSystem';
+import { SpatialGrid } from '../utils/SpatialGrid';
 import { worldToTile, angleBetween, lerpAngle, distance2D } from '../utils/MathUtils';
 
 const ARRIVAL_THRESHOLD = 1.0;
@@ -20,6 +21,10 @@ export class MovementSystem implements GameSystem {
   // Flying entities skip pathfinding
   private flyingEntities = new Set<number>();
   private tickCount = 0;
+  // Spatial grid for O(n*k) neighbor lookups instead of O(n²)
+  private spatialGrid = new SpatialGrid(SEPARATION_RADIUS);
+  /** Expose the spatial grid for use by CombatSystem */
+  getSpatialGrid(): SpatialGrid { return this.spatialGrid; }
 
   constructor(pathfinder: PathfindingSystem) {
     this.pathfinder = pathfinder;
@@ -40,6 +45,12 @@ export class MovementSystem implements GameSystem {
     this.tickCount++;
     const doIdleSep = this.tickCount % 5 === 0; // Idle separation every 5 ticks
 
+    // Rebuild spatial grid for efficient neighbor queries (includes all units for combat)
+    this.spatialGrid.clear();
+    for (const eid of entities) {
+      this.spatialGrid.insert(eid, Position.x[eid], Position.z[eid]);
+    }
+
     for (const eid of entities) {
       if (MoveTarget.active[eid] !== 1) {
         // Apply idle separation to prevent stacking (throttled)
@@ -47,7 +58,8 @@ export class MovementSystem implements GameSystem {
           const px = Position.x[eid];
           const pz = Position.z[eid];
           let sepX = 0, sepZ = 0;
-          for (const other of entities) {
+          const nearby = this.spatialGrid.getNearby(px, pz);
+          for (const other of nearby) {
             if (other === eid || this.flyingEntities.has(other)) continue;
             const d = distance2D(px, pz, Position.x[other], Position.z[other]);
             if (d < 1.2 && d > 0.01) {
@@ -160,12 +172,12 @@ export class MovementSystem implements GameSystem {
       // Move at speed
       const speed = Speed.max[eid];
 
-      // Separation from nearby units
+      // Separation from nearby units (spatial grid lookup)
       let sepX = 0;
       let sepZ = 0;
-      for (const other of entities) {
-        if (other === eid) continue;
-        if (this.flyingEntities.has(other)) continue; // Don't separate from flyers
+      const nearby = this.spatialGrid.getNearby(px, pz);
+      for (const other of nearby) {
+        if (other === eid || this.flyingEntities.has(other)) continue;
         const ox = Position.x[other];
         const oz = Position.z[other];
         const d = distance2D(px, pz, ox, oz);
