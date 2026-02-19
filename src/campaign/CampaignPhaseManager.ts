@@ -239,6 +239,7 @@ export class CampaignPhaseManager {
     this.state.currentPhase = newPhase;
     this.state.battlesInPhase = 0;
     this.state.capturesInPhase = 0;
+    this.state.battlesWithoutCapture = 0;
     this.state.jumpPointCaptured = false;
     this.state.isWarned = false;
     this.updateTechLevel();

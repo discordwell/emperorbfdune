@@ -231,8 +231,8 @@ export function getSubHousesForPhase(house: HousePrefix, phase: number): Faction
   const missions = getMissionsForPhase(house, phase);
   const subs = new Set<FactionPrefix>();
   for (const m of missions) {
-    // Only include actual sub-houses, not the main houses
-    if (m.subHouse !== 'AT' && m.subHouse !== 'HK' && m.subHouse !== 'OR' && m.subHouse !== 'GN') {
+    // Only include alliable sub-houses, not main houses, guild navigators, or smugglers
+    if (m.subHouse !== 'AT' && m.subHouse !== 'HK' && m.subHouse !== 'OR' && m.subHouse !== 'GN' && m.subHouse !== 'SM') {
       subs.add(m.subHouse);
     }
   }
@@ -324,12 +324,12 @@ export const SPECIAL_MISSIONS: Record<string, Record<HousePrefix, string>> = {
     HK: 'Harkonnen homeworld assault_AT', // variant per enemy
     OR: 'Ordos homeworld assault',
   },
-  civilWarAttack: {
+  civilWar: {
     AT: '', // only HK has civil war
     HK: 'HHK Civil War Attack Mission',
     OR: '',
   },
-  finalMission: {
+  final: {
     AT: 'ATENDMission',
     HK: 'HKENDMission',
     OR: 'ORENDMission',

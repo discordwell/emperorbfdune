@@ -214,6 +214,18 @@ export class ProductionSystem {
       const current = counts.get(buildingType) ?? 0;
       if (current <= 1) {
         counts.delete(buildingType);
+        // Cancel any in-progress upgrade if last building of this type is destroyed
+        const queue = this.upgradeQueues.get(playerId);
+        if (queue) {
+          const idx = queue.findIndex(q => q.typeName === buildingType);
+          if (idx >= 0) {
+            const item = queue[idx];
+            // Partial refund based on remaining time
+            const refundRatio = item.totalTime > 0 ? 1 - item.elapsed / item.totalTime : 1;
+            this.harvestSystem.addSolaris(playerId, Math.round(item.cost * Math.max(0, refundRatio)));
+            queue.splice(idx, 1);
+          }
+        }
       } else {
         counts.set(buildingType, current - 1);
       }
