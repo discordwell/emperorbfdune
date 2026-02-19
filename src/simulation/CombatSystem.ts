@@ -69,6 +69,41 @@ export class CombatSystem implements GameSystem {
     this.playerFactions.set(playerId, prefix);
   }
 
+  getPlayerFaction(playerId: number): string | undefined {
+    return this.playerFactions.get(playerId);
+  }
+
+  /** Add XP to an entity and check for rank promotion (used by crates, etc.) */
+  addXp(eid: number, amount: number): void {
+    if (!this.world || !hasComponent(this.world, Veterancy, eid)) return;
+    Veterancy.xp[eid] += amount;
+    const xp = Veterancy.xp[eid];
+    const oldRank = Veterancy.rank[eid];
+    const aTypeName = this.unitTypeMap.get(eid);
+    const aDef = aTypeName ? this.rules.units.get(aTypeName) : null;
+    let newRank = oldRank;
+    if (aDef && aDef.veterancy.length > 0) {
+      for (let r = aDef.veterancy.length - 1; r >= 0; r--) {
+        if (xp >= aDef.veterancy[r].scoreThreshold) { newRank = r + 1; break; }
+      }
+    } else {
+      newRank = xp >= 5 ? 3 : xp >= 3 ? 2 : xp >= 1 ? 1 : 0;
+    }
+    if (newRank > oldRank) {
+      Veterancy.rank[eid] = newRank;
+      if (aDef && aDef.veterancy.length > 0) {
+        for (let r = oldRank; r < newRank; r++) {
+          const lvl = aDef.veterancy[r];
+          if (lvl?.health) {
+            Health.max[eid] += lvl.health;
+            Health.current[eid] += lvl.health;
+          }
+        }
+      }
+      EventBus.emit('unit:promoted', { entityId: eid, rank: newRank });
+    }
+  }
+
   setSpatialGrid(grid: SpatialGrid): void {
     this.spatialGrid = grid;
   }
@@ -544,36 +579,7 @@ export class CombatSystem implements GameSystem {
       Health.current[targetEid] = 0;
 
       // Grant XP to killer and check rank promotion
-      if (hasComponent(world, Veterancy, attackerEid)) {
-        Veterancy.xp[attackerEid]++;
-        const xp = Veterancy.xp[attackerEid];
-        const oldRank = Veterancy.rank[attackerEid];
-        // Promote using per-unit scoreThreshold from rules.txt, or fallback defaults
-        const aTypeName = this.unitTypeMap.get(attackerEid);
-        const aDef = aTypeName ? this.rules.units.get(aTypeName) : null;
-        let newRank = oldRank;
-        if (aDef && aDef.veterancy.length > 0) {
-          for (let r = aDef.veterancy.length - 1; r >= 0; r--) {
-            if (xp >= aDef.veterancy[r].scoreThreshold) { newRank = r + 1; break; }
-          }
-        } else {
-          newRank = xp >= 5 ? 3 : xp >= 3 ? 2 : xp >= 1 ? 1 : 0;
-        }
-        if (newRank > oldRank) {
-          Veterancy.rank[attackerEid] = newRank;
-          // Apply health bonus for each rank gained (handles multi-rank jumps)
-          if (aDef && aDef.veterancy.length > 0) {
-            for (let r = oldRank; r < newRank; r++) {
-              const lvl = aDef.veterancy[r]; // r=0 is rank 1 data
-              if (lvl?.health) {
-                Health.max[attackerEid] += lvl.health;
-                Health.current[attackerEid] += lvl.health;
-              }
-            }
-          }
-          EventBus.emit('unit:promoted', { entityId: attackerEid, rank: newRank });
-        }
-      }
+      this.addXp(attackerEid, 1);
 
       EventBus.emit('unit:died', { entityId: targetEid, killerEntity: attackerEid });
     }

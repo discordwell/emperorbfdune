@@ -1433,6 +1433,12 @@ async function main() {
           rearmingAircraft.add(attackerEntity);
           combatSystem.setSuppressed(attackerEntity, true);
           if (owner === 0) selectionPanel.addMessage('Aircraft returning to rearm', '#88aaff');
+        } else {
+          // No landing pad available — suppress combat so it stops firing at 0 ammo
+          MoveTarget.active[attackerEntity] = 0;
+          AttackTarget.active[attackerEntity] = 0;
+          combatSystem.setSuppressed(attackerEntity, true);
+          rearmingAircraft.add(attackerEntity);
         }
       }
     }
@@ -1996,7 +2002,7 @@ async function main() {
       productionSystem.setPowerMultiplier(0, powerMult);
       combatSystem.setPowerMultiplier(0, powerMult);
 
-      // Disable buildings with disableWithLowPower flag when in deficit
+      // Disable buildings with disableWithLowPower flag when in deficit (player 0)
       for (const eid of buildings) {
         if (Owner.playerId[eid] !== 0) continue;
         if (Health.current[eid] <= 0) continue;
@@ -2044,9 +2050,22 @@ async function main() {
             else aiPowerUsed += Math.abs(amt);
           }
         }
-        const aiPowerMult = aiPowerGen >= aiPowerUsed ? 1.0 : 0.5;
+        const aiLowPower = aiPowerGen < aiPowerUsed;
+        const aiPowerMult = aiLowPower ? 0.5 : 1.0;
         productionSystem.setPowerMultiplier(ai, aiPowerMult);
         combatSystem.setPowerMultiplier(ai, aiPowerMult);
+
+        // Disable AI buildings with disableWithLowPower flag
+        for (const eid of buildings) {
+          if (Owner.playerId[eid] !== ai) continue;
+          if (Health.current[eid] <= 0) continue;
+          const typeId = BuildingType.id[eid];
+          const bName = buildingTypeNames[typeId];
+          const bDef = bName ? gameRules.buildings.get(bName) : null;
+          if (bDef?.disableWithLowPower) {
+            combatSystem.setDisabledBuilding(eid, aiLowPower);
+          }
+        }
       }
 
       // Check for Hanger buildings (enables Carryall harvester airlift)
@@ -2113,6 +2132,14 @@ async function main() {
             combatSystem.setSuppressed(eid, false);
             if (owner === 0) selectionPanel.addMessage('Aircraft rearmed', '#44ff44');
           }
+        } else if (MoveTarget.active[eid] !== 1) {
+          // Not near pad and not moving — try to find a pad to fly to
+          const pad = findNearestLandingPad(world, owner, Position.x[eid], Position.z[eid]);
+          if (pad) {
+            MoveTarget.x[eid] = pad.x;
+            MoveTarget.z[eid] = pad.z;
+            MoveTarget.active[eid] = 1;
+          }
         }
       }
     }
@@ -2144,7 +2171,7 @@ async function main() {
               harvestSystem.addSolaris(owner, 500);
               if (owner === 0) selectionPanel.addMessage('+500 Solaris!', '#ffd700');
             } else if (crate.type === 'veterancy') {
-              Veterancy.xp[eid] += 100;
+              combatSystem.addXp(eid, 100);
               if (owner === 0) selectionPanel.addMessage('Unit experience boost!', '#44ff44');
             } else if (crate.type === 'heal') {
               // Heal all nearby friendly units

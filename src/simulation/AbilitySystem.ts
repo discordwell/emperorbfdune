@@ -864,8 +864,9 @@ export class AbilitySystem {
     if (tickCount % 50 !== 25) return;
     const allUnits = unitQuery(world);
 
-    for (let pid = 0; pid <= 1; pid++) {
-      const prefix = pid === 0 ? this.deps.housePrefix : this.deps.enemyPrefix;
+    for (let pid = 0; pid < 8; pid++) {
+      const prefix = this.deps.combatSystem.getPlayerFaction(pid);
+      if (!prefix) continue;
 
       // ORDOS: self-regeneration (units slowly heal 1% HP per 2 seconds)
       if (prefix === 'OR') {
@@ -874,7 +875,7 @@ export class AbilitySystem {
           if (Health.current[eid] <= 0 || Health.current[eid] >= Health.max[eid]) continue;
           Health.current[eid] = Math.min(Health.max[eid],
             Health.current[eid] + Health.max[eid] * 0.01);
-          // Subtle regen sparkle (only player's units, 50% chance for subtlety)
+          // Subtle regen sparkle (only human player's units, 50% chance for subtlety)
           if (pid === 0 && Math.random() < 0.5) {
             this.deps.effectsManager.spawnRepairSparkle(
               Position.x[eid] + (Math.random() - 0.5),
@@ -884,11 +885,6 @@ export class AbilitySystem {
           }
         }
       }
-
-      // HARKONNEN: no damage degradation — implemented via combat system bonus
-      // (In the real game, all units deal less damage as they lose HP. Harkonnen are exempt.
-      //  Our implementation: Harkonnen get +10% damage at all times to represent this advantage.)
-      // This is handled in the damage calculation below.
     }
   }
 
