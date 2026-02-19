@@ -306,9 +306,13 @@ export class CombatSystem implements GameSystem {
 
       if (hasComponent(world, AttackTarget, eid) && AttackTarget.active[eid] === 1) {
         targetEid = AttackTarget.entityId[eid];
-        // Validate target: must be alive and not a recycled friendly entity
+        // Validate target: must be alive, not recycled friendly, and targetable by our weapon
+        const tgtTypeName = this.unitTypeMap.get(targetEid);
+        const tgtDef = tgtTypeName ? this.rules.units.get(tgtTypeName) : null;
+        const atkBullet = this.getBulletDef(eid);
         if (!hasComponent(world, Health, targetEid) || Health.current[targetEid] <= 0
-          || Owner.playerId[targetEid] === Owner.playerId[eid]) {
+          || Owner.playerId[targetEid] === Owner.playerId[eid]
+          || (tgtDef?.canFly && !atkBullet?.antiAircraft)) {
           AttackTarget.active[eid] = 0;
           targetEid = -1;
           // If attack-move unit killed its target, resume moving to destination
