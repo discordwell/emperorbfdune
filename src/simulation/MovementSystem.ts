@@ -7,6 +7,7 @@ import {
 import { PathfindingSystem } from './PathfindingSystem';
 import { SpatialGrid } from '../utils/SpatialGrid';
 import { worldToTile, angleBetween, lerpAngle, distance2D } from '../utils/MathUtils';
+import { TerrainType, type TerrainRenderer } from '../rendering/TerrainRenderer';
 
 const ARRIVAL_THRESHOLD = 1.0;
 const SEPARATION_RADIUS = 2.0;
@@ -32,6 +33,8 @@ export class MovementSystem implements GameSystem {
   private mapMaxZ = 256;
   // Speed modifier callback (e.g., hit slowdown from CombatSystem)
   private speedModifierFn: ((eid: number) => number) | null = null;
+  // Terrain reference for height following
+  private terrain: TerrainRenderer | null = null;
 
   constructor(pathfinder: PathfindingSystem) {
     this.pathfinder = pathfinder;
@@ -44,6 +47,10 @@ export class MovementSystem implements GameSystem {
   setMapBounds(maxX: number, maxZ: number): void {
     this.mapMaxX = maxX;
     this.mapMaxZ = maxZ;
+  }
+
+  setTerrain(terrain: TerrainRenderer): void {
+    this.terrain = terrain;
   }
 
   /** Invalidate all cached paths (call when blocked tiles change, e.g. building placed/destroyed) */
@@ -98,8 +105,13 @@ export class MovementSystem implements GameSystem {
             }
           }
           if (Math.abs(sepX) > 0.01 || Math.abs(sepZ) > 0.01) {
-            Position.x[eid] = Math.max(0, Math.min(this.mapMaxX, px + sepX * 0.03));
-            Position.z[eid] = Math.max(0, Math.min(this.mapMaxZ, pz + sepZ * 0.03));
+            const nx = Math.max(0, Math.min(this.mapMaxX, px + sepX * 0.03));
+            const nz = Math.max(0, Math.min(this.mapMaxZ, pz + sepZ * 0.03));
+            Position.x[eid] = nx;
+            Position.z[eid] = nz;
+            if (this.terrain && !this.flyingEntities.has(eid)) {
+              Position.y[eid] = this.terrain.getHeightAt(nx, nz) + 0.1;
+            }
           }
         }
         Velocity.x[eid] = 0;
@@ -200,9 +212,16 @@ export class MovementSystem implements GameSystem {
       const turnRate = Speed.turnRate[eid];
       Rotation.y[eid] = lerpAngle(currentAngle, desiredAngle, Math.min(1, turnRate * 2));
 
-      // Move at speed (with hit slowdown modifier)
+      // Move at speed (with hit slowdown and terrain modifiers)
       let speed = Speed.max[eid];
       if (this.speedModifierFn) speed *= this.speedModifierFn(eid);
+      if (this.terrain) {
+        const tile = worldToTile(px, pz);
+        const tType = this.terrain.getTerrainType(tile.tx, tile.tz);
+        if (tType === TerrainType.Dunes) speed *= 0.7;
+        else if (tType === TerrainType.Rock || tType === TerrainType.InfantryRock) speed *= 1.15;
+        else if (tType === TerrainType.ConcreteSlab) speed *= 1.25;
+      }
 
       // Separation from nearby units (spatial grid lookup)
       let sepX = 0;
@@ -226,8 +245,15 @@ export class MovementSystem implements GameSystem {
       Velocity.z[eid] = vz;
 
       // Apply velocity (scaled by tick interval), clamped to map bounds
-      Position.x[eid] = Math.max(0, Math.min(this.mapMaxX, px + vx * 0.04));
-      Position.z[eid] = Math.max(0, Math.min(this.mapMaxZ, pz + vz * 0.04));
+      const newX = Math.max(0, Math.min(this.mapMaxX, px + vx * 0.04));
+      const newZ = Math.max(0, Math.min(this.mapMaxZ, pz + vz * 0.04));
+      Position.x[eid] = newX;
+      Position.z[eid] = newZ;
+
+      // Ground units follow terrain height
+      if (this.terrain) {
+        Position.y[eid] = this.terrain.getHeightAt(newX, newZ) + 0.1;
+      }
     }
   }
 

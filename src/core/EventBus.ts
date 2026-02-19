@@ -28,7 +28,7 @@ interface EventMap {
   'rally:set': { playerId: number; x: number; z: number };
   'worm:eat': { entityId: number; x: number; z: number; ownerId: number };
   'unit:damaged': { entityId: number; attackerOwner: number; x: number; z: number; isBuilding: boolean };
-  'combat:hit': { x: number; z: number; damage: number; targetOwner: number };
+  'combat:hit': { x: number; z: number; damage: number; targetOwner: number; attackerOwner: number };
   'crate:collected': { x: number; z: number; type: string; owner: number };
   'bloom:warning': { x: number; z: number };
   'bloom:tremor': { x: number; z: number; intensity: number };

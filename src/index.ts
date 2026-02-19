@@ -1,11 +1,12 @@
 import * as THREE from 'three';
 import { Game } from './core/Game';
 import { SceneManager } from './rendering/SceneManager';
-import { TerrainRenderer } from './rendering/TerrainRenderer';
+import { TerrainRenderer, TerrainType } from './rendering/TerrainRenderer';
 import { InputManager } from './input/InputManager';
 import { parseRules, type GameRules } from './config/RulesParser';
 import { parseArtIni, type ArtEntry } from './config/ArtIniParser';
 import { loadConstants, GameConstants } from './utils/Constants';
+import { worldToTile } from './utils/MathUtils';
 import { ModelManager } from './rendering/ModelManager';
 import { UnitRenderer } from './rendering/UnitRenderer';
 import { SelectionManager } from './input/SelectionManager';
@@ -672,6 +673,7 @@ async function main() {
   minimapRenderer.renderTerrain(); // Re-render minimap with actual terrain data
   scene.setMapBounds(mapW * 2, mapH * 2); // TILE_SIZE = 2
   movement.setMapBounds(mapW * 2, mapH * 2);
+  movement.setTerrain(terrain);
 
   // Load model manifest for case-insensitive lookups
   updateLoading(45, 'Loading model manifest...');
@@ -767,7 +769,7 @@ async function main() {
     addComponent(world, ViewRange, eid);
 
     Position.x[eid] = x;
-    Position.y[eid] = 0.1;
+    Position.y[eid] = terrain.getHeightAt(x, z) + 0.1;
     Position.z[eid] = z;
     Rotation.y[eid] = 0;
     Health.current[eid] = def.health;
@@ -853,11 +855,31 @@ async function main() {
     addComponent(world, ViewRange, eid);
 
     Position.x[eid] = x;
-    Position.y[eid] = 0;
+    Position.y[eid] = terrain.getHeightAt(x, z);
     Position.z[eid] = z;
     Rotation.y[eid] = 0;
-    Health.current[eid] = def.health;
-    Health.max[eid] = def.health;
+
+    // Concrete slab bonus: buildings on concrete get 50% more health
+    let healthBonus = 1.0;
+    const bTile = worldToTile(x, z);
+    const bHalfW = 1; // 3x3 footprint => half = 1
+    const bHalfH = 1;
+    let concreteCount = 0;
+    let totalTiles = 0;
+    for (let dtz = -bHalfH; dtz <= bHalfH; dtz++) {
+      for (let dtx = -bHalfW; dtx <= bHalfW; dtx++) {
+        totalTiles++;
+        if (terrain.getTerrainType(bTile.tx + dtx, bTile.tz + dtz) === TerrainType.ConcreteSlab) {
+          concreteCount++;
+        }
+      }
+    }
+    if (concreteCount > 0) {
+      healthBonus = 1.0 + 0.5 * (concreteCount / totalTiles);
+    }
+
+    Health.current[eid] = Math.floor(def.health * healthBonus);
+    Health.max[eid] = Math.floor(def.health * healthBonus);
     Owner.playerId[eid] = owner;
     BuildingType.id[eid] = buildingTypeIdMap.get(typeName) ?? 0;
     Renderable.modelId[eid] = 0;
@@ -1092,6 +1114,11 @@ async function main() {
   // Track harvest income
   EventBus.on('harvest:delivered', ({ amount, owner }) => {
     gameStats.recordCreditsEarned(owner, amount);
+  });
+
+  // Track damage dealt for post-game stats
+  EventBus.on('combat:hit', ({ damage, attackerOwner }) => {
+    gameStats.recordDamage(attackerOwner, damage);
   });
 
   // Refund when player cancels building placement
@@ -1561,12 +1588,13 @@ async function main() {
         let frame = 0;
         const descend = () => {
           if (Health.current[eid] <= 0 || frame >= 30) {
-            Position.y[eid] = 0.1;
+            Position.y[eid] = terrain.getHeightAt(Position.x[eid], Position.z[eid]) + 0.1;
             combatSystem.setSuppressed(eid, false);
             return;
           }
           frame++;
-          Position.y[eid] = 15 * (1 - frame / 30); // Linear descent over 30 frames
+          const groundY = terrain.getHeightAt(Position.x[eid], Position.z[eid]) + 0.1;
+          Position.y[eid] = groundY + (15 - groundY) * (1 - frame / 30); // Descend to ground
           setTimeout(descend, 33); // ~30fps
         };
         descend();
@@ -1992,10 +2020,22 @@ async function main() {
         musicTrackEl.textContent = trackName ? `♪ ${trackName}` : '';
       }
 
-      // AI players get full power (simplification - AI builds enough windtraps)
+      // Calculate real power for AI players (destroying windtraps matters)
       for (let ai = 1; ai < totalPlayers; ai++) {
-        productionSystem.setPowerMultiplier(ai, 1.0);
-        combatSystem.setPowerMultiplier(ai, 1.0);
+        let aiPowerGen = 0;
+        let aiPowerUsed = 0;
+        for (const eid of buildings) {
+          if (Owner.playerId[eid] !== ai) continue;
+          if (Health.current[eid] <= 0) continue;
+          if (hasComponent(world, PowerSource, eid)) {
+            const amt = PowerSource.amount[eid];
+            if (amt > 0) aiPowerGen += amt;
+            else aiPowerUsed += Math.abs(amt);
+          }
+        }
+        const aiPowerMult = aiPowerGen >= aiPowerUsed ? 1.0 : 0.5;
+        productionSystem.setPowerMultiplier(ai, aiPowerMult);
+        combatSystem.setPowerMultiplier(ai, aiPowerMult);
       }
 
       // Check for Hanger buildings (enables Carryall harvester airlift)

@@ -507,11 +507,13 @@ export class CombatSystem implements GameSystem {
 
     // Emit hit event for floating damage numbers (all visible hits)
     const targetOwner = Owner.playerId[targetEid];
+    const attackerOwner = Owner.playerId[attackerEid];
     EventBus.emit('combat:hit', {
       x: Position.x[targetEid],
       z: Position.z[targetEid],
       damage,
       targetOwner,
+      attackerOwner,
     });
 
     // Notify when local player's units/buildings take damage

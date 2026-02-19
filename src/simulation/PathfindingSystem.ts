@@ -1,4 +1,4 @@
-import type { TerrainRenderer } from '../rendering/TerrainRenderer';
+import { TerrainType, type TerrainRenderer } from '../rendering/TerrainRenderer';
 
 interface PathNode {
   tx: number;
@@ -148,7 +148,14 @@ export class PathfindingSystem {
             }
           }
 
-          const moveCost = (dx !== 0 && dz !== 0) ? 1.414 : 1.0;
+          const baseCost = (dx !== 0 && dz !== 0) ? 1.414 : 1.0;
+          // Terrain-based cost multiplier: dunes slow, rock/concrete fast
+          const tType = this.terrain.getTerrainType(ntx, ntz);
+          const terrainMult = tType === TerrainType.Dunes ? 1.5
+            : tType === TerrainType.Rock || tType === TerrainType.InfantryRock ? 0.8
+            : tType === TerrainType.ConcreteSlab ? 0.7
+            : 1.0;
+          const moveCost = baseCost * terrainMult;
           const g = current.g + moveCost;
 
           // Skip if we already found a shorter path to this tile

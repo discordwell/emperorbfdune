@@ -33,6 +33,14 @@ const DEFAULT_MAP_SIZE = 128;
 // Maximum terrain height from heightmap values (world units)
 const MAX_ELEVATION = 3.0;
 
+/** Type-based height for procedural maps (no heightmap data) */
+function proceduralHeight(t: TerrainType): number {
+  if (t === TerrainType.Cliff) return 1.5;
+  if (t === TerrainType.Rock || t === TerrainType.InfantryRock) return 0.3;
+  if (t === TerrainType.Dunes) return 0.15;
+  return 0;
+}
+
 /**
  * CPF passability nibble (0-15) → TerrainType mapping.
  * Based on frequency analysis across 82 maps:
@@ -160,6 +168,48 @@ export class TerrainRenderer {
   setTerrainType(tx: number, tz: number, type: TerrainType): void {
     if (tx < 0 || tx >= this.mapWidth || tz < 0 || tz >= this.mapHeight) return;
     this.terrainData[tz * this.mapWidth + tx] = type;
+  }
+
+  /** Get interpolated terrain height at world coordinates */
+  getHeightAt(worldX: number, worldZ: number): number {
+    // Convert world coords to fractional tile coords
+    const fx = worldX / TILE_SIZE;
+    const fz = worldZ / TILE_SIZE;
+    const tx = Math.floor(fx);
+    const tz = Math.floor(fz);
+
+    if (!this.heightData) {
+      // Procedural: interpolate between neighboring tile heights for smooth transitions
+      const fracX = fx - tx;
+      const fracZ = fz - tz;
+      const h00 = proceduralHeight(this.getTerrainType(tx, tz));
+      const h10 = proceduralHeight(this.getTerrainType(tx + 1, tz));
+      const h01 = proceduralHeight(this.getTerrainType(tx, tz + 1));
+      const h11 = proceduralHeight(this.getTerrainType(tx + 1, tz + 1));
+      const top = h00 + (h10 - h00) * fracX;
+      const bot = h01 + (h11 - h01) * fracX;
+      return top + (bot - top) * fracZ;
+    }
+
+    // Bilinear interpolation of heightmap
+    const w = this.mapWidth;
+    const h = this.mapHeight;
+    const tx0 = tx < 0 ? 0 : tx >= w ? w - 1 : tx;
+    const tz0 = tz < 0 ? 0 : tz >= h ? h - 1 : tz;
+    const tx1 = tx + 1 >= w ? w - 1 : tx + 1 < 0 ? 0 : tx + 1;
+    const tz1 = tz + 1 >= h ? h - 1 : tz + 1 < 0 ? 0 : tz + 1;
+    const fracX = fx - tx;
+    const fracZ = fz - tz;
+
+    const scale = MAX_ELEVATION / 255.0;
+    const h00 = this.heightData[tz0 * w + tx0] * scale;
+    const h10 = this.heightData[tz0 * w + tx1] * scale;
+    const h01 = this.heightData[tz1 * w + tx0] * scale;
+    const h11 = this.heightData[tz1 * w + tx1] * scale;
+
+    const top = h00 + (h10 - h00) * fracX;
+    const bot = h01 + (h11 - h01) * fracX;
+    return top + (bot - top) * fracZ;
   }
 
   getSpice(tx: number, tz: number): number {
