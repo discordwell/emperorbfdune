@@ -447,7 +447,7 @@ export class DialogManager {
 
     // Building destroyed (only play for human player's buildings)
     EventBus.on('building:destroyed', ({ owner }) => {
-      if (owner === 0) {
+      if (owner === humanPlayerId) {
         this.playDialog('buildingLost');
       }
     });
