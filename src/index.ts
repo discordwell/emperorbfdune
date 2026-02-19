@@ -987,6 +987,18 @@ async function main() {
       const def = gameRules.buildings.get(typeName);
       const duration = def ? Math.max(25, Math.floor(def.buildTime * 0.5)) : 75;
       unitRenderer.startConstruction(eid, duration);
+
+      // Spawn free unit when building completes (e.g. Harvester from Refinery)
+      if (def?.getUnitWhenBuilt) {
+        const freeUnitName = def.getUnitWhenBuilt;
+        setTimeout(() => {
+          const w = game.getWorld();
+          const freeEid = spawnUnit(w, freeUnitName, 0, x + 3, z + 3);
+          if (freeEid >= 0) {
+            audioManager.getDialogManager()?.trigger('unitReady');
+          }
+        }, duration * 40); // Match construction duration (40ms per tick at 25 TPS)
+      }
     }
   });
 
@@ -1437,6 +1449,10 @@ async function main() {
         if (bDef && ownerAi) {
           const pos = ownerAi.getNextBuildingPlacement(unitType, bDef);
           spawnBuilding(world, unitType, owner, pos.x, pos.z);
+          // Spawn free unit for AI buildings (e.g. Harvester from Refinery)
+          if (bDef.getUnitWhenBuilt) {
+            spawnUnit(world, bDef.getUnitWhenBuilt, owner, pos.x + 3, pos.z + 3);
+          }
         }
       }
     } else {
