@@ -107,24 +107,10 @@ export class Sidebar {
     if (starportOffers.length > 0) tabs.push('Starport');
 
     // Count queued items per category for badges
-    const buildingQueueCount = this.production.getQueue(this.playerId, true).length;
-    const unitQueue = this.production.getQueue(this.playerId, false);
-    const infantryNames = new Set<string>();
-    const vehicleNames = new Set<string>();
-    for (const [name, def] of this.rules.units) {
-      if (def.infantry) infantryNames.add(name);
-      else vehicleNames.add(name);
-    }
-    let infantryQueueCount = 0;
-    let vehicleQueueCount = 0;
-    for (const item of unitQueue) {
-      if (infantryNames.has(item.typeName)) infantryQueueCount++;
-      else vehicleQueueCount++;
-    }
     const queueCounts: Record<string, number> = {
-      Buildings: buildingQueueCount,
-      Units: vehicleQueueCount,
-      Infantry: infantryQueueCount,
+      Buildings: this.production.getQueue(this.playerId, true).length,
+      Units: this.production.getQueue(this.playerId, false, 'vehicle').length,
+      Infantry: this.production.getQueue(this.playerId, false, 'infantry').length,
       Starport: 0,
     };
 
@@ -179,10 +165,12 @@ export class Sidebar {
 
   private renderQueue(container: HTMLElement): void {
     const buildingQ = this.production.getQueue(this.playerId, true);
-    const unitQ = this.production.getQueue(this.playerId, false);
+    const infQ = this.production.getQueue(this.playerId, false, 'infantry');
+    const vehQ = this.production.getQueue(this.playerId, false, 'vehicle');
     const allItems = [
-      ...buildingQ.map((q, i) => ({ ...q, isBuilding: true, index: i })),
-      ...unitQ.map((q, i) => ({ ...q, isBuilding: false, index: i })),
+      ...buildingQ.map((q, i) => ({ ...q, isBuilding: true as const, index: i, unitType: undefined as 'infantry' | 'vehicle' | undefined })),
+      ...infQ.map((q, i) => ({ ...q, isBuilding: false as const, index: i, unitType: 'infantry' as const })),
+      ...vehQ.map((q, i) => ({ ...q, isBuilding: false as const, index: i, unitType: 'vehicle' as const })),
     ];
     if (allItems.length === 0) return;
 
@@ -198,7 +186,7 @@ export class Sidebar {
       chip.style.cssText = `font-size:9px;padding:2px 4px;background:${item.progress > 0 ? '#2a3a2a' : '#1a1a2e'};color:#aaa;border:1px solid #333;cursor:pointer;border-radius:2px;`;
       chip.oncontextmenu = (e) => {
         e.preventDefault();
-        if (this.production.cancelQueueItem(this.playerId, item.isBuilding, item.index)) {
+        if (this.production.cancelQueueItem(this.playerId, item.isBuilding, item.index, item.unitType)) {
           this.render();
         }
       };
@@ -426,15 +414,16 @@ export class Sidebar {
       ? `<img src="${iconUrl}" width="36" height="36" style="flex-shrink:0;opacity:${iconOpacity};image-rendering:auto;border-right:1px solid #333;" />`
       : `<div style="width:6px;background:${roleColor};opacity:${iconOpacity};flex-shrink:0;"></div>`;
 
-    // Production progress overlay
-    const progress = this.production.getQueueProgress(this.playerId, isBuilding);
+    // Production progress overlay — check the correct sub-queue for units
+    const unitType = !isBuilding ? (this.rules.units.get(name)?.infantry ? 'infantry' as const : 'vehicle' as const) : undefined;
+    const progress = this.production.getQueueProgress(this.playerId, isBuilding, unitType);
     const isProducing = progress && progress.typeName === name;
     const progressBar = isProducing
       ? `<div style="position:absolute;bottom:0;left:0;height:3px;width:${Math.round(progress!.progress * 100)}%;background:#0f0;transition:width 0.3s;"></div>`
       : '';
 
-    // Queue count badge (shown on icon area)
-    const queue = this.production.getQueue(this.playerId, isBuilding);
+    // Queue count badge — check the correct sub-queue for units
+    const queue = this.production.getQueue(this.playerId, isBuilding, unitType);
     const queuedCount = queue.filter(q => q.typeName === name).length;
     const queueBadge = queuedCount > 0
       ? `<span style="position:absolute;top:1px;left:1px;font-size:9px;color:#4f4;background:rgba(0,0,0,0.7);padding:0 2px;border-radius:2px;font-weight:bold;">x${queuedCount}</span>`
@@ -618,14 +607,20 @@ export class Sidebar {
   }
 
   updateProgress(): void {
-    const buildingProg = this.production.getQueueProgress(this.playerId, true);
-    const unitProg = this.production.getQueueProgress(this.playerId, false);
-
     const fill = document.getElementById('production-progress');
     const label = document.getElementById('production-label');
 
-    // Show the active production item
-    const prog = buildingProg ?? unitProg;
+    // Show progress for the currently selected tab's queue
+    let prog: { typeName: string; progress: number } | null;
+    if (this.currentTab === 'Buildings') {
+      prog = this.production.getQueueProgress(this.playerId, true);
+    } else if (this.currentTab === 'Infantry') {
+      prog = this.production.getQueueProgress(this.playerId, false, 'infantry');
+    } else {
+      // Units/Starport tab: show vehicle progress only
+      prog = this.production.getQueueProgress(this.playerId, false, 'vehicle');
+    }
+
     if (fill) {
       fill.style.width = prog ? `${prog.progress * 100}%` : '0%';
     }

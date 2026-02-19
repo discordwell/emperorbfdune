@@ -273,53 +273,119 @@ export class CommandManager {
     }
     this.combatSystem?.clearAttackMove(entityIds);
 
-    // Formation spreading
-    const count = entityIds.length;
-    const cols = Math.ceil(Math.sqrt(count));
-    const spacing = 2.5;
-
-    for (let i = 0; i < entityIds.length; i++) {
-      const eid = entityIds[i];
-      const row = Math.floor(i / cols);
-      const col = i % cols;
-      const offsetX = (col - (cols - 1) / 2) * spacing;
-      const offsetZ = (row - (Math.ceil(count / cols) - 1) / 2) * spacing;
-
-      MoveTarget.x[eid] = x + offsetX;
-      MoveTarget.z[eid] = z + offsetZ;
-      MoveTarget.active[eid] = 1;
-
-      // Clear attack target when move is issued
-      AttackTarget.active[eid] = 0;
-    }
+    this.applyFormation(entityIds, x, z);
 
     EventBus.emit('unit:move', { entityIds: [...entityIds], x, z });
     this.moveMarkerFn?.(x, z);
   }
 
-  private addWaypoint(entityIds: number[], x: number, z: number): void {
+  /** Apply directional formation offsets: units spread perpendicular to move direction */
+  private applyFormation(entityIds: number[], x: number, z: number): void {
     const count = entityIds.length;
+    if (count === 0) return;
+
+    // Compute average unit position (group center)
+    let cx = 0, cz = 0;
+    for (const eid of entityIds) {
+      cx += Position.x[eid];
+      cz += Position.z[eid];
+    }
+    cx /= count;
+    cz /= count;
+
+    // Direction from group center to target
+    const dx = x - cx;
+    const dz = z - cz;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+
+    // If too close, fall back to simple grid (no meaningful direction)
+    if (dist < 2 || count === 1) {
+      for (const eid of entityIds) {
+        MoveTarget.x[eid] = x;
+        MoveTarget.z[eid] = z;
+        MoveTarget.active[eid] = 1;
+        AttackTarget.active[eid] = 0;
+      }
+      return;
+    }
+
+    // Unit direction vectors: forward (toward target) and right (perpendicular)
+    const fwdX = dx / dist;
+    const fwdZ = dz / dist;
+    const rightX = -fwdZ; // Perpendicular (rotate 90 degrees)
+    const rightZ = fwdX;
+
+    const cols = Math.ceil(Math.sqrt(count));
+    const rows = Math.ceil(count / cols);
+    const spacing = 2.5;
+
+    for (let i = 0; i < count; i++) {
+      const eid = entityIds[i];
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+
+      // Lateral offset (spread perpendicular to movement direction)
+      const lateral = (col - (cols - 1) / 2) * spacing;
+      // Depth offset (row 0 = front line at target, subsequent rows trail behind)
+      const depth = -row * spacing;
+
+      MoveTarget.x[eid] = x + rightX * lateral + fwdX * depth;
+      MoveTarget.z[eid] = z + rightZ * lateral + fwdZ * depth;
+      MoveTarget.active[eid] = 1;
+      AttackTarget.active[eid] = 0;
+    }
+  }
+
+  private addWaypoint(entityIds: number[], x: number, z: number): void {
+    // Compute directional formation offsets (same as applyFormation)
+    const count = entityIds.length;
+    if (count === 0) return;
+
+    let cx = 0, cz = 0;
+    for (const eid of entityIds) {
+      cx += Position.x[eid];
+      cz += Position.z[eid];
+    }
+    cx /= count;
+    cz /= count;
+
+    const dx = x - cx;
+    const dz = z - cz;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+
     const cols = Math.ceil(Math.sqrt(count));
     const spacing = 2.5;
 
-    for (let i = 0; i < entityIds.length; i++) {
+    for (let i = 0; i < count; i++) {
       const eid = entityIds[i];
-      const row = Math.floor(i / cols);
       const col = i % cols;
-      const offsetX = (col - (cols - 1) / 2) * spacing;
-      const offsetZ = (row - (Math.ceil(count / cols) - 1) / 2) * spacing;
+      const row = Math.floor(i / cols);
+
+      let offX = 0, offZ = 0;
+      if (dist >= 2 && count > 1) {
+        const fwdX = dx / dist;
+        const fwdZ = dz / dist;
+        const rightX = -fwdZ;
+        const rightZ = fwdX;
+        const lateral = (col - (cols - 1) / 2) * spacing;
+        const depth = -row * spacing;
+        offX = rightX * lateral + fwdX * depth;
+        offZ = rightZ * lateral + fwdZ * depth;
+      } else {
+        offX = (col - (cols - 1) / 2) * spacing;
+        offZ = (row - (Math.ceil(count / cols) - 1) / 2) * spacing;
+      }
 
       if (!this.waypointQueues.has(eid)) {
         this.waypointQueues.set(eid, []);
       }
 
-      // If unit is idle, start moving immediately
       if (MoveTarget.active[eid] === 0) {
-        MoveTarget.x[eid] = x + offsetX;
-        MoveTarget.z[eid] = z + offsetZ;
+        MoveTarget.x[eid] = x + offX;
+        MoveTarget.z[eid] = z + offZ;
         MoveTarget.active[eid] = 1;
       } else {
-        this.waypointQueues.get(eid)!.push({ x: x + offsetX, z: z + offsetZ });
+        this.waypointQueues.get(eid)!.push({ x: x + offX, z: z + offZ });
       }
     }
 

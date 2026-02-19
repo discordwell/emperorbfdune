@@ -21,7 +21,9 @@ export class ProductionSystem {
 
   // Per-player production queues
   private buildingQueues = new Map<number, QueueItem[]>(); // playerId -> queue
-  private unitQueues = new Map<number, QueueItem[]>();
+  // Parallel unit production: infantry and vehicles build simultaneously
+  private infantryQueues = new Map<number, QueueItem[]>();
+  private vehicleQueues = new Map<number, QueueItem[]>();
 
   // Built buildings per player (for tech tree checking) - count allows duplicates
   private playerBuildings = new Map<number, Map<string, number>>();
@@ -47,6 +49,11 @@ export class ProductionSystem {
   constructor(rules: GameRules, harvestSystem: HarvestSystem) {
     this.rules = rules;
     this.harvestSystem = harvestSystem;
+  }
+
+  /** Determine if a unit type uses the infantry production queue */
+  private isInfantryType(typeName: string): boolean {
+    return this.rules.units.get(typeName)?.infantry ?? false;
   }
 
   /** Set difficulty scaling for a specific player.
@@ -332,9 +339,14 @@ export class ProductionSystem {
     const adjustedCost = this.getAdjustedCost(playerId, typeName, isBuilding);
     if (!this.harvestSystem.spendSolaris(playerId, adjustedCost)) return false;
 
-    const queue = isBuilding
-      ? (this.buildingQueues.get(playerId) ?? [])
-      : (this.unitQueues.get(playerId) ?? []);
+    let queue: QueueItem[];
+    if (isBuilding) {
+      queue = this.buildingQueues.get(playerId) ?? [];
+    } else {
+      const isInf = this.isInfantryType(typeName);
+      const queueMap = isInf ? this.infantryQueues : this.vehicleQueues;
+      queue = queueMap.get(playerId) ?? [];
+    }
 
     const adjustedTime = this.getAdjustedBuildTime(playerId, def);
     queue.push({
@@ -348,7 +360,8 @@ export class ProductionSystem {
     if (isBuilding) {
       this.buildingQueues.set(playerId, queue);
     } else {
-      this.unitQueues.set(playerId, queue);
+      const isInf = this.isInfantryType(typeName);
+      (isInf ? this.infantryQueues : this.vehicleQueues).set(playerId, queue);
     }
 
     EventBus.emit('production:started', { unitType: typeName, owner: playerId, isBuilding });
@@ -368,8 +381,8 @@ export class ProductionSystem {
       }
     }
 
-    // Process unit queues
-    for (const [playerId, queue] of this.unitQueues) {
+    // Process infantry queues (parallel with vehicle queues)
+    for (const [playerId, queue] of this.infantryQueues) {
       if (queue.length === 0) continue;
       const item = queue[0];
       const mult = this.powerMultipliers.get(playerId) ?? 1.0;
@@ -378,7 +391,22 @@ export class ProductionSystem {
         const completedName = item.typeName;
         queue.shift();
         EventBus.emit('production:complete', { unitType: completedName, owner: playerId, buildingId: 0, isBuilding: false });
-        // Auto-requeue if on repeat and can afford it
+        if (this.repeatUnits.get(playerId)?.has(completedName)) {
+          this.startProduction(playerId, completedName, false);
+        }
+      }
+    }
+
+    // Process vehicle queues (parallel with infantry queues)
+    for (const [playerId, queue] of this.vehicleQueues) {
+      if (queue.length === 0) continue;
+      const item = queue[0];
+      const mult = this.powerMultipliers.get(playerId) ?? 1.0;
+      item.elapsed += mult;
+      if (item.elapsed >= item.totalTime) {
+        const completedName = item.typeName;
+        queue.shift();
+        EventBus.emit('production:complete', { unitType: completedName, owner: playerId, buildingId: 0, isBuilding: false });
         if (this.repeatUnits.get(playerId)?.has(completedName)) {
           this.startProduction(playerId, completedName, false);
         }
@@ -415,13 +443,27 @@ export class ProductionSystem {
     return { typeName: item.typeName, progress: item.totalTime > 0 ? Math.min(1, item.elapsed / item.totalTime) : 1 };
   }
 
-  getQueueProgress(playerId: number, isBuilding: boolean): { typeName: string; progress: number } | null {
-    const queue = isBuilding
-      ? this.buildingQueues.get(playerId)
-      : this.unitQueues.get(playerId);
-    if (!queue || queue.length === 0) return null;
-    const item = queue[0];
-    return { typeName: item.typeName, progress: item.elapsed / item.totalTime };
+  getQueueProgress(playerId: number, isBuilding: boolean, unitType?: 'infantry' | 'vehicle'): { typeName: string; progress: number } | null {
+    if (isBuilding) {
+      const queue = this.buildingQueues.get(playerId);
+      if (!queue || queue.length === 0) return null;
+      const item = queue[0];
+      return { typeName: item.typeName, progress: item.totalTime > 0 ? item.elapsed / item.totalTime : 1 };
+    }
+    // Unit queues: return specific type or first active
+    if (unitType === 'infantry' || unitType === undefined) {
+      const q = this.infantryQueues.get(playerId);
+      if (q && q.length > 0) {
+        return { typeName: q[0].typeName, progress: q[0].totalTime > 0 ? q[0].elapsed / q[0].totalTime : 1 };
+      }
+    }
+    if (unitType === 'vehicle' || unitType === undefined) {
+      const q = this.vehicleQueues.get(playerId);
+      if (q && q.length > 0) {
+        return { typeName: q[0].typeName, progress: q[0].totalTime > 0 ? q[0].elapsed / q[0].totalTime : 1 };
+      }
+    }
+    return null;
   }
 
   // --- Starport Trading ---
@@ -461,7 +503,9 @@ export class ProductionSystem {
     const def = this.rules.units.get(unitName);
     if (!def) return false;
 
-    const queue = this.unitQueues.get(playerId) ?? [];
+    const isInf = this.isInfantryType(unitName);
+    const queueMap = isInf ? this.infantryQueues : this.vehicleQueues;
+    const queue = queueMap.get(playerId) ?? [];
     queue.push({
       typeName: unitName,
       isBuilding: false,
@@ -469,31 +513,56 @@ export class ProductionSystem {
       elapsed: 0,
       cost: price,
     });
-    this.unitQueues.set(playerId, queue);
+    queueMap.set(playerId, queue);
     return true;
   }
 
-  /** Get full queue contents for UI display */
-  getQueue(playerId: number, isBuilding: boolean): { typeName: string; progress: number }[] {
-    const queue = isBuilding
-      ? this.buildingQueues.get(playerId)
-      : this.unitQueues.get(playerId);
-    if (!queue) return [];
-    return queue.map((item, i) => ({
+  /** Get full queue contents for UI display. For units, optionally filter by infantry/vehicle. */
+  getQueue(playerId: number, isBuilding: boolean, unitType?: 'infantry' | 'vehicle'): { typeName: string; progress: number }[] {
+    if (isBuilding) {
+      const queue = this.buildingQueues.get(playerId);
+      if (!queue) return [];
+      return queue.map((item, i) => ({
+        typeName: item.typeName,
+        progress: i === 0 && item.totalTime > 0 ? item.elapsed / item.totalTime : 0,
+      }));
+    }
+    const mapQueue = (q: QueueItem[]) => q.map((item, i) => ({
       typeName: item.typeName,
       progress: i === 0 && item.totalTime > 0 ? item.elapsed / item.totalTime : 0,
     }));
+    if (unitType === 'infantry') return mapQueue(this.infantryQueues.get(playerId) ?? []);
+    if (unitType === 'vehicle') return mapQueue(this.vehicleQueues.get(playerId) ?? []);
+    // Merged: infantry first, then vehicle
+    return [
+      ...mapQueue(this.infantryQueues.get(playerId) ?? []),
+      ...mapQueue(this.vehicleQueues.get(playerId) ?? []),
+    ];
   }
 
-  /** Cancel a queued item by index, refunding cost (partial for in-progress) */
-  cancelQueueItem(playerId: number, isBuilding: boolean, index: number): boolean {
-    const queue = isBuilding
-      ? this.buildingQueues.get(playerId)
-      : this.unitQueues.get(playerId);
+  /** Cancel a queued item by index, refunding cost (partial for in-progress).
+   *  For units, specify unitType to target the correct sub-queue. */
+  cancelQueueItem(playerId: number, isBuilding: boolean, index: number, unitType?: 'infantry' | 'vehicle'): boolean {
+    let queue: QueueItem[] | undefined;
+    if (isBuilding) {
+      queue = this.buildingQueues.get(playerId);
+    } else if (unitType === 'infantry') {
+      queue = this.infantryQueues.get(playerId);
+    } else if (unitType === 'vehicle') {
+      queue = this.vehicleQueues.get(playerId);
+    } else {
+      // Legacy fallback: index into merged view (infantry first, then vehicle)
+      const infQ = this.infantryQueues.get(playerId) ?? [];
+      if (index < infQ.length) {
+        queue = infQ;
+      } else {
+        queue = this.vehicleQueues.get(playerId);
+        index -= infQ.length;
+      }
+    }
     if (!queue || index < 0 || index >= queue.length) return false;
 
     const item = queue[index];
-    // Full refund for queued items, partial for in-progress
     const refundRatio = index === 0 ? (1 - item.elapsed / item.totalTime) : 1.0;
     const refund = Math.floor(item.cost * refundRatio);
     this.harvestSystem.addSolaris(playerId, refund);

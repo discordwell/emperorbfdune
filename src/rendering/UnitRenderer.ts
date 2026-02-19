@@ -53,6 +53,10 @@ export class UnitRenderer {
   private dying = new Map<THREE.Group, { opacity: number; sinkRate: number }>();
   // Idle animation timer
   private animTime = 0;
+  // Frustum culling: skip expensive updates for off-screen entities
+  private frustum = new THREE.Frustum();
+  private frustumMatrix = new THREE.Matrix4();
+  private cullingSphere = new THREE.Sphere();
   // Unit category classifier (returns 'infantry'|'vehicle'|'aircraft')
   private unitCategoryFn: ((eid: number) => 'infantry' | 'vehicle' | 'aircraft' | 'building') | null = null;
   // Attack-move status checker
@@ -277,6 +281,11 @@ export class UnitRenderer {
     this.currentWorld = world;
     this.animTime += 0.016; // ~60fps frame time
 
+    // Compute view frustum for culling expensive updates on off-screen entities
+    const cam = this.sceneManager.camera;
+    this.frustumMatrix.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+    this.frustum.setFromProjectionMatrix(this.frustumMatrix);
+
     // Handle new renderable entities
     const entered = renderEnter(world);
     for (const eid of entered) {
@@ -295,6 +304,7 @@ export class UnitRenderer {
       const obj = this.entityObjects.get(eid);
       if (!obj) continue;
 
+      // Always sync position (needed for ECS accuracy)
       obj.position.set(
         Position.x[eid],
         Position.y[eid],
@@ -302,30 +312,33 @@ export class UnitRenderer {
       );
       obj.rotation.y = Rotation.y[eid];
 
-      // Idle animations (subtle movement when not moving)
-      if (this.unitCategoryFn && !hasComponent(world, BuildingType, eid)) {
-        const isIdle = !hasComponent(world, MoveTarget, eid) || MoveTarget.active[eid] === 0;
-        const cat = this.unitCategoryFn(eid);
-        const t = this.animTime + eid * 1.37; // Phase offset per entity
-        if (cat === 'aircraft') {
-          // Aircraft: hover bob
-          obj.position.y += Math.sin(t * 2.0) * 0.15;
-          if (isIdle) obj.rotation.y += Math.sin(t * 0.5) * 0.003;
-        } else if (cat === 'infantry' && isIdle) {
-          // Infantry: subtle breathing bob
-          obj.position.y += Math.sin(t * 3.0) * 0.03;
-        } else if (cat === 'vehicle' && isIdle) {
-          // Vehicles: very subtle engine vibration
-          obj.position.y += Math.sin(t * 8.0) * 0.008;
-        }
-      }
-
       // Fog of war: hide enemy entities in non-visible tiles
       if (this.fogOfWar && this.fogOfWar.isEnabled() && Owner.playerId[eid] !== this.localPlayerId) {
         const tile = worldToTile(Position.x[eid], Position.z[eid]);
         obj.visible = this.fogOfWar.isTileVisible(tile.tx, tile.tz);
       } else {
         obj.visible = true;
+      }
+
+      // Frustum culling: skip expensive visual updates for off-screen entities
+      // Use bounding sphere (radius 4) to avoid popping at screen edges for buildings/large units
+      this.cullingSphere.set(obj.position, 4);
+      const inFrustum = this.frustum.intersectsSphere(this.cullingSphere);
+      if (!inFrustum && !obj.visible) continue; // Fog-hidden + off-screen: skip everything
+
+      // Idle animations (subtle movement when not moving) — only for visible entities
+      if (inFrustum && this.unitCategoryFn && !hasComponent(world, BuildingType, eid)) {
+        const isIdle = !hasComponent(world, MoveTarget, eid) || MoveTarget.active[eid] === 0;
+        const cat = this.unitCategoryFn(eid);
+        const t = this.animTime + eid * 1.37; // Phase offset per entity
+        if (cat === 'aircraft') {
+          obj.position.y += Math.sin(t * 2.0) * 0.15;
+          if (isIdle) obj.rotation.y += Math.sin(t * 0.5) * 0.003;
+        } else if (cat === 'infantry' && isIdle) {
+          obj.position.y += Math.sin(t * 3.0) * 0.03;
+        } else if (cat === 'vehicle' && isIdle) {
+          obj.position.y += Math.sin(t * 8.0) * 0.008;
+        }
       }
 
       // Update selection circle visibility and color (orange for attack-move)
@@ -337,6 +350,16 @@ export class UnitRenderer {
           const mat = circle.material as THREE.MeshBasicMaterial;
           mat.color.set(this.isAttackMoveFn(eid) ? 0xff8800 : 0x00ff00);
         }
+      }
+
+      // Skip remaining expensive updates for off-screen entities
+      if (!inFrustum) {
+        // Clean up visible indicators before skipping
+        const rc = this.rangeCircles.get(eid);
+        if (rc) rc.visible = false;
+        const ring = this.idleHarvesterCircles.get(eid);
+        if (ring) ring.visible = false;
+        continue;
       }
 
       // Idle harvester pulsing yellow ring (visible even when not selected)
@@ -355,7 +378,6 @@ export class UnitRenderer {
           }
           ring.position.set(Position.x[eid], 0.08, Position.z[eid]);
           ring.visible = true;
-          // Pulse opacity
           const pulse = 0.3 + Math.sin(this.animTime * 4 + eid * 0.5) * 0.3;
           (ring.material as THREE.MeshBasicMaterial).opacity = pulse;
         } else {
@@ -378,7 +400,6 @@ export class UnitRenderer {
             }
             rc.position.set(Position.x[eid], 0.15, Position.z[eid]);
             rc.visible = true;
-            // Recreate if range changed (veterancy bonus)
             const currentRadius = (rc.userData as any).range;
             if (Math.abs(currentRadius - range) > 0.5) {
               this.sceneManager.scene.remove(rc);

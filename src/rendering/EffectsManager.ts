@@ -106,6 +106,12 @@ export class EffectsManager {
   private shimmerGeo: THREE.PlaneGeometry | null = null;
   private shimmerTickCounter = 0;
 
+  // Impact decals: scorch marks on the ground from explosions/deaths
+  private static readonly MAX_DECALS = 40;
+  private decals: { mesh: THREE.Mesh; age: number; maxAge: number }[] = [];
+  private decalGeo: THREE.PlaneGeometry | null = null;
+  private decalTexture: THREE.Texture | null = null;
+
   // Projectile trail particle system (GPU-efficient single Points object)
   private static readonly MAX_TRAIL_PARTICLES = 500;
   private trailParticles: TrailParticle[] = [];
@@ -859,6 +865,24 @@ export class EffectsManager {
     // Projectile trail particles: spawn new + age/fade existing
     this.updateProjectileTrails(dtSec);
     this.updateTrailParticles(dtSec);
+
+    // Age and fade impact decals
+    for (let i = this.decals.length - 1; i >= 0; i--) {
+      const d = this.decals[i];
+      d.age++;
+      if (d.age >= d.maxAge) {
+        this.sceneManager.scene.remove(d.mesh);
+        (d.mesh.material as THREE.Material).dispose();
+        this.decals.splice(i, 1);
+      } else {
+        // Fade out during last 30% of life
+        const fadeStart = d.maxAge * 0.7;
+        if (d.age > fadeStart) {
+          const fadeT = (d.age - fadeStart) / (d.maxAge - fadeStart);
+          (d.mesh.material as THREE.MeshBasicMaterial).opacity = 0.7 * (1 - fadeT);
+        }
+      }
+    }
   }
 
   /** Spawn a small dust puff at the given position (for moving ground units) */
@@ -945,6 +969,51 @@ export class EffectsManager {
         p.mesh.rotation.y += 0.05;
       }
     }
+  }
+
+  /** Spawn a ground scorch mark decal at the given position */
+  spawnDecal(x: number, z: number, size: 'small' | 'medium' | 'large' = 'medium'): void {
+    // Evict oldest decal if at cap
+    if (this.decals.length >= EffectsManager.MAX_DECALS) {
+      const oldest = this.decals.shift()!;
+      this.sceneManager.scene.remove(oldest.mesh);
+      (oldest.mesh.material as THREE.Material).dispose();
+    }
+
+    // Create decal texture on first use (radial gradient scorch)
+    if (!this.decalTexture) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 64;
+      canvas.height = 64;
+      const ctx = canvas.getContext('2d')!;
+      const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+      gradient.addColorStop(0, 'rgba(20, 15, 10, 0.8)');
+      gradient.addColorStop(0.4, 'rgba(30, 20, 10, 0.5)');
+      gradient.addColorStop(0.7, 'rgba(40, 30, 15, 0.2)');
+      gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, 64, 64);
+      this.decalTexture = new THREE.CanvasTexture(canvas);
+    }
+
+    const scale = size === 'small' ? 1.5 : size === 'medium' ? 3.0 : 5.0;
+    if (!this.decalGeo) this.decalGeo = new THREE.PlaneGeometry(1, 1);
+
+    const mat = new THREE.MeshBasicMaterial({
+      map: this.decalTexture,
+      transparent: true,
+      opacity: 0.7,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const mesh = new THREE.Mesh(this.decalGeo, mat);
+    mesh.rotation.set(-Math.PI / 2, Math.random() * Math.PI * 2, 0); // Flat on ground with random spin
+    mesh.position.set(x, 0.02, z);
+    mesh.scale.set(scale, scale, 1);
+
+    this.sceneManager.scene.add(mesh);
+    // Decals last 60 seconds (1500 ticks at 25 TPS)
+    this.decals.push({ mesh, age: 0, maxAge: 1500 });
   }
 
   /** Gold star burst for unit promotion */

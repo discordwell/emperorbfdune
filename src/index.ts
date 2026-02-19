@@ -1096,6 +1096,7 @@ async function main() {
     }
     effectsManager.spawnExplosion(x, y, z, explosionSize);
     effectsManager.spawnWreckage(x, y, z, isBuilding);
+    effectsManager.spawnDecal(x, z, explosionSize);
     // Screen shake proportional to explosion size
     if (explosionSize === 'large') scene.shake(0.4);
     else if (explosionSize === 'medium') scene.shake(0.15);
