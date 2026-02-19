@@ -1133,9 +1133,9 @@ async function main() {
 
   // Refund when player cancels building placement
   EventBus.on('placement:cancelled', ({ typeName }) => {
-    const def = gameRules.buildings.get(typeName);
-    if (def) {
-      harvestSystem.addSolaris(0, def.cost);
+    const refund = productionSystem.getAdjustedCost(0, typeName, true);
+    if (refund > 0) {
+      harvestSystem.addSolaris(0, refund);
       selectionPanel.addMessage('Building cancelled - refunded', '#f0c040');
     }
   });

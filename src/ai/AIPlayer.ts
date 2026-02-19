@@ -144,20 +144,7 @@ export class AIPlayer implements GameSystem {
       }
     });
 
-    for (const [name, def] of rules.units) {
-      if (name.startsWith('HK') && def.cost > 0) {
-        if (def.canFly) {
-          this.aircraftPool.push(name);
-        } else if (def.aiSpecial && !def.deviator) {
-          this.specialPool.push(name);
-        } else {
-          this.unitPool.push(name);
-        }
-      }
-    }
-    if (this.unitPool.length === 0) {
-      this.unitPool = ['HKLightInf', 'HKBuzzsaw', 'HKAssault'];
-    }
+    // Unit pools start empty — setUnitPool(prefix) must be called before first update
   }
 
   setSpawnCallback(cb: (eid: number, typeName: string, owner: number, x: number, z: number) => void): void {
@@ -1574,6 +1561,7 @@ export class AIPlayer implements GameSystem {
   }
 
   private spawnWave(world: World): void {
+    if (this.unitPool.length === 0) return;
     for (let i = 0; i < this.waveSize; i++) {
       const typeName = this.unitPool[Math.floor(Math.random() * this.unitPool.length)];
       const x = this.baseX + randomFloat(-10, 10);

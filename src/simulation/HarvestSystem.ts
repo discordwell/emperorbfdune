@@ -43,8 +43,8 @@ export class HarvestSystem implements GameSystem {
   private lastSolarisSnapshot = 0;
   // Tracked harvester entity IDs
   private knownHarvesters = new Set<number>();
-  // Harvesters that recently took damage - flee to refinery
-  private fleeing = new Set<number>();
+  // Harvesters that recently took damage - flee to refinery (eid -> expiry tick)
+  private fleeing = new Map<number, number>();
   // Building lookup for refinery reassignment
   private world: World | null = null;
   private buildingTypeNames: string[] = [];
@@ -59,11 +59,7 @@ export class HarvestSystem implements GameSystem {
       if (state !== RETURNING && state !== UNLOADING) {
         Harvester.state[entityId] = RETURNING;
         this.returnToRefinery(entityId);
-        this.fleeing.add(entityId);
-        // Clear flee flag after 10 seconds so they can resume
-        setTimeout(() => {
-          if (this.knownHarvesters.has(entityId)) this.fleeing.delete(entityId);
-        }, 10000);
+        this.fleeing.set(entityId, this.tickCounter + 250); // ~10 seconds at 25 tps
       }
     });
   }
@@ -126,6 +122,13 @@ export class HarvestSystem implements GameSystem {
     // Track known harvesters for damage detection
     this.knownHarvesters.clear();
     for (const eid of entities) this.knownHarvesters.add(eid);
+
+    // Expire flee timers
+    for (const [eid, expiry] of this.fleeing) {
+      if (this.tickCounter >= expiry || !this.knownHarvesters.has(eid)) {
+        this.fleeing.delete(eid);
+      }
+    }
 
     for (const eid of entities) {
       const state = Harvester.state[eid];
@@ -426,6 +429,8 @@ export class HarvestSystem implements GameSystem {
   }
 
   private handleIdle(eid: number): void {
+    // Don't go back to spice while fleeing from damage
+    if (this.fleeing.has(eid)) return;
     // Find nearest spice
     const spiceTile = this.findNearestSpice(eid);
     if (!spiceTile) return;

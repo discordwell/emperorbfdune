@@ -155,6 +155,17 @@ export class MovementSystem implements GameSystem {
       let path = this.paths.get(eid);
       let idx = this.pathIndex.get(eid) ?? 0;
 
+      // Invalidate cached path if destination has changed
+      if (path && path.length > 0) {
+        const lastWp = path[path.length - 1];
+        if (Math.abs(lastWp.x - targetX) > 2 || Math.abs(lastWp.z - targetZ) > 2) {
+          path = undefined;
+          this.paths.delete(eid);
+          this.pathIndex.delete(eid);
+          idx = 0;
+        }
+      }
+
       if (!path) {
         const startTile = worldToTile(px, pz);
         const endTile = worldToTile(targetX, targetZ);
