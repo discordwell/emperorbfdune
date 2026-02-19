@@ -60,6 +60,14 @@ export class HarvestSystem implements GameSystem {
     });
   }
 
+  /** Force a harvester to return to refinery immediately (e.g. R key) */
+  forceReturn(eid: number): void {
+    if (!this.knownHarvesters.has(eid)) return;
+    Harvester.state[eid] = RETURNING;
+    this.returnToRefinery(eid);
+    MoveTarget.active[eid] = 1;
+  }
+
   /** Provide building context for refinery reassignment when a refinery is destroyed */
   setBuildingContext(world: World, buildingTypeNames: string[]): void {
     this.world = world;

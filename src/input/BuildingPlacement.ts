@@ -213,14 +213,37 @@ export class BuildingPlacement {
     this.isValidPlacement = this.concreteMode
       ? this.checkConcreteValidity(tile.tx, tile.tz)
       : this.checkValidity(tile.tx, tile.tz);
-    const color = this.isValidPlacement ? this.validColor : this.invalidColor;
 
-    (this.ghostMesh.material as THREE.MeshBasicMaterial).color = color;
-    this.gridHelper.children.forEach(child => {
-      if (child instanceof THREE.Mesh) {
-        (child.material as THREE.MeshBasicMaterial).color = color;
+    // Per-tile validity coloring for detailed feedback
+    if (!this.concreteMode) {
+      const { w, h } = this.buildingSize;
+      const halfW = Math.floor(w / 2);
+      const halfH = Math.floor(h / 2);
+      let idx = 0;
+      for (let dz = 0; dz < h; dz++) {
+        for (let dx = 0; dx < w; dx++) {
+          const child = this.gridHelper.children[idx++];
+          if (child instanceof THREE.Mesh) {
+            const checkTx = tile.tx + dx - halfW;
+            const checkTz = tile.tz + dz - halfH;
+            (child.material as THREE.MeshBasicMaterial).color.copy(
+              this.isTileValid(checkTx, checkTz) ? this.validColor : this.invalidColor
+            );
+          }
+        }
       }
-    });
+    } else {
+      const color = this.isValidPlacement ? this.validColor : this.invalidColor;
+      this.gridHelper.children.forEach(child => {
+        if (child instanceof THREE.Mesh) {
+          (child.material as THREE.MeshBasicMaterial).color = color;
+        }
+      });
+    }
+
+    // Ghost mesh overall color
+    const ghostColor = this.isValidPlacement ? this.validColor : this.invalidColor;
+    (this.ghostMesh.material as THREE.MeshBasicMaterial).color = ghostColor;
   };
 
   private onMouseDown = (e: MouseEvent): void => {
@@ -302,6 +325,15 @@ export class BuildingPlacement {
     this.sceneManager.scene.add(this.gridHelper);
 
     document.body.style.cursor = 'crosshair';
+  }
+
+  private isTileValid(tx: number, tz: number): boolean {
+    if (tx < 2 || tx >= this.terrain.getMapWidth() - 2 || tz < 2 || tz >= this.terrain.getMapHeight() - 2) return false;
+    const terrain = this.terrain.getTerrainType(tx, tz);
+    if (terrain === TerrainType.Cliff || terrain === TerrainType.Rock || terrain === TerrainType.InfantryRock) return false;
+    if (terrain === TerrainType.SpiceLow || terrain === TerrainType.SpiceHigh) return false;
+    if (this.occupiedTiles.has(`${tx},${tz}`)) return false;
+    return true;
   }
 
   private checkConcreteValidity(tx: number, tz: number): boolean {

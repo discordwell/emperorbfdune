@@ -343,6 +343,7 @@ async function main() {
   const combatSystem = new CombatSystem(gameRules);
   commandManager.setCombatSystem(combatSystem);
   const harvestSystem = new HarvestSystem(terrain);
+  commandManager.setForceReturnFn((eid) => harvestSystem.forceReturn(eid));
   const productionSystem = new ProductionSystem(gameRules, harvestSystem);
   // Apply difficulty-based cost/time scaling (additional AI players registered after opponents array is created)
   const playerDifficulty = house.difficulty ?? 'normal';
@@ -382,6 +383,7 @@ async function main() {
     if (def.infantry) return 'infantry';
     return 'vehicle';
   });
+  unitRenderer.setAttackMoveFn((eid: number) => combatSystem.isAttackMove(eid));
   combatSystem.setFogOfWar(fogOfWar, 0);
   combatSystem.setPlayerFaction(0, house.prefix);
   combatSystem.setPlayerFaction(1, house.enemyPrefix);  // AI player 1 (additional AIs registered below)
@@ -1021,6 +1023,9 @@ async function main() {
     }
     effectsManager.spawnExplosion(x, y, z, explosionSize);
     effectsManager.spawnWreckage(x, y, z, isBuilding);
+    // Screen shake proportional to explosion size
+    if (explosionSize === 'large') scene.shake(0.4);
+    else if (explosionSize === 'medium') scene.shake(0.15);
     if (isBuilding) {
       EventBus.emit('building:destroyed', { entityId, owner: deadOwner, x, z });
     }
@@ -1107,6 +1112,7 @@ async function main() {
   EventBus.on('worm:emerge', () => {
     selectionPanel.addMessage('Worm sign detected!', '#ff8800');
     audioManager.playSfx('worm');
+    scene.shake(0.5);
   });
   EventBus.on('worm:eat', ({ ownerId }) => {
     if (ownerId === 0) {
@@ -1142,6 +1148,7 @@ async function main() {
   });
   EventBus.on('bloom:eruption', ({ x, z }) => {
     effectsManager.spawnExplosion(x, 0.5, z, 'large');
+    scene.shake(0.3);
     selectionPanel.addMessage('Spice bloom detected!', '#ff8800');
     audioManager.playSfx('worm'); // Rumble sound
     terrain.updateSpiceVisuals();
@@ -1467,6 +1474,7 @@ async function main() {
   const unitCountEl = document.getElementById('unit-count');
   const commandModeEl = document.getElementById('command-mode');
   const lowPowerEl = document.getElementById('low-power-warning');
+  const controlGroupsEl = document.getElementById('control-groups');
 
   // Objective display for campaign
   let objectiveEl: HTMLDivElement | null = null;
@@ -1649,6 +1657,23 @@ async function main() {
         }
       }
       if (unitCountEl) unitCountEl.textContent = `${unitCount}`;
+
+      // Control group badges (update every second)
+      if (controlGroupsEl && game.getTickCount() % 25 === 0) {
+        const groups = selectionManager.getControlGroups();
+        let html = '';
+        for (let i = 1; i <= 9; i++) {
+          const grp = groups.get(i);
+          if (grp && grp.length > 0) {
+            const w = game.getWorld();
+            const alive = grp.filter(eid => { try { return w && hasComponent(w, Health, eid) && Health.current[eid] > 0; } catch { return false; } });
+            if (alive.length > 0) {
+              html += `<span style="display:inline-block;min-width:18px;height:18px;line-height:18px;text-align:center;background:#1a1a3e;border:1px solid #555;border-radius:3px;font-size:10px;color:#aaa;cursor:pointer;" title="Group ${i}: ${alive.length} units" data-grp="${i}">${i}<sub style="font-size:8px;color:#888;">${alive.length}</sub></span>`;
+            }
+          }
+        }
+        controlGroupsEl.innerHTML = html;
+      }
 
       // Power affects gameplay: slow production and turrets when in deficit
       const lowPower = powerGen < powerUsed;

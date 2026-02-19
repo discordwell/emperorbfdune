@@ -19,6 +19,7 @@ export class CommandManager {
 
   private commandMode: CommandMode = 'normal';
   private unitClassifier: ((eid: number) => UnitCategory) | null = null;
+  private forceReturnFn: ((eid: number) => void) | null = null;
 
   // Waypoint queue per entity
   private waypointQueues = new Map<number, Array<{ x: number; z: number }>>();
@@ -42,6 +43,10 @@ export class CommandManager {
 
   setCombatSystem(combat: CombatSystem): void {
     this.combatSystem = combat;
+  }
+
+  setForceReturnFn(fn: (eid: number) => void): void {
+    this.forceReturnFn = fn;
   }
 
   setUnitClassifier(fn: (eid: number) => UnitCategory): void {
@@ -216,6 +221,22 @@ export class CommandManager {
             modeEl.style.display = 'block';
             modeEl.textContent = `Stance: ${names[next]}`;
             setTimeout(() => { if (modeEl.textContent?.startsWith('Stance:')) modeEl.style.display = 'none'; }, 1500);
+          }
+        }
+        break;
+
+      case 'r':
+        // Return harvesters to refinery
+        if (selected.length > 0 && this.forceReturnFn) {
+          let returned = 0;
+          for (const eid of selected) {
+            if (hasComponent(this.world, Harvester, eid)) {
+              this.forceReturnFn(eid);
+              returned++;
+            }
+          }
+          if (returned > 0) {
+            this.audioManager?.playSfx('select');
           }
         }
         break;

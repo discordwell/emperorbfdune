@@ -46,6 +46,10 @@ export class SelectionManager {
     return this.selectedEntities;
   }
 
+  getControlGroups(): Map<number, number[]> {
+    return this.controlGroups;
+  }
+
   clearSelection(world: World): void {
     for (const eid of this.selectedEntities) {
       Selectable.selected[eid] = 0;
@@ -209,6 +213,42 @@ export class SelectionManager {
         combat.push(eid);
       }
       if (combat.length > 0) this.selectEntities(world, combat);
+      return;
+    }
+
+    // Ctrl+H: Select all harvesters
+    if (key === 'h' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      const world = (window as any).game?.getWorld();
+      if (!world) return;
+      const allUnits = unitQuery(world);
+      const harvesters: number[] = [];
+      for (const eid of allUnits) {
+        if (Owner.playerId[eid] !== 0) continue;
+        if (Health.current[eid] <= 0) continue;
+        if (!hasComponent(world, Harvester, eid)) continue;
+        harvesters.push(eid);
+      }
+      if (harvesters.length > 0) this.selectEntities(world, harvesters);
+      return;
+    }
+
+    // Shift+Tab: Select all idle military units
+    if (key === 'Tab' && e.shiftKey) {
+      e.preventDefault();
+      const world = (window as any).game?.getWorld();
+      if (!world) return;
+      const allUnits = unitQuery(world);
+      const idle: number[] = [];
+      for (const eid of allUnits) {
+        if (Owner.playerId[eid] !== 0) continue;
+        if (Health.current[eid] <= 0) continue;
+        if (hasComponent(world, Harvester, eid)) continue;
+        if (MoveTarget.active[eid] === 1) continue;
+        if (hasComponent(world, Combat, eid) && Combat.targetEid[eid] > 0) continue;
+        idle.push(eid);
+      }
+      if (idle.length > 0) this.selectEntities(world, idle);
       return;
     }
 

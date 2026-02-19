@@ -140,6 +140,10 @@ export class CombatSystem implements GameSystem {
     }
   }
 
+  isAttackMove(eid: number): boolean {
+    return this.attackMoveEntities.has(eid);
+  }
+
   update(world: World, _dt: number): void {
     this.world = world;
 

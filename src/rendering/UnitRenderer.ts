@@ -55,6 +55,8 @@ export class UnitRenderer {
   private animTime = 0;
   // Unit category classifier (returns 'infantry'|'vehicle'|'aircraft')
   private unitCategoryFn: ((eid: number) => 'infantry' | 'vehicle' | 'aircraft' | 'building') | null = null;
+  // Attack-move status checker
+  private isAttackMoveFn: ((eid: number) => boolean) | null = null;
 
   constructor(sceneManager: SceneManager, modelManager: ModelManager, artMap: Map<string, ArtEntry>) {
     this.sceneManager = sceneManager;
@@ -69,6 +71,10 @@ export class UnitRenderer {
 
   setUnitCategoryFn(fn: (eid: number) => 'infantry' | 'vehicle' | 'aircraft' | 'building'): void {
     this.unitCategoryFn = fn;
+  }
+
+  setAttackMoveFn(fn: (eid: number) => boolean): void {
+    this.isAttackMoveFn = fn;
   }
 
   /** Mark a building as under construction — will animate from scaffold to solid */
@@ -289,10 +295,15 @@ export class UnitRenderer {
         obj.visible = true;
       }
 
-      // Update selection circle visibility
+      // Update selection circle visibility and color (orange for attack-move)
       const circle = this.selectionCircles.get(eid);
       if (circle) {
-        circle.visible = Selectable.selected[eid] === 1 && obj.visible;
+        const selected = Selectable.selected[eid] === 1;
+        circle.visible = selected && obj.visible;
+        if (selected && this.isAttackMoveFn) {
+          const mat = circle.material as THREE.MeshBasicMaterial;
+          mat.color.set(this.isAttackMoveFn(eid) ? 0xff8800 : 0x00ff00);
+        }
       }
 
       // Update health bar

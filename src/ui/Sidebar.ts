@@ -402,6 +402,13 @@ export class Sidebar {
       ? `<img src="${iconUrl}" width="36" height="36" style="flex-shrink:0;opacity:${iconOpacity};image-rendering:auto;border-right:1px solid #333;" />`
       : `<div style="width:6px;background:${roleColor};opacity:${iconOpacity};flex-shrink:0;"></div>`;
 
+    // Production progress overlay
+    const progress = this.production.getQueueProgress(this.playerId, isBuilding);
+    const isProducing = progress && progress.typeName === name;
+    const progressBar = isProducing
+      ? `<div style="position:absolute;bottom:0;left:0;height:3px;width:${Math.round(progress!.progress * 100)}%;background:#0f0;transition:width 0.3s;"></div>`
+      : '';
+
     item.innerHTML = `
       ${iconHtml}
       <div style="padding:4px 4px;flex:1;min-width:0;">
@@ -410,6 +417,7 @@ export class Sidebar {
         <div style="color:${costColor};font-size:10px;">$${cost}</div>
         ${blockDetail}
       </div>
+      ${progressBar}
     `;
 
     // Tooltip on hover

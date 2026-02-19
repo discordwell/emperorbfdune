@@ -220,7 +220,7 @@ export class SelectionPanel {
       const stanceNames = ['Aggressive', 'Defensive', 'Hold Position'];
       const stanceColors = ['#f44', '#4af', '#888'];
       const stanceIcons = ['\u2694', '\u26e8', '\u2693']; // crossed swords, shield, anchor
-      stanceHtml = `<span style="font-size:11px;color:${stanceColors[stance]};">${stanceIcons[stance]} ${stanceNames[stance]}</span> <span style="font-size:9px;color:#666;">(V to cycle)</span>`;
+      stanceHtml = `<span id="stance-btn" style="font-size:11px;color:${stanceColors[stance]};cursor:pointer;">${stanceIcons[stance]} ${stanceNames[stance]}</span> <span style="font-size:9px;color:#666;">(V)</span>`;
     }
 
     let buttons = '';
@@ -302,6 +302,16 @@ export class SelectionPanel {
         this.onUpgrade?.(eid, typeName);
       };
     }
+    const stanceBtn = document.getElementById('stance-btn');
+    if (stanceBtn && this.combatSystem) {
+      stanceBtn.onclick = () => {
+        const current = this.combatSystem!.getStance(eid);
+        const next = (current + 1) % 3;
+        this.combatSystem!.setStance(eid, next);
+        this.audioManager.playSfx('select');
+        this.render();
+      };
+    }
   }
 
   private renderMulti(): void {
@@ -363,10 +373,31 @@ export class SelectionPanel {
 
     const moreText = count > 20 ? `<span style="color:#888;font-size:10px;">+${count - 20} more</span>` : '';
 
+    // Dominant stance for multi-selection
+    let stanceHtml = '';
+    if (this.combatSystem) {
+      const stanceCounts = [0, 0, 0];
+      for (const eid of this.selectedEntities) {
+        if (hasComponent(this.world!, Combat, eid)) {
+          stanceCounts[this.combatSystem.getStance(eid)]++;
+        }
+      }
+      const totalCombat = stanceCounts[0] + stanceCounts[1] + stanceCounts[2];
+      if (totalCombat > 0) {
+        const stanceNames = ['Aggressive', 'Defensive', 'Hold'];
+        const stanceColors = ['#f44', '#4af', '#888'];
+        const stanceIcons = ['\u2694', '\u26e8', '\u2693'];
+        const dominant = stanceCounts.indexOf(Math.max(...stanceCounts));
+        const allSame = stanceCounts[dominant] === totalCombat;
+        stanceHtml = `<div style="font-size:11px;margin-bottom:2px;"><span style="color:${stanceColors[dominant]};">${stanceIcons[dominant]} ${stanceNames[dominant]}${allSame ? '' : ' (mixed)'}</span> <span style="color:#666;font-size:9px;">(V)</span></div>`;
+      }
+    }
+
     this.container.innerHTML = `
       <div style="flex:1;">
         <div style="font-size:13px;font-weight:bold;color:#fff;margin-bottom:2px;">${count} units selected</div>
         <div style="font-size:11px;margin-bottom:4px;">${groups}${moreTypes}</div>
+        ${stanceHtml}
         <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
           <div style="flex:1;height:4px;background:#333;border-radius:2px;overflow:hidden;">
             <div style="height:100%;width:${Math.round(avgRatio * 100)}%;background:${avgColor};"></div>
