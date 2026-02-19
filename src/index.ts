@@ -952,8 +952,9 @@ async function main() {
     const bx = Position.x[eid];
     const bz = Position.z[eid];
 
-    // Prevent combat targeting this building
+    // Prevent combat targeting this building and block duplicate death processing
     Health.current[eid] = 0;
+    processedDeaths.add(eid);
 
     // Notify systems that building is gone (path invalidation, AI tracking, etc.)
     EventBus.emit('building:destroyed', { entityId: eid, owner: 0, x: bx, z: bz });
@@ -1632,8 +1633,7 @@ async function main() {
           const uDef = gameRules.units.get(unitType);
           if (uDef?.infantry && productionSystem.isUpgraded(owner, `${ownerPrefix}Barracks`)) {
             if (hasComponent(world, Veterancy, eid) && Veterancy.rank[eid] < 1) {
-              Veterancy.rank[eid] = 1;
-              Veterancy.xp[eid] = 1;
+              combatSystem.addXp(eid, 1); // Applies rank + health bonus properly
             }
           }
         }

@@ -501,7 +501,7 @@ export class HarvestSystem implements GameSystem {
       // Airlift complete - land adjacent to refinery (try cardinal directions to avoid obstacles)
       this.airlifting.delete(eid);
       const refEntity = Harvester.refineryEntity[eid];
-      if (refEntity > 0) {
+      if (refEntity > 0 && Health.current[refEntity] > 0) {
         const rx = Position.x[refEntity];
         const rz = Position.z[refEntity];
         // Try 4 cardinal offsets outside 3x3 building footprint
@@ -523,6 +523,14 @@ export class HarvestSystem implements GameSystem {
           Position.x[eid] = rx;
           Position.z[eid] = rz + 4;
         }
+      } else {
+        // Refinery died during airlift — find another or go idle
+        Position.y[eid] = 0.1;
+        this.returnToRefinery(eid); // Sets state to IDLE if no refineries found
+        if (Harvester.state[eid] !== IDLE) {
+          Harvester.state[eid] = RETURNING;
+        }
+        return;
       }
       Position.y[eid] = 0.1;
       Harvester.state[eid] = UNLOADING;

@@ -930,7 +930,7 @@ export class AIPlayer implements GameSystem {
     const cost = bDef ? Math.floor(bDef.cost * 0.05) : 50;
 
     if (this.harvestSystem.spendSolaris(this.playerId, cost)) {
-      Health.current[worstEid] += repairAmount;
+      Health.current[worstEid] = Math.min(Health.max[worstEid], Health.current[worstEid] + repairAmount);
     }
   }
 
