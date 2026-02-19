@@ -2697,8 +2697,10 @@ async function main() {
       spawnUnit(world, playerVehicles[i], 0, playerBase.x + 3 + i * 2, playerBase.z + 12);
     }
 
-    // Harvester
-    const harvTypes = [...gameRules.units.keys()].filter(n => n.startsWith(px) && (n.includes('Harv') || n.includes('harvester')));
+    // Harvester — check faction-prefixed first, then generic "Harvester"
+    const harvTypes = [...gameRules.units.keys()].filter(n =>
+      (n.startsWith(px) || n === 'Harvester') && (n.includes('Harv') || n.includes('harvester'))
+    );
     if (harvTypes.length > 0) {
       spawnUnit(world, harvTypes[0], 0, playerBase.x + 10, playerBase.z + 8);
     } else {
@@ -2740,8 +2742,10 @@ async function main() {
         spawnUnit(world, enemyVehicles[j], owner, aiBase.x + 1 + j * 2, aiBase.z + 12);
       }
 
-      // Enemy harvester
-      const enemyHarvTypes = [...gameRules.units.keys()].filter(n => n.startsWith(ex) && (n.includes('Harv') || n.includes('harvester')));
+      // Enemy harvester — check faction-prefixed first, then generic "Harvester"
+      const enemyHarvTypes = [...gameRules.units.keys()].filter(n =>
+        (n.startsWith(ex) || n === 'Harvester') && (n.includes('Harv') || n.includes('harvester'))
+      );
       if (enemyHarvTypes.length > 0) {
         spawnUnit(world, enemyHarvTypes[0], owner, aiBase.x - 5, aiBase.z + 12);
       }

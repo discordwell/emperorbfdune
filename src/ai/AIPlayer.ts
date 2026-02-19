@@ -821,16 +821,13 @@ export class AIPlayer implements GameSystem {
       const harvesterNames = [
         `${this.factionPrefix}Harvester`,
         `${this.factionPrefix}harvester`,
-        // Also check for generic harvester types
+        'Harvester', // Generic shared harvester type
       ];
 
-      // Also search all units for any harvester-type unit matching our faction
-      for (const [name, def] of this.rules.units) {
-        if (name.startsWith(this.factionPrefix) && def.getUnitWhenBuilt) {
-          // Some buildings produce harvesters when built (refineries)
-          // But we want to directly train harvesters
-        }
-        if (name.toLowerCase().includes('harvester') && name.startsWith(this.factionPrefix)) {
+      // Also search all units for any harvester-type unit
+      for (const [name] of this.rules.units) {
+        if (name.toLowerCase().includes('harvester') &&
+            (name.startsWith(this.factionPrefix) || name === 'Harvester')) {
           if (!harvesterNames.includes(name)) harvesterNames.push(name);
         }
       }
