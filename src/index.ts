@@ -14,7 +14,7 @@ import { MovementSystem } from './simulation/MovementSystem';
 import { PathfindingSystem } from './simulation/PathfindingSystem';
 import { CombatSystem } from './simulation/CombatSystem';
 import { HarvestSystem } from './simulation/HarvestSystem';
-import { ProductionSystem } from './simulation/ProductionSystem';
+import { ProductionSystem, type ProductionState } from './simulation/ProductionSystem';
 import { Sidebar } from './ui/Sidebar';
 import { IconRenderer } from './rendering/IconRenderer';
 import { MinimapRenderer } from './rendering/MinimapRenderer';
@@ -77,6 +77,7 @@ interface SaveData {
   solaris: number[];
   entities: SavedEntity[];
   spice: number[][]; // [row][col]
+  production?: ProductionState;
 }
 
 // ID maps
@@ -655,6 +656,7 @@ async function main() {
   fogOfWar.reinitialize(); // Re-create fog buffers/mesh for actual map dimensions
   minimapRenderer.renderTerrain(); // Re-render minimap with actual terrain data
   scene.setMapBounds(mapW * 2, mapH * 2); // TILE_SIZE = 2
+  movement.setMapBounds(mapW * 2, mapH * 2);
 
   // Load model manifest for case-insensitive lookups
   updateLoading(45, 'Loading model manifest...');
@@ -764,7 +766,7 @@ async function main() {
     Speed.turnRate[eid] = def.turnRate;
     Renderable.modelId[eid] = unitTypeIdMap.get(typeName) ?? 0;
     Renderable.sceneIndex[eid] = -1;
-    ViewRange.range[eid] = def.viewRange * 2;
+    ViewRange.range[eid] = (def.viewRange || 5) * 2;
 
     if (def.turretAttach) {
       addComponent(world, Combat, eid);
@@ -796,6 +798,11 @@ async function main() {
     if (def.canFly) {
       movement.registerFlyer(eid);
       Position.y[eid] = 5.0; // Flight altitude
+    }
+
+    // Register infantry for terrain passability
+    if (def.infantry) {
+      movement.registerInfantry(eid);
     }
 
     // Ornithopters/gunships need rearming - track ammo
@@ -841,7 +848,7 @@ async function main() {
     Renderable.modelId[eid] = 0;
     Renderable.sceneIndex[eid] = -1;
     Selectable.selected[eid] = 0;
-    ViewRange.range[eid] = 16; // Buildings see 8 tiles
+    ViewRange.range[eid] = (def.viewRange || 10) * 2; // Convert tile range to world units
 
     if (def.powerGenerated > 0 || def.powerUsed > 0) {
       addComponent(world, PowerSource, eid);
@@ -981,6 +988,7 @@ async function main() {
     const world = game.getWorld();
     // Cost already paid by ProductionSystem.startProduction() — just spawn
     const eid = spawnBuilding(world, typeName, 0, x, z);
+    movement.invalidateAllPaths(); // Building changed terrain
     // Animate construction over ~3 seconds (75 ticks at 25 TPS)
     if (eid >= 0) {
       audioManager.playSfx('place');
@@ -1094,6 +1102,7 @@ async function main() {
 
     combatSystem.unregisterUnit(entityId);
     movement.unregisterFlyer(entityId);
+    movement.unregisterInfantry(entityId);
     effectsManager.clearBuildingDamage(entityId);
 
     // Clean up aircraft ammo tracking
@@ -1120,6 +1129,7 @@ async function main() {
     else if (explosionSize === 'medium') scene.shake(0.15);
     if (isBuilding) {
       EventBus.emit('building:destroyed', { entityId, owner: deadOwner, x, z });
+      movement.invalidateAllPaths(); // Building removed — paths may have changed
     }
 
     // Death animation: play explode clip if available, otherwise procedural tilt
@@ -1449,6 +1459,7 @@ async function main() {
         if (bDef && ownerAi) {
           const pos = ownerAi.getNextBuildingPlacement(unitType, bDef);
           spawnBuilding(world, unitType, owner, pos.x, pos.z);
+          movement.invalidateAllPaths(); // AI building placed
           // Spawn free unit for AI buildings (e.g. Harvester from Refinery)
           if (bDef.getUnitWhenBuilt) {
             spawnUnit(world, bDef.getUnitWhenBuilt, owner, pos.x + 3, pos.z + 3);
@@ -1590,6 +1601,7 @@ async function main() {
           Health.current[eid] = 0;
           EventBus.emit('unit:died', { entityId: eid, killerEntity: -1 });
           spawnBuilding(world, conYardName, owner, deployX, deployZ);
+          movement.invalidateAllPaths(); // MCV deployed
         }
       }
     }
@@ -2555,6 +2567,7 @@ async function main() {
       solaris: Array.from({ length: totalPlayers }, (_, i) => harvestSystem.getSolaris(i)),
       entities,
       spice,
+      production: productionSystem.getState(),
     };
   }
 
@@ -2662,6 +2675,11 @@ async function main() {
         }
       }
     }
+    // Restore production queues and upgrade state
+    if (savedGame.production) {
+      productionSystem.restoreState(savedGame.production);
+    }
+
     console.log(`Restored ${savedGame.entities.length} entities from save (tick ${savedGame.tick})`);
   } else {
     // --- FRESH GAME ---

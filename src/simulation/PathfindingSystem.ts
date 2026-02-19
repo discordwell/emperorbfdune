@@ -77,7 +77,7 @@ export class PathfindingSystem {
     startTx: number, startTz: number,
     endTx: number, endTz: number,
     isVehicle: boolean = true,
-    maxNodes: number = 1000
+    maxNodes: number = 3000
   ): { x: number; z: number }[] | null {
     // A* pathfinding on terrain grid
     const mapW = this.terrain.getMapWidth();
@@ -109,6 +109,7 @@ export class PathfindingSystem {
     openSet.insert(startNode);
 
     let nodesExplored = 0;
+    let bestPartialNode: PathNode | null = null; // Track closest node to goal
 
     while (openSet.length > 0 && nodesExplored < maxNodes) {
       nodesExplored++;
@@ -122,6 +123,11 @@ export class PathfindingSystem {
       const key = current.tz * mapW + current.tx;
       if (closedSet.has(key)) continue;
       closedSet.add(key);
+
+      // Track the node closest to goal for partial path fallback (after closedSet guard)
+      if (!bestPartialNode || current.h < bestPartialNode.h) {
+        bestPartialNode = current;
+      }
 
       // 8-directional neighbors
       for (let dz = -1; dz <= 1; dz++) {
@@ -159,7 +165,12 @@ export class PathfindingSystem {
       }
     }
 
-    return null; // No path found
+    // Return partial path toward goal if node limit was hit (not for genuinely unreachable targets)
+    if (bestPartialNode && bestPartialNode.parent && bestPartialNode.h < startNode.h * 0.7) {
+      return this.reconstructPath(bestPartialNode);
+    }
+
+    return null; // No path found or target unreachable
   }
 
   private heuristic(ax: number, az: number, bx: number, bz: number): number {

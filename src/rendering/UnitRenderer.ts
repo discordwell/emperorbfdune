@@ -652,7 +652,15 @@ export class UnitRenderer {
 
     // Determine desired state from ECS
     const isMoving = hasComponent(world, MoveTarget, eid) && MoveTarget.active[eid] === 1;
-    const isFiring = hasComponent(world, AttackTarget, eid) && AttackTarget.active[eid] === 1;
+    // Check if unit is firing: either has explicit attack target OR auto-acquired (fireTimer near rof = just fired)
+    const hasExplicitTarget = hasComponent(world, AttackTarget, eid) && AttackTarget.active[eid] === 1;
+    const hasCombat = hasComponent(world, Combat, eid);
+    const rof = hasCombat ? Combat.rof[eid] : 0;
+    const fireTimer = hasCombat ? Combat.fireTimer[eid] : 0;
+    // For units with rof >= 5: check within 2 ticks of firing; for fast-firers (rof < 5): check full timer
+    const fireWindow = rof >= 5 ? 2 : rof;
+    const justFired = hasCombat && fireTimer > 0 && fireTimer >= rof - fireWindow;
+    const isFiring = hasExplicitTarget || justFired;
 
     let desiredState: AnimState;
     if (isFiring && !isMoving) {

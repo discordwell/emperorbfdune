@@ -15,6 +15,15 @@ interface QueueItem {
   cost: number;
 }
 
+export interface ProductionState {
+  buildingQueues: Record<number, QueueItem[]>;
+  infantryQueues: Record<number, QueueItem[]>;
+  vehicleQueues: Record<number, QueueItem[]>;
+  upgradeQueues: Record<number, QueueItem[]>;
+  upgradedBuildings: Record<number, string[]>;
+  repeatUnits: Record<number, string[]>;
+}
+
 export class ProductionSystem {
   private rules: GameRules;
   private harvestSystem: HarvestSystem;
@@ -538,6 +547,67 @@ export class ProductionSystem {
       ...mapQueue(this.infantryQueues.get(playerId) ?? []),
       ...mapQueue(this.vehicleQueues.get(playerId) ?? []),
     ];
+  }
+
+  // --- Save/Load ---
+
+  /** Serialize production state for saving */
+  getState(): ProductionState {
+    const serializeQueue = (q: Map<number, QueueItem[]>): Record<number, QueueItem[]> => {
+      const out: Record<number, QueueItem[]> = {};
+      for (const [pid, items] of q) {
+        if (items.length > 0) out[pid] = items.map(i => ({ ...i }));
+      }
+      return out;
+    };
+    const serializeSet = (m: Map<number, Set<string>>): Record<number, string[]> => {
+      const out: Record<number, string[]> = {};
+      for (const [pid, set] of m) {
+        if (set.size > 0) out[pid] = [...set];
+      }
+      return out;
+    };
+    return {
+      buildingQueues: serializeQueue(this.buildingQueues),
+      infantryQueues: serializeQueue(this.infantryQueues),
+      vehicleQueues: serializeQueue(this.vehicleQueues),
+      upgradeQueues: serializeQueue(this.upgradeQueues),
+      upgradedBuildings: serializeSet(this.upgradedBuildings),
+      repeatUnits: serializeSet(this.repeatUnits),
+    };
+  }
+
+  /** Restore production state from save data (clears existing state first) */
+  restoreState(state: ProductionState): void {
+    this.buildingQueues.clear();
+    this.infantryQueues.clear();
+    this.vehicleQueues.clear();
+    this.upgradeQueues.clear();
+    this.upgradedBuildings.clear();
+    this.repeatUnits.clear();
+    const restoreQueue = (data: Record<number, QueueItem[]>, target: Map<number, QueueItem[]>): void => {
+      for (const pid of Object.keys(data)) {
+        const items = data[Number(pid)];
+        if (items && items.length > 0) {
+          target.set(Number(pid), items.map(i => ({ ...i })));
+        }
+      }
+    };
+    const restoreSet = (data: Record<number, string[]>, target: Map<number, Set<string>>): void => {
+      for (const pid of Object.keys(data)) {
+        const arr = data[Number(pid)];
+        if (arr && arr.length > 0) {
+          target.set(Number(pid), new Set(arr));
+        }
+      }
+    };
+
+    restoreQueue(state.buildingQueues ?? {}, this.buildingQueues);
+    restoreQueue(state.infantryQueues ?? {}, this.infantryQueues);
+    restoreQueue(state.vehicleQueues ?? {}, this.vehicleQueues);
+    restoreQueue(state.upgradeQueues ?? {}, this.upgradeQueues);
+    restoreSet(state.upgradedBuildings ?? {}, this.upgradedBuildings);
+    restoreSet(state.repeatUnits ?? {}, this.repeatUnits);
   }
 
   /** Cancel a queued item by index, refunding cost (partial for in-progress).

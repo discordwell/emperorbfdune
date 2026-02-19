@@ -32,8 +32,7 @@ export class FogOfWar {
   private fogData: Uint8Array;
   private rawAlphaBuffer: Uint8Array; // Temp buffer for blur pass
 
-  // Buildings reveal radius (tiles)
-  private buildingViewRange = 8;
+  // (buildingViewRange removed — now uses per-building ViewRange component)
 
   private enabled = true;
   private tickCounter = 0;
@@ -185,17 +184,18 @@ export class FogOfWar {
     for (const eid of units) {
       if (Owner.playerId[eid] !== this.localPlayerId) continue;
       if (Health.current[eid] <= 0) continue;
-      const range = ViewRange.range ? (ViewRange.range[eid] || 6) : 6;
+      const range = ViewRange.range[eid] || 10; // Default 5 tiles * 2
       const tile = worldToTile(Position.x[eid], Position.z[eid]);
       this.revealArea(tile.tx, tile.tz, Math.ceil(range / TILE_SIZE));
     }
 
-    // Reveal around player buildings
+    // Reveal around player buildings (using per-building ViewRange)
     for (const eid of buildings) {
       if (Owner.playerId[eid] !== this.localPlayerId) continue;
       if (Health.current[eid] <= 0) continue;
+      const range = ViewRange.range[eid] || 20; // Default 10 tiles * 2
       const tile = worldToTile(Position.x[eid], Position.z[eid]);
-      this.revealArea(tile.tx, tile.tz, this.buildingViewRange);
+      this.revealArea(tile.tx, tile.tz, Math.ceil(range / TILE_SIZE));
     }
 
     // Update fog texture

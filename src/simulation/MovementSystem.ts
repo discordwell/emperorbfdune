@@ -20,14 +20,30 @@ export class MovementSystem implements GameSystem {
   private pathIndex = new Map<number, number>();
   // Flying entities skip pathfinding
   private flyingEntities = new Set<number>();
+  // Infantry entities use infantry passability for pathfinding
+  private infantryEntities = new Set<number>();
   private tickCount = 0;
   // Spatial grid for O(n*k) neighbor lookups instead of O(n²)
   private spatialGrid = new SpatialGrid(SEPARATION_RADIUS);
   /** Expose the spatial grid for use by CombatSystem */
   getSpatialGrid(): SpatialGrid { return this.spatialGrid; }
+  // Map bounds in world units (set from terrain)
+  private mapMaxX = 256;
+  private mapMaxZ = 256;
 
   constructor(pathfinder: PathfindingSystem) {
     this.pathfinder = pathfinder;
+  }
+
+  setMapBounds(maxX: number, maxZ: number): void {
+    this.mapMaxX = maxX;
+    this.mapMaxZ = maxZ;
+  }
+
+  /** Invalidate all cached paths (call when blocked tiles change, e.g. building placed/destroyed) */
+  invalidateAllPaths(): void {
+    this.paths.clear();
+    this.pathIndex.clear();
   }
 
   registerFlyer(eid: number): void {
@@ -36,6 +52,14 @@ export class MovementSystem implements GameSystem {
 
   unregisterFlyer(eid: number): void {
     this.flyingEntities.delete(eid);
+  }
+
+  registerInfantry(eid: number): void {
+    this.infantryEntities.add(eid);
+  }
+
+  unregisterInfantry(eid: number): void {
+    this.infantryEntities.delete(eid);
   }
 
   init(_world: World): void {}
@@ -68,8 +92,8 @@ export class MovementSystem implements GameSystem {
             }
           }
           if (Math.abs(sepX) > 0.01 || Math.abs(sepZ) > 0.01) {
-            Position.x[eid] = Math.max(0, Math.min(256, px + sepX * 0.03));
-            Position.z[eid] = Math.max(0, Math.min(256, pz + sepZ * 0.03));
+            Position.x[eid] = Math.max(0, Math.min(this.mapMaxX, px + sepX * 0.03));
+            Position.z[eid] = Math.max(0, Math.min(this.mapMaxZ, pz + sepZ * 0.03));
           }
         }
         Velocity.x[eid] = 0;
@@ -104,8 +128,8 @@ export class MovementSystem implements GameSystem {
         const vz = dirZ * speed;
         Velocity.x[eid] = vx;
         Velocity.z[eid] = vz;
-        Position.x[eid] = px + vx * 0.04;
-        Position.z[eid] = pz + vz * 0.04;
+        Position.x[eid] = Math.max(0, Math.min(this.mapMaxX, px + vx * 0.04));
+        Position.z[eid] = Math.max(0, Math.min(this.mapMaxZ, pz + vz * 0.04));
         continue;
       }
 
@@ -116,7 +140,8 @@ export class MovementSystem implements GameSystem {
       if (!path) {
         const startTile = worldToTile(px, pz);
         const endTile = worldToTile(targetX, targetZ);
-        path = this.pathfinder.findPath(startTile.tx, startTile.tz, endTile.tx, endTile.tz) ?? [{ x: targetX, z: targetZ }];
+        const isVehicle = !this.infantryEntities.has(eid);
+        path = this.pathfinder.findPath(startTile.tx, startTile.tz, endTile.tx, endTile.tz, isVehicle) ?? [{ x: targetX, z: targetZ }];
         this.paths.set(eid, path);
         idx = 0;
         this.pathIndex.set(eid, 0);
@@ -193,9 +218,9 @@ export class MovementSystem implements GameSystem {
       Velocity.x[eid] = vx;
       Velocity.z[eid] = vz;
 
-      // Apply velocity (scaled by tick interval)
-      Position.x[eid] = px + vx * 0.04; // 40ms = 0.04s per tick
-      Position.z[eid] = pz + vz * 0.04;
+      // Apply velocity (scaled by tick interval), clamped to map bounds
+      Position.x[eid] = Math.max(0, Math.min(this.mapMaxX, px + vx * 0.04));
+      Position.z[eid] = Math.max(0, Math.min(this.mapMaxZ, pz + vz * 0.04));
     }
   }
 

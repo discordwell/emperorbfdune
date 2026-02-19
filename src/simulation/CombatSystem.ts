@@ -45,6 +45,8 @@ export class CombatSystem implements GameSystem {
   private bulletCache = new Map<string, BulletDef | null>();
   // Spatial grid from MovementSystem for efficient neighbor queries
   private spatialGrid: SpatialGrid | null = null;
+  // Entities that fired this tick (for animation triggering)
+  private recentlyFired = new Set<number>();
 
   constructor(rules: GameRules) {
     this.rules = rules;
@@ -152,8 +154,14 @@ export class CombatSystem implements GameSystem {
     return this.attackMoveEntities.has(eid);
   }
 
+  /** Check if an entity just fired (for animation triggering) */
+  hasFiredThisTick(eid: number): boolean {
+    return this.recentlyFired.has(eid);
+  }
+
   update(world: World, _dt: number): void {
     this.world = world;
+    this.recentlyFired.clear();
 
     // Update escort targets: follow the escorted unit
     for (const [escorter, targetEid] of this.escortTargets) {
@@ -338,6 +346,7 @@ export class CombatSystem implements GameSystem {
       if (Combat.fireTimer[eid] > 0) continue;
 
       this.fire(world, eid, targetEid);
+      this.recentlyFired.add(eid);
       // Buildings fire slower when low on power
       let rof = Combat.rof[eid];
       if (hasComponent(world, BuildingType, eid)) {
