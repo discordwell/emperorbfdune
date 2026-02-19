@@ -878,6 +878,19 @@ export class EffectsManager {
     this.dustPuffs.push({ mesh, life: 0.8, vy: 0.3 + Math.random() * 0.3 });
   }
 
+  /** Spawn a green repair sparkle above a building */
+  spawnRepairSparkle(x: number, y: number, z: number): void {
+    if (this.dustPuffs.length > 100) return;
+    if (!this.dustGeo) this.dustGeo = new THREE.SphereGeometry(0.15, 3, 3);
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0x44ff44, transparent: true, opacity: 0.7, depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(this.dustGeo, mat);
+    mesh.position.set(x, y, z);
+    this.sceneManager.scene.add(mesh);
+    this.dustPuffs.push({ mesh, life: 0.6, vy: 0.5 + Math.random() * 0.3 });
+  }
+
   /** Update spice shimmer: periodically spawn sparkle particles over spice fields */
   updateSpiceShimmer(terrain: import('../rendering/TerrainRenderer').TerrainRenderer): void {
     this.shimmerTickCounter++;

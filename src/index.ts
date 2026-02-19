@@ -883,29 +883,66 @@ async function main() {
     });
   }
 
+  // Continuous repair: set of building eids being auto-repaired
+  const repairingBuildings = new Set<number>();
+
   function repairBuilding(eid: number): void {
     const world = game.getWorld();
     if (!hasComponent(world, BuildingType, eid)) return;
     if (Owner.playerId[eid] !== 0) return;
 
+    // Toggle continuous repair on/off
+    if (repairingBuildings.has(eid)) {
+      repairingBuildings.delete(eid);
+      selectionPanel.addMessage('Repair stopped', '#aaaaaa');
+      return;
+    }
+
     const hp = Health.current[eid];
     const maxHp = Health.max[eid];
-    if (hp >= maxHp) return;
+    if (hp >= maxHp) {
+      selectionPanel.addMessage('Building at full health', '#aaaaaa');
+      return;
+    }
 
-    // Repair 10% per click, costs proportional
-    const repairAmount = Math.min(maxHp * 0.1, maxHp - hp);
-    const typeId = BuildingType.id[eid];
-    const typeName = buildingTypeNames[typeId];
-    const def = typeName ? gameRules.buildings.get(typeName) : null;
-    const cost = def ? Math.floor(def.cost * 0.05) : 50;
+    repairingBuildings.add(eid);
+    audioManager.playSfx('build');
+    selectionPanel.addMessage('Repairing...', '#44ff44');
+  }
 
-    if (harvestSystem.spendSolaris(0, cost)) {
-      Health.current[eid] += repairAmount;
-      selectionPanel.addMessage(`Repaired for ${cost} Solaris`, '#44ff44');
-    } else {
-      audioManager.playSfx('error');
-      selectionPanel.addMessage('Insufficient funds', '#ff4444');
-      audioManager.getDialogManager()?.trigger('insufficientFunds');
+  // Called from game tick to process continuous repairs
+  function tickRepairs(): void {
+    if (repairingBuildings.size === 0) return;
+
+    for (const eid of repairingBuildings) {
+      const world = game.getWorld();
+      if (!hasComponent(world, BuildingType, eid) || Health.current[eid] <= 0) {
+        repairingBuildings.delete(eid);
+        continue;
+      }
+
+      const hp = Health.current[eid];
+      const maxHp = Health.max[eid];
+      if (hp >= maxHp) {
+        repairingBuildings.delete(eid);
+        selectionPanel.addMessage('Repair complete', '#44ff44');
+        continue;
+      }
+
+      // Repair 1% per tick (~2.5% per second), costs proportional
+      const repairAmount = Math.min(maxHp * 0.01, maxHp - hp);
+      const typeId = BuildingType.id[eid];
+      const typeName = buildingTypeNames[typeId];
+      const def = typeName ? gameRules.buildings.get(typeName) : null;
+      const cost = def ? Math.max(1, Math.floor(def.cost * 0.005)) : 5;
+
+      if (harvestSystem.spendSolaris(0, cost)) {
+        Health.current[eid] += repairAmount;
+      } else {
+        repairingBuildings.delete(eid);
+        selectionPanel.addMessage('Repair stopped: insufficient funds', '#ff4444');
+        audioManager.getDialogManager()?.trigger('insufficientFunds');
+      }
     }
   }
 
@@ -963,6 +1000,7 @@ async function main() {
   });
 
   selectionPanel.setPassengerCountFn((eid) => abilitySystem.getTransportPassengerCount(eid));
+  selectionPanel.setRepairingFn((eid) => repairingBuildings.has(eid));
 
   // --- AI SPAWN CALLBACK ---
 
@@ -1576,6 +1614,11 @@ async function main() {
     productionSystem.update();
     productionSystem.updateStarportPrices();
 
+    // Continuous building repair (every 10 ticks = ~2.5x per second)
+    if (game.getTickCount() % 10 === 0) {
+      tickRepairs();
+    }
+
     superweaponSystem.update(world, game.getTickCount());
 
     // Dust trails for moving ground units (every 3rd tick to limit particles)
@@ -1790,10 +1833,16 @@ async function main() {
         harvestSystem.setCarryallAvailable(i, hasHanger[i]);
       }
 
-      // Building damage visual states: smoke and fire based on HP
+      // Building damage visual states: smoke and fire based on HP + repair sparkles
       for (const eid of buildings) {
         if (Health.current[eid] <= 0) continue;
         const ratio = Health.current[eid] / Health.max[eid];
+        // Green repair sparkles on buildings being repaired
+        if (repairingBuildings.has(eid) && game.getTickCount() % 8 === 0) {
+          const bx = Position.x[eid] + (Math.random() - 0.5) * 3;
+          const bz = Position.z[eid] + (Math.random() - 0.5) * 3;
+          effectsManager.spawnRepairSparkle(bx, 1 + Math.random() * 2, bz);
+        }
         effectsManager.updateBuildingDamage(
           eid, Position.x[eid], Position.y[eid], Position.z[eid], ratio
         );

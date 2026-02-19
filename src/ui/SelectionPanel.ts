@@ -33,6 +33,7 @@ export class SelectionPanel {
   private sellConfirmEid: number | null = null;
   private sellConfirmTimer: ReturnType<typeof setTimeout> | null = null;
   private passengerCountFn: ((eid: number) => number) | null = null;
+  private isRepairingFn: ((eid: number) => boolean) | null = null;
 
   constructor(
     rules: GameRules,
@@ -98,6 +99,10 @@ export class SelectionPanel {
 
   setPassengerCountFn(fn: (eid: number) => number): void {
     this.passengerCountFn = fn;
+  }
+
+  setRepairingFn(fn: (eid: number) => boolean): void {
+    this.isRepairingFn = fn;
   }
 
   addMessage(text: string, color = '#ccc'): void {
@@ -263,7 +268,7 @@ export class SelectionPanel {
       buttons = `
         ${upgradeBtn}
         <button id="sell-btn" style="padding:4px 12px;background:${sellBg};border:1px solid ${sellBorder};color:${sellColor};cursor:pointer;font-size:11px;">${sellLabel}</button>
-        <button id="repair-btn" style="padding:4px 12px;background:#114411;border:1px solid #4f4;color:#8f8;cursor:pointer;font-size:11px;">Repair</button>
+        <button id="repair-btn" style="padding:4px 12px;background:${this.isRepairingFn?.(eid) ? '#225522' : '#114411'};border:1px solid ${this.isRepairingFn?.(eid) ? '#8f8' : '#4f4'};color:${this.isRepairingFn?.(eid) ? '#afa' : '#8f8'};cursor:pointer;font-size:11px;">${this.isRepairingFn?.(eid) ? 'Repairing...' : 'Repair'}</button>
       `;
     }
 
@@ -314,7 +319,6 @@ export class SelectionPanel {
     const repairBtn = document.getElementById('repair-btn');
     if (repairBtn) {
       repairBtn.onclick = () => {
-        this.audioManager.playSfx('build');
         this.onRepair(eid);
       };
     }
