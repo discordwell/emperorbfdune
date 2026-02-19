@@ -1817,7 +1817,7 @@ export class AIPlayer implements GameSystem {
       // Special units (engineers, saboteurs) don't retreat — they're on suicide missions
       if (this.specialEntities.has(eid)) continue;
 
-      const ratio = Health.current[eid] / Health.max[eid];
+      const ratio = Health.max[eid] > 0 ? Health.current[eid] / Health.max[eid] : 1;
       if (ratio < this.retreatHealthPct) {
         // Retreat to base
         const dist = distance2D(Position.x[eid], Position.z[eid], this.baseX, this.baseZ);
@@ -1952,7 +1952,7 @@ export class AIPlayer implements GameSystem {
       if (this.specialEntities.has(eid)) continue;
 
       // Only send healthy units (>50% HP) on counterattack
-      const hpRatio = Health.current[eid] / Health.max[eid];
+      const hpRatio = Health.max[eid] > 0 ? Health.current[eid] / Health.max[eid] : 1;
       if (hpRatio < 0.5) continue;
 
       const dist = distance2D(Position.x[eid], Position.z[eid], this.baseX, this.baseZ);

@@ -99,11 +99,13 @@ export class AbilitySystem {
     }
 
     // Clean up special ability tracking
+    this.deviatedUnits.delete(entityId);
     this.leechTargets.delete(entityId);
     this.projectorHolograms.delete(entityId);
     this.infiltratorRevealed.delete(entityId);
     this.stealthTimers.delete(entityId);
     this.stealthPrevPositions.delete(entityId);
+    this.unitsInUnstealthZone.delete(entityId);
 
     // Kobra: restore base range on death (for ECS entity recycling safety)
     if (this.kobraDeployed.has(entityId)) {

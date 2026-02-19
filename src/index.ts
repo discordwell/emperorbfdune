@@ -2090,7 +2090,7 @@ async function main() {
       // Building damage visual states: smoke and fire based on HP + repair sparkles
       for (const eid of buildings) {
         if (Health.current[eid] <= 0) continue;
-        const ratio = Health.current[eid] / Health.max[eid];
+        const ratio = Health.max[eid] > 0 ? Health.current[eid] / Health.max[eid] : 1;
         // Green repair sparkles on buildings being repaired
         if (repairingBuildings.has(eid) && game.getTickCount() % 8 === 0) {
           const bx = Position.x[eid] + (Math.random() - 0.5) * 3;

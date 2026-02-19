@@ -190,9 +190,12 @@ export class CombatSystem implements GameSystem {
     this.suppressedEntities.delete(eid);
     this.stealthedEntities.delete(eid);
     this.disabledBuildings.delete(eid);
-    // Clear any units escorting this entity
+    // Clear any units escorting this entity or tracking it as attacker
     for (const [escorter, target] of this.escortTargets) {
       if (target === eid) this.escortTargets.delete(escorter);
+    }
+    for (const [targetEid, attackerId] of this.lastAttacker) {
+      if (attackerId === eid) this.lastAttacker.delete(targetEid);
     }
   }
 
@@ -259,7 +262,8 @@ export class CombatSystem implements GameSystem {
 
     // Update escort targets: follow the escorted unit
     for (const [escorter, targetEid] of this.escortTargets) {
-      if (!hasComponent(world, Health, targetEid) || Health.current[targetEid] <= 0) {
+      if (!hasComponent(world, Health, targetEid) || Health.current[targetEid] <= 0
+        || Owner.playerId[targetEid] !== Owner.playerId[escorter]) {
         this.escortTargets.delete(escorter);
         this.guardPositions.delete(escorter);
         continue;
@@ -302,7 +306,9 @@ export class CombatSystem implements GameSystem {
 
       if (hasComponent(world, AttackTarget, eid) && AttackTarget.active[eid] === 1) {
         targetEid = AttackTarget.entityId[eid];
-        if (!hasComponent(world, Health, targetEid) || Health.current[targetEid] <= 0) {
+        // Validate target: must be alive and not a recycled friendly entity
+        if (!hasComponent(world, Health, targetEid) || Health.current[targetEid] <= 0
+          || Owner.playerId[targetEid] === Owner.playerId[eid]) {
           AttackTarget.active[eid] = 0;
           targetEid = -1;
           // If attack-move unit killed its target, resume moving to destination
