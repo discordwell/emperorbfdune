@@ -6,7 +6,7 @@
 import { EventBus } from '../core/EventBus';
 import {
   Position, Health, Owner, BuildingType,
-  unitQuery, buildingQuery, hasComponent,
+  unitQuery, buildingQuery,
   type World,
 } from '../core/ECS';
 import type { SceneManager } from '../rendering/SceneManager';
@@ -179,9 +179,8 @@ export class SuperweaponSystem {
         const dmg = Math.floor(config.damage * (1 - dist / config.radius));
         Health.current[eid] = Math.max(0, Health.current[eid] - dmg);
         if (Health.current[eid] <= 0) {
-          if (hasComponent(w, BuildingType, eid)) {
-            EventBus.emit('building:destroyed', { entityId: eid, owner: Owner.playerId[eid], x: Position.x[eid], z: Position.z[eid] });
-          }
+          // Note: only emit unit:died here; the unit:died handler in index.ts
+          // already emits building:destroyed for buildings, avoiding double-fire.
           EventBus.emit('unit:died', { entityId: eid, killerEntity: -1 });
         }
       }

@@ -170,6 +170,7 @@ function buildMiniBriefingKey(
   if (phaseType === 'homeDefense') return `${house}HWDmb`;
   if (phaseType === 'heighliner') return `${house}HeighlinerMini`;
   if (phaseType === 'homeAttack') return `${house}HWAmb`;
+  if (phaseType === 'civilWar') return `${house}CivilWarmb`;
   if (phaseType === 'final') return `${house}FinalMini`;
 
   const suffix = subHouse ?? enemy ?? 'GN';

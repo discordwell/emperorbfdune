@@ -297,8 +297,16 @@ function parseBuildingDef(name: string, section: Section): BuildingDef {
       case 'StormDamage': def.stormDamage = parseNum(value); break;
       case 'Occupy': def.occupy.push(value.split('')); break;
       case 'DeployTile': {
-        const parts = value.split(',');
-        def.deployTiles.push({ x: parseNum(parts[0]), y: parseNum(parts[1]), angle: 0 });
+        // Format can be "x,y" or "x,y x2,y2" or "x,y, x2,y2" (multiple tiles per line)
+        const tileTokens = value.split(/\s+/).filter(s => s.length > 0);
+        for (const token of tileTokens) {
+          // Remove trailing commas from tokens like "3,7,"
+          const clean = token.replace(/,$/, '');
+          const parts = clean.split(',');
+          if (parts.length >= 2) {
+            def.deployTiles.push({ x: parseNum(parts[0]), y: parseNum(parts[1]), angle: 0 });
+          }
+        }
         break;
       }
       case 'DeployAngle': {
