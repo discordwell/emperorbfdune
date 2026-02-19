@@ -83,6 +83,7 @@ interface DamageSmoke {
 
 export class EffectsManager {
   private sceneManager: SceneManager;
+  private _tmpVec = new THREE.Vector3();
   private explosions: Explosion[] = [];
   private projectiles: Projectile[] = [];
   private beams: Beam[] = [];
@@ -618,7 +619,7 @@ export class EffectsManager {
         mat.opacity -= dt * 0.0003;
         if (mat.opacity <= 0) {
           this.sceneManager.scene.remove(trail);
-          trail.geometry.dispose();
+          // Don't dispose shared wormTrailGeo — only dispose per-trail material
           mat.dispose();
           vis.trailMeshes.splice(j, 1);
         }
@@ -766,7 +767,7 @@ export class EffectsManager {
 
         // Physics
         p.velocity.y -= p.gravity * dtSec;
-        p.mesh.position.add(p.velocity.clone().multiplyScalar(dtSec));
+        p.mesh.position.add(this._tmpVec.copy(p.velocity).multiplyScalar(dtSec));
 
         // Don't go below ground
         if (p.mesh.position.y < 0.1) {

@@ -34,6 +34,10 @@ const HOUSE_COLORS: THREE.Color[] = [
 ];
 
 export class UnitRenderer {
+  private static readonly _hbGreen = new THREE.Color(0x00ff00);
+  private static readonly _hbYellow = new THREE.Color(0xffff00);
+  private static readonly _hbRed = new THREE.Color(0xff0000);
+
   private sceneManager: SceneManager;
   private modelManager: ModelManager;
   private artMap: Map<string, ArtEntry>;
@@ -543,11 +547,15 @@ export class UnitRenderer {
       return;
     }
 
-    // Remove placeholder children (keep selection circle)
+    // Remove placeholder children and dispose their geometry/material
     const circle = this.selectionCircles.get(eid);
     while (existing.children.length > 0) {
       const child = existing.children[0];
       existing.remove(child);
+      if (child instanceof THREE.Mesh) {
+        child.geometry?.dispose();
+        if (child.material) (child.material as THREE.Material).dispose();
+      }
     }
 
     // Add cloned model
@@ -703,11 +711,13 @@ export class UnitRenderer {
     }
 
     bar.visible = true;
-    // Color based on health: green->yellow->red
-    const color = ratio > 0.5
-      ? new THREE.Color(0x00ff00).lerp(new THREE.Color(0xffff00), 1 - (ratio - 0.5) * 2)
-      : new THREE.Color(0xffff00).lerp(new THREE.Color(0xff0000), 1 - ratio * 2);
-    (bar.material as THREE.SpriteMaterial).color = color;
+    // Color based on health: green->yellow->red (reuse static colors to avoid allocations)
+    const mat = bar.material as THREE.SpriteMaterial;
+    if (ratio > 0.5) {
+      mat.color.copy(UnitRenderer._hbGreen).lerp(UnitRenderer._hbYellow, 1 - (ratio - 0.5) * 2);
+    } else {
+      mat.color.copy(UnitRenderer._hbYellow).lerp(UnitRenderer._hbRed, 1 - ratio * 2);
+    }
     bar.scale.set(ratio * 1.5, 0.15, 1);
   }
 
