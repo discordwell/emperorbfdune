@@ -287,6 +287,37 @@ export class UnitRenderer {
     console.log(`Preloaded ${this.modelTemplates.size} total model templates (units + buildings)`);
   }
 
+  // Models currently being lazy-loaded (prevents duplicate loads)
+  private loadingModels = new Set<string>();
+  // Models that failed to load (prevents repeated 404s)
+  private failedModels = new Set<string>();
+
+  /** Trigger lazy load of a model that wasn't preloaded */
+  private lazyLoadModel(xafName: string): void {
+    if (this.loadingModels.has(xafName) || this.modelTemplates.has(xafName) || this.failedModels.has(xafName)) return;
+    this.loadingModels.add(xafName);
+    this.modelManager.loadModel(xafName, 'H0').then(model => {
+      this.loadingModels.delete(xafName);
+      if (model) {
+        this.modelTemplates.set(xafName, model);
+        // Auto-resolve pending entities waiting for this model
+        this.resolvePendingForModel(xafName);
+      } else {
+        this.failedModels.add(xafName);
+      }
+    });
+  }
+
+  /** Resolve pending models only for a specific xaf name (after lazy load) */
+  private resolvePendingForModel(xafName: string): void {
+    for (const [eid, pending] of [...this.pendingModels]) {
+      if (pending.xafName === xafName) {
+        this.pendingModels.delete(eid);
+        this.setEntityModel(eid, pending.xafName, pending.scale);
+      }
+    }
+  }
+
   /** Retry pending models for entities still using placeholders */
   resolvePendingModels(): number {
     let resolved = 0;
@@ -493,6 +524,7 @@ export class UnitRenderer {
 
     this.entityObjects.set(eid, group);
     this.sceneManager.scene.add(group);
+    this.invalidateMeshLookup();
 
     // Selection circle (green ring, hidden by default) — larger for buildings
     const innerR = isBuilding ? 2.0 : 0.8;
@@ -559,8 +591,9 @@ export class UnitRenderer {
   setEntityModel(eid: number, xafName: string, scale: number = 0.02): void {
     const template = this.modelTemplates.get(xafName);
     if (!template) {
-      // No template loaded — store pending in case model loads later
+      // No template loaded — trigger lazy load and store pending
       this.pendingModels.set(eid, { xafName, scale });
+      this.lazyLoadModel(xafName);
       return;
     }
 
@@ -608,6 +641,8 @@ export class UnitRenderer {
         }
       }
     });
+
+    this.invalidateMeshLookup();
 
     // Cache turret node (identified by ::0 name prefix in XBF models)
     this.turretNodes.delete(eid);
@@ -951,6 +986,7 @@ export class UnitRenderer {
       });
       this.dying.set(obj, { opacity: 1.0, sinkRate: 0.02 });
       this.entityObjects.delete(eid);
+      this.invalidateMeshLookup();
     }
     this.selectionCircles.delete(eid);
     this.shadowCircles.delete(eid);
@@ -1006,6 +1042,15 @@ export class UnitRenderer {
     }
   }
 
+  // Reverse lookup: mesh -> entity ID (rebuilt on changes)
+  private meshToEntity = new Map<THREE.Object3D, number>();
+  private meshLookupDirty = true;
+
+  /** Mark mesh lookup as needing rebuild */
+  private invalidateMeshLookup(): void {
+    this.meshLookupDirty = true;
+  }
+
   getEntityAtScreen(screenX: number, screenY: number): number | null {
     const ndc = new THREE.Vector2(
       (screenX / window.innerWidth) * 2 - 1,
@@ -1013,9 +1058,21 @@ export class UnitRenderer {
     );
     this.sceneManager.raycaster.setFromCamera(ndc, this.sceneManager.camera);
 
-    // Collect all meshes
+    // Rebuild mesh->entity reverse lookup if stale
+    if (this.meshLookupDirty) {
+      this.meshToEntity.clear();
+      for (const [eid, obj] of this.entityObjects) {
+        obj.traverse(child => {
+          if (child instanceof THREE.Mesh) this.meshToEntity.set(child, eid);
+        });
+      }
+      this.meshLookupDirty = false;
+    }
+
+    // Only raycast against visible entities in frustum
     const meshes: THREE.Object3D[] = [];
     for (const [, obj] of this.entityObjects) {
+      if (!obj.visible) continue;
       obj.traverse(child => {
         if (child instanceof THREE.Mesh) meshes.push(child);
       });
@@ -1024,17 +1081,7 @@ export class UnitRenderer {
     const intersects = this.sceneManager.raycaster.intersectObjects(meshes, false);
     if (intersects.length === 0) return null;
 
-    // Find which entity owns this mesh
-    const hitObj = intersects[0].object;
-    for (const [eid, obj] of this.entityObjects) {
-      let found = false;
-      obj.traverse(child => {
-        if (child === hitObj) found = true;
-      });
-      if (found) return eid;
-    }
-
-    return null;
+    return this.meshToEntity.get(intersects[0].object) ?? null;
   }
 
   /** Add a visual upgrade indicator (gold ring) to a building */

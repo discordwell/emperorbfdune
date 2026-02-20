@@ -16,6 +16,7 @@ import { SelectionManager } from '../input/SelectionManager';
 import { CommandManager } from '../input/CommandManager';
 import { MovementSystem } from '../simulation/MovementSystem';
 import { PathfindingSystem } from '../simulation/PathfindingSystem';
+import { AsyncPathfinder } from '../simulation/AsyncPathfinder';
 import { CombatSystem } from '../simulation/CombatSystem';
 import { HarvestSystem } from '../simulation/HarvestSystem';
 import { ProductionSystem } from '../simulation/ProductionSystem';
@@ -100,7 +101,9 @@ export function initializeSystems(config: SystemInitConfig): GameContext {
   commandManager.setUnitClassifier(classifyUnit);
 
   const pathfinder = new PathfindingSystem(terrain);
+  const asyncPathfinder = new AsyncPathfinder(terrain, pathfinder);
   const movement = new MovementSystem(pathfinder);
+  movement.setAsyncPathfinder(asyncPathfinder);
   const combatSystem = new CombatSystem(gameRules);
   commandManager.setCombatSystem(combatSystem);
   const effectsManager = new EffectsManager(scene);
@@ -440,7 +443,7 @@ export function initializeSystems(config: SystemInitConfig): GameContext {
     activeMissionConfig, activeMapId, missionRuntime,
 
     scene, terrain, input, modelManager, unitRenderer,
-    selectionManager, commandManager, pathfinder, movement,
+    selectionManager, commandManager, pathfinder, asyncPathfinder, movement,
     combatSystem, harvestSystem, productionSystem,
     minimapRenderer, fogOfWar, effectsManager, damageNumbers,
     sandwormSystem, abilitySystem, superweaponSystem, wallSystem,

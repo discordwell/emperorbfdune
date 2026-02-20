@@ -162,6 +162,11 @@ export class TerrainRenderer {
   getMapWidth(): number { return this.mapWidth; }
   getMapHeight(): number { return this.mapHeight; }
 
+  /** Get a copy of the raw terrain data for worker pathfinding */
+  getTerrainDataCopy(): Uint8Array {
+    return new Uint8Array(this.terrainData);
+  }
+
   getTerrainType(tx: number, tz: number): TerrainType {
     if (tx < 0 || tx >= this.mapWidth || tz < 0 || tz >= this.mapHeight) return TerrainType.Cliff;
     return this.terrainData[tz * this.mapWidth + tx];

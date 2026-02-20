@@ -9,6 +9,7 @@ import type { SelectionManager } from '../input/SelectionManager';
 import type { CommandManager } from '../input/CommandManager';
 import type { MovementSystem } from '../simulation/MovementSystem';
 import type { PathfindingSystem } from '../simulation/PathfindingSystem';
+import type { AsyncPathfinder } from '../simulation/AsyncPathfinder';
 import type { CombatSystem } from '../simulation/CombatSystem';
 import type { HarvestSystem } from '../simulation/HarvestSystem';
 import type { ProductionSystem } from '../simulation/ProductionSystem';
@@ -117,6 +118,7 @@ export interface GameContext {
   selectionManager: SelectionManager;
   commandManager: CommandManager;
   pathfinder: PathfindingSystem;
+  asyncPathfinder: AsyncPathfinder;
   movement: MovementSystem;
   combatSystem: CombatSystem;
   harvestSystem: HarvestSystem;

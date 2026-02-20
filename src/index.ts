@@ -384,6 +384,8 @@ async function main() {
   ctx.scene.setMapBounds(mapW * 2, mapH * 2);
   ctx.movement.setMapBounds(mapW * 2, mapH * 2);
   ctx.movement.setTerrain(ctx.terrain);
+  // Send terrain data to pathfinding worker
+  ctx.asyncPathfinder.sendTerrainData();
 
   // --- LOAD MODELS ---
   updateLoading(45, 'Loading model manifest...');

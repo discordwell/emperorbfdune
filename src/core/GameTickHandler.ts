@@ -18,7 +18,7 @@ export function registerTickHandler(ctx: GameContext): void {
     combatSystem, movement, commandManager, harvestSystem, productionSystem,
     effectsManager, audioManager, minimapRenderer, fogOfWar, damageNumbers,
     sandwormSystem, abilitySystem, superweaponSystem, victorySystem,
-    selectionManager, selectionPanel, buildingPlacement, pathfinder,
+    selectionManager, selectionPanel, buildingPlacement,
     aiPlayers,
     aircraftAmmo, rearmingAircraft, descendingUnits, dyingTilts,
     processedDeaths, repairingBuildings, groundSplats, bloomMarkers,
@@ -243,7 +243,10 @@ export function registerTickHandler(ctx: GameContext): void {
     effectsManager.updateSpiceShimmer(terrain);
 
     buildingPlacement.updateOccupiedTiles(world);
-    pathfinder.updateBlockedTiles(buildingPlacement.getOccupiedTiles());
+    const occupiedTiles = buildingPlacement.getOccupiedTiles();
+    ctx.asyncPathfinder.updateBlockedTiles(occupiedTiles);
+    // Periodically sync terrain data to pathfinding worker (spice depletion, concrete placement)
+    if (currentTick % 50 === 0) ctx.asyncPathfinder.updateTerrain();
     if (currentTick % 10 === 0) ctx.wallSystem.updateWallTiles(world);
     selectionPanel.setWorld(world);
     if (currentTick % 10 === 0) selectionPanel.refresh();

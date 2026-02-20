@@ -5,6 +5,7 @@ import {
   movableQuery, hasComponent,
 } from '../core/ECS';
 import { PathfindingSystem } from './PathfindingSystem';
+import type { AsyncPathfinder } from './AsyncPathfinder';
 import { SpatialGrid } from '../utils/SpatialGrid';
 import { worldToTile, angleBetween, lerpAngle, distance2D } from '../utils/MathUtils';
 import { TerrainType, type TerrainRenderer } from '../rendering/TerrainRenderer';
@@ -16,9 +17,14 @@ const FLIGHT_ALTITUDE = 5.0;
 
 export class MovementSystem implements GameSystem {
   private pathfinder: PathfindingSystem;
+  private asyncPathfinder: AsyncPathfinder | null = null;
   // Path cache per entity
   private paths = new Map<number, { x: number; z: number }[]>();
   private pathIndex = new Map<number, number>();
+  // Entities waiting for async path result
+  private pendingAsync = new Set<number>();
+  // Path generation counter per entity (guards against stale async results on ID recycling)
+  private pathGeneration = new Map<number, number>();
   // Stuck detection: count ticks with no movement progress
   private stuckTicks = new Map<number, number>();
   private lastPos = new Map<number, { x: number; z: number }>();
@@ -41,6 +47,10 @@ export class MovementSystem implements GameSystem {
 
   constructor(pathfinder: PathfindingSystem) {
     this.pathfinder = pathfinder;
+  }
+
+  setAsyncPathfinder(async_pf: AsyncPathfinder): void {
+    this.asyncPathfinder = async_pf;
   }
 
   setSpeedModifier(fn: (eid: number) => number): void {
@@ -90,6 +100,8 @@ export class MovementSystem implements GameSystem {
     this.lastPos.delete(eid);
     this.flyingEntities.delete(eid);
     this.infantryEntities.delete(eid);
+    this.pendingAsync.delete(eid);
+    this.pathGeneration.delete(eid);
   }
 
   init(_world: World): void {}
@@ -204,13 +216,38 @@ export class MovementSystem implements GameSystem {
       }
 
       if (!path) {
+        // Skip if already waiting for async result
+        if (this.pendingAsync.has(eid)) continue;
+
         const startTile = worldToTile(px, pz);
         const endTile = worldToTile(targetX, targetZ);
         const isVehicle = !this.infantryEntities.has(eid);
-        path = this.pathfinder.findPath(startTile.tx, startTile.tz, endTile.tx, endTile.tz, isVehicle) ?? [{ x: targetX, z: targetZ }];
-        this.paths.set(eid, path);
-        idx = 0;
-        this.pathIndex.set(eid, 0);
+
+        if (this.asyncPathfinder?.isWorkerAvailable()) {
+          // Use async worker pathfinding — move toward target while waiting
+          this.pendingAsync.add(eid);
+          const gen = (this.pathGeneration.get(eid) ?? 0) + 1;
+          this.pathGeneration.set(eid, gen);
+          this.asyncPathfinder.findPathAsync(startTile.tx, startTile.tz, endTile.tx, endTile.tz, isVehicle).then(result => {
+            this.pendingAsync.delete(eid);
+            // Guard against stale results from ID recycling
+            if (result && this.pathGeneration.get(eid) === gen && MoveTarget.active[eid] === 1) {
+              this.paths.set(eid, result);
+              this.pathIndex.set(eid, 0);
+            }
+          });
+          // Move directly toward target while waiting for path (straight-line approximation)
+          path = [{ x: targetX, z: targetZ }];
+          this.paths.set(eid, path);
+          idx = 0;
+          this.pathIndex.set(eid, 0);
+        } else {
+          // Sync fallback
+          path = this.pathfinder.findPath(startTile.tx, startTile.tz, endTile.tx, endTile.tz, isVehicle) ?? [{ x: targetX, z: targetZ }];
+          this.paths.set(eid, path);
+          idx = 0;
+          this.pathIndex.set(eid, 0);
+        }
       }
 
       // Current waypoint
@@ -359,5 +396,8 @@ export class MovementSystem implements GameSystem {
     this.pathIndex.delete(eid);
     this.stuckTicks.delete(eid);
     this.lastPos.delete(eid);
+    this.pendingAsync.delete(eid);
+    // Increment generation to invalidate any in-flight async path
+    this.pathGeneration.set(eid, (this.pathGeneration.get(eid) ?? 0) + 1);
   }
 }
