@@ -1289,10 +1289,12 @@ export class EffectsManager {
       smoke.mesh.scale.setScalar(scale);
       const mat = smoke.mesh.material as THREE.MeshBasicMaterial;
       mat.opacity = 0.4 + Math.sin(t * 4 + smoke.phase) * 0.2;
-      // Fire flickers between orange and red
+      // Fire flickers between orange and red; reset to grey smoke when healed
       if (isOnFire) {
         const flicker = Math.sin(t * 8 + smoke.phase) * 0.5 + 0.5;
         mat.color.setRGB(1.0, 0.2 + flicker * 0.3, flicker * 0.1);
+      } else {
+        mat.color.setRGB(0.27, 0.27, 0.27); // 0x444444
       }
     }
   }

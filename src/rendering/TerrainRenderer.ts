@@ -252,7 +252,7 @@ export class TerrainRenderer {
 
   isPassableVehicle(tx: number, tz: number): boolean {
     const type = this.getTerrainType(tx, tz);
-    return type !== TerrainType.Cliff;
+    return type !== TerrainType.Cliff && type !== TerrainType.InfantryRock;
   }
 
   /** Load terrain from real map data (replaces proc-gen) */

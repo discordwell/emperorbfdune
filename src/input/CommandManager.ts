@@ -133,8 +133,16 @@ export class CommandManager {
     }
   }
 
+  private isOverUI(x: number, y: number): boolean {
+    if (y < 32) return true; // Resource bar
+    if (x > window.innerWidth - 200) return true; // Sidebar
+    if (x < 200 && y > window.innerHeight - 200) return true; // Minimap
+    return false;
+  }
+
   private onMouseUp = (e: MouseEvent): void => {
     if (e.button !== 2) return; // Right-click only
+    if (this.isOverUI(e.clientX, e.clientY)) return; // Ignore clicks on UI
 
     const selected = this.selectionManager.getSelectedEntities();
     if (selected.length === 0) return;
@@ -184,8 +192,9 @@ export class CommandManager {
     // Check if a building is selected — set rally point instead of move
     const hasBuildingSel = this.world && selected.some(eid => hasComponent(this.world, BuildingType, eid));
     if (hasBuildingSel && this.commandMode === 'normal' && !shiftHeld) {
-      this.rallyPoints.set(0, { x: worldPos.x, z: worldPos.z });
-      EventBus.emit('rally:set', { playerId: 0, x: worldPos.x, z: worldPos.z });
+      const rallyOwner = Owner.playerId[selected[0]];
+      this.rallyPoints.set(rallyOwner, { x: worldPos.x, z: worldPos.z });
+      EventBus.emit('rally:set', { playerId: rallyOwner, x: worldPos.x, z: worldPos.z });
       this.audioManager?.playSfx('move');
       return;
     }
@@ -226,8 +235,8 @@ export class CommandManager {
 
     switch (e.key.toLowerCase()) {
       case 'a':
-        // Attack-move mode
-        if (selected.length > 0) {
+        // Attack-move mode (skip when Ctrl+A is used for select-all)
+        if (selected.length > 0 && !e.ctrlKey && !e.metaKey) {
           this.commandMode = 'attack-move';
           document.body.style.cursor = 'crosshair';
         }

@@ -48,6 +48,18 @@ export class SelectionManager {
   }
 
   getSelectedEntities(): number[] {
+    // Prune dead entities lazily on access
+    if (this.selectedEntities.length > 0) {
+      const before = this.selectedEntities.length;
+      // Clear selection flag on dead entities before pruning
+      for (const eid of this.selectedEntities) {
+        if (Health.current[eid] <= 0) Selectable.selected[eid] = 0;
+      }
+      this.selectedEntities = this.selectedEntities.filter(eid => Health.current[eid] > 0);
+      if (this.selectedEntities.length !== before) {
+        if (this.selectedEntities.length === 0) EventBus.emit('unit:deselected', {});
+      }
+    }
     return this.selectedEntities;
   }
 
@@ -203,6 +215,7 @@ export class SelectionManager {
 
     for (const eid of entities) {
       if (hasComponent(world, Health, eid) && Health.current[eid] <= 0) continue;
+      if (Owner.playerId[eid] !== this.localPlayerId) continue; // Only own units
       // Project entity world position to screen
       const worldPos = new THREE.Vector3(Position.x[eid], Position.y[eid], Position.z[eid]);
       const screenPos = worldPos.project(this.sceneManager.camera);
@@ -215,7 +228,8 @@ export class SelectionManager {
       }
     }
 
-    this.selectEntities(world, selected);
+    // Only update selection if we captured own units (don't clear selection for empty box)
+    if (selected.length > 0) this.selectEntities(world, selected);
   }
 
   private onKeyDown = (e: KeyboardEvent): void => {
@@ -229,7 +243,7 @@ export class SelectionManager {
       const allUnits = unitQuery(world);
       const combat: number[] = [];
       for (const eid of allUnits) {
-        if (Owner.playerId[eid] !== 0) continue;
+        if (Owner.playerId[eid] !== this.localPlayerId) continue;
         if (Health.current[eid] <= 0) continue;
         if (hasComponent(world, Harvester, eid)) continue; // Skip harvesters
         combat.push(eid);
@@ -246,7 +260,7 @@ export class SelectionManager {
       const allUnits = unitQuery(world);
       const harvesters: number[] = [];
       for (const eid of allUnits) {
-        if (Owner.playerId[eid] !== 0) continue;
+        if (Owner.playerId[eid] !== this.localPlayerId) continue;
         if (Health.current[eid] <= 0) continue;
         if (!hasComponent(world, Harvester, eid)) continue;
         harvesters.push(eid);
@@ -263,7 +277,7 @@ export class SelectionManager {
       const allUnits = unitQuery(world);
       const idle: number[] = [];
       for (const eid of allUnits) {
-        if (Owner.playerId[eid] !== 0) continue;
+        if (Owner.playerId[eid] !== this.localPlayerId) continue;
         if (Health.current[eid] <= 0) continue;
         if (hasComponent(world, Harvester, eid)) continue;
         if (MoveTarget.active[eid] === 1) continue;
@@ -280,7 +294,7 @@ export class SelectionManager {
       if (!world) return;
       const buildings = buildingQuery(world);
       for (const eid of buildings) {
-        if (Owner.playerId[eid] !== 0) continue;
+        if (Owner.playerId[eid] !== this.localPlayerId) continue;
         if (Health.current[eid] <= 0) continue;
         const typeId = BuildingType.id[eid];
         const bName = this.buildingTypeNames[typeId] ?? '';
@@ -291,7 +305,7 @@ export class SelectionManager {
       }
       // No ConYard — pan to any owned building
       for (const eid of buildings) {
-        if (Owner.playerId[eid] !== 0) continue;
+        if (Owner.playerId[eid] !== this.localPlayerId) continue;
         if (Health.current[eid] <= 0) continue;
         this.sceneManager.panTo(Position.x[eid], Position.z[eid]);
         return;
@@ -327,10 +341,11 @@ export class SelectionManager {
       const allUnits = unitQuery(world);
       const idle: number[] = [];
       for (const eid of allUnits) {
-        if (Owner.playerId[eid] !== 0) continue;
+        if (Owner.playerId[eid] !== this.localPlayerId) continue;
         if (Health.current[eid] <= 0) continue;
         if (hasComponent(world, Harvester, eid)) continue;
         if (MoveTarget.active[eid] === 1) continue; // Moving
+        if (hasComponent(world, Combat, eid) && hasComponent(world, AttackTarget, eid) && AttackTarget.active[eid] === 1) continue; // In combat
         idle.push(eid);
       }
       if (idle.length > 0) {

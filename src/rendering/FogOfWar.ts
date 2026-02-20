@@ -35,8 +35,8 @@ export class FogOfWar {
   // (buildingViewRange removed — now uses per-building ViewRange component)
 
   private enabled = true;
-  private tickCounter = 0;
-  private lastPositionHash = 0;
+  private tickCounter = 4; // Start at updateInterval-1 so first update fires immediately
+  private lastPositionHash = -1;
   private updateInterval = 5; // Only recalculate every 5 ticks (200ms)
 
   constructor(sceneManager: SceneManager, terrain: TerrainRenderer, localPlayerId = 0) {
@@ -167,7 +167,8 @@ export class FogOfWar {
     for (const eid of buildings) {
       if (Owner.playerId[eid] !== this.localPlayerId) continue;
       if (Health.current[eid] <= 0) continue;
-      hash = (hash * 31 + eid * 503) | 0;
+      const bTile = worldToTile(Position.x[eid], Position.z[eid]);
+      hash = (hash * 31 + eid * 503 + bTile.tx * 997 + bTile.tz * 1009) | 0;
       entityCount++;
     }
     hash = (hash * 31 + entityCount) | 0;
