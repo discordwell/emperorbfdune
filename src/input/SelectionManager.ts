@@ -233,6 +233,9 @@ export class SelectionManager {
   }
 
   private onKeyDown = (e: KeyboardEvent): void => {
+    // Don't capture keys when typing in text inputs
+    const tag = document.activeElement?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
     const key = e.key;
 
     // Ctrl+A: Select all combat units on screen
@@ -401,6 +404,14 @@ export class SelectionManager {
       }
     }
   };
+
+  dispose(): void {
+    window.removeEventListener('mousedown', this.onMouseDown);
+    window.removeEventListener('mousemove', this.onMouseMove);
+    window.removeEventListener('mouseup', this.onMouseUp);
+    window.removeEventListener('keydown', this.onKeyDown);
+    this.dragBox.remove();
+  }
 
   private isOverUI(x: number, y: number): boolean {
     // Check if click is on sidebar (right 200px), minimap (bottom-left 200x200), or resource bar (top 32px)

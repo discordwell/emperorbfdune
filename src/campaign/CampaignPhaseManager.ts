@@ -290,8 +290,12 @@ export class CampaignPhaseManager {
 
       if (achieved) {
         this.state.techLevel = level;
-      } else {
-        break; // Tech levels must be achieved in order
+      } else if (rule.phase !== undefined) {
+        // Phase-based levels are sequential gates — stop here.
+        // Capture-based levels may be unmet (capturesInPhase resets each
+        // phase) but shouldn't block later phase-based grants (e.g.,
+        // entering Phase 2 via maxBattles should still grant Tech 3).
+        break;
       }
     }
   }

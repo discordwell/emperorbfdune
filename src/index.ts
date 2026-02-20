@@ -1334,6 +1334,7 @@ async function main() {
 
     combatSystem.unregisterUnit(entityId);
     movement.unregisterEntity(entityId);
+    commandManager.unregisterEntity(entityId);
     effectsManager.clearBuildingDamage(entityId);
 
     // Clean up aircraft ammo tracking

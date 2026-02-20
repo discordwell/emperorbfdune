@@ -231,6 +231,9 @@ export class CommandManager {
   };
 
   private onKeyDown = (e: KeyboardEvent): void => {
+    // Don't capture keys when typing in text inputs
+    const tag = document.activeElement?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
     const selected = this.selectionManager.getSelectedEntities();
 
     switch (e.key.toLowerCase()) {
@@ -531,6 +534,17 @@ export class CommandManager {
     }
     this.combatSystem?.clearAttackMove(entityIds);
     this.audioManager?.playSfx('select');
+  }
+
+  /** Clean up all entity-keyed state for a dead entity (prevents stale data on ID recycling) */
+  unregisterEntity(eid: number): void {
+    this.waypointQueues.delete(eid);
+    this.patrolEntities.delete(eid);
+  }
+
+  dispose(): void {
+    window.removeEventListener('mouseup', this.onMouseUp);
+    window.removeEventListener('keydown', this.onKeyDown);
   }
 
   private issueEscortCommand(entityIds: number[], targetEid: number): void {

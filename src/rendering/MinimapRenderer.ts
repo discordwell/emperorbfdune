@@ -38,10 +38,7 @@ export class MinimapRenderer {
   private rallyPoint: { x: number; z: number } | null = null;
   // Attack flash pings
   private attackPings: { x: number; z: number; color: string; age: number }[] = [];
-  // Double-click detection
-  private lastClickTime = 0;
-  private lastClickX = 0;
-  private lastClickY = 0;
+  // (double-click detection removed: native dblclick event used instead)
   // Unit category classifier for differentiated rendering
   private unitCategoryFn: ((eid: number) => 'infantry' | 'vehicle' | 'aircraft') | null = null;
   // Building name resolver for importance-based rendering

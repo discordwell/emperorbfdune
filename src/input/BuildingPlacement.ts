@@ -62,6 +62,8 @@ export class BuildingPlacement {
 
   startPlacement(typeName: string, sizeW = 3, sizeH = 3, terrainTypes?: string[]): void {
     this.cancel();
+    this.concreteMode = false;
+    this.onConcrete = null;
     this.active = true;
     this.typeName = typeName;
     this.buildingSize = { w: sizeW, h: sizeH };
@@ -124,6 +126,8 @@ export class BuildingPlacement {
     const cancelledType = this.typeName;
     this.active = false;
     this.typeName = '';
+    this.concreteMode = false;
+    this.onConcrete = null;
 
     // Emit cancel event so cost can be refunded
     if (cancelledType) {
@@ -271,14 +275,14 @@ export class BuildingPlacement {
       const color = this.isValidPlacement ? this.validColor : this.invalidColor;
       this.gridHelper.children.forEach(child => {
         if (child instanceof THREE.Mesh) {
-          (child.material as THREE.MeshBasicMaterial).color = color;
+          (child.material as THREE.MeshBasicMaterial).color.copy(color);
         }
       });
     }
 
     // Ghost mesh overall color
     const ghostColor = this.isValidPlacement ? this.validColor : this.invalidColor;
-    (this.ghostMesh.material as THREE.MeshBasicMaterial).color = ghostColor;
+    (this.ghostMesh.material as THREE.MeshBasicMaterial).color.copy(ghostColor);
   };
 
   private onMouseDown = (e: MouseEvent): void => {
@@ -387,7 +391,23 @@ export class BuildingPlacement {
   private onKeyDown = (e: KeyboardEvent): void => {
     if (!this.active) return;
     if (e.key === 'Escape') {
-      this.cancel();
+      if (this.concreteMode) {
+        // Exit concrete mode without refund event (matches right-click behavior)
+        this.active = false;
+        this.concreteMode = false;
+        this.onConcrete = null;
+        this.typeName = '';
+        if (this.ghostMesh) {
+          this.sceneManager.scene.remove(this.ghostMesh);
+          this.ghostMesh.geometry.dispose();
+          (this.ghostMesh.material as THREE.Material).dispose();
+          this.ghostMesh = null;
+        }
+        this.disposeGridHelper();
+        document.body.style.cursor = 'default';
+      } else {
+        this.cancel();
+      }
     }
   };
 }

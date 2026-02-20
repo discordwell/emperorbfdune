@@ -39,6 +39,13 @@ export class SelectionPanel {
   private panToFn: ((x: number, z: number) => void) | null = null;
   private deselectFn: ((eid: number) => void) | null = null;
 
+  // EventBus handler refs for dispose
+  private onSelected!: (data: { entityIds: number[] }) => void;
+  private onDeselected!: () => void;
+  private onDied!: (data: { entityId: number }) => void;
+  private onProdComplete!: (data: { unitType: string }) => void;
+  private onHarvest!: (data: { amount: number }) => void;
+
   constructor(
     rules: GameRules,
     audioManager: AudioManager,
@@ -65,20 +72,20 @@ export class SelectionPanel {
     `;
     document.body.appendChild(this.messageContainer);
 
-    // Listen for events
-    EventBus.on('unit:selected', ({ entityIds }) => {
+    // Listen for events (store refs for dispose)
+    this.onSelected = ({ entityIds }) => {
       this.selectedEntities = entityIds;
       this.sellConfirmEid = null;
       if (this.sellConfirmTimer) { clearTimeout(this.sellConfirmTimer); this.sellConfirmTimer = null; }
       this.render();
-    });
-    EventBus.on('unit:deselected', () => {
+    };
+    this.onDeselected = () => {
       this.selectedEntities = [];
       this.sellConfirmEid = null;
       if (this.sellConfirmTimer) { clearTimeout(this.sellConfirmTimer); this.sellConfirmTimer = null; }
       this.render();
-    });
-    EventBus.on('unit:died', ({ entityId }) => {
+    };
+    this.onDied = ({ entityId }) => {
       this.addMessage('Unit destroyed', '#ff4444');
       // Remove dead entity from selection to prevent stale data / ID recycling issues
       const idx = this.selectedEntities.indexOf(entityId);
@@ -90,14 +97,19 @@ export class SelectionPanel {
         }
         this.render();
       }
-    });
-    EventBus.on('production:complete', ({ unitType }) => {
+    };
+    this.onProdComplete = ({ unitType }) => {
       const name = unitType.replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, '');
       this.addMessage(`${name} ready`, '#44ff44');
-    });
-    EventBus.on('harvest:delivered', ({ amount }) => {
+    };
+    this.onHarvest = ({ amount }) => {
       this.addMessage(`+${Math.floor(amount)} Solaris`, '#f0c040');
-    });
+    };
+    EventBus.on('unit:selected', this.onSelected);
+    EventBus.on('unit:deselected', this.onDeselected);
+    EventBus.on('unit:died', this.onDied);
+    EventBus.on('production:complete', this.onProdComplete);
+    EventBus.on('harvest:delivered', this.onHarvest);
   }
 
   setWorld(world: World): void {
@@ -286,7 +298,15 @@ export class SelectionPanel {
     if (hasComponent(this.world, Combat, eid)) {
       const range = Math.round(Combat.attackRange[eid]);
       const rof = Combat.rof[eid];
-      const dps = rof > 0 ? (25 / rof).toFixed(1) : '0';
+      // Look up actual bullet damage from rules (turretAttach -> turret -> bullet -> damage)
+      let dmg = 1;
+      const turretName = def?.turretAttach;
+      if (turretName) {
+        const turret = this.rules.turrets.get(turretName);
+        const bullet = turret ? this.rules.bullets.get(turret.bullet) : null;
+        if (bullet) dmg = bullet.damage;
+      }
+      const dps = rof > 0 ? (dmg * 25 / rof).toFixed(1) : '0';
       statsHtml += `<span style="${statStyle}"><span style="${labelStyle}">Range:</span> <span style="${valStyle}">${range}</span></span>`;
       statsHtml += `<span style="${statStyle}"><span style="${labelStyle}">DPS:</span> <span style="${valStyle}">${dps}</span></span>`;
     }
@@ -349,8 +369,9 @@ export class SelectionPanel {
 
     // Upgrade progress bar (for buildings with active upgrade)
     let upgradeProgressHtml = '';
+    const ownerId = Owner.playerId[eid];
     if (isBuilding && this.production) {
-      const upProg = this.production.getUpgradeProgress(0, typeName);
+      const upProg = this.production.getUpgradeProgress(ownerId, typeName);
       if (upProg) {
         const pct = Math.round(upProg.progress * 100);
         upgradeProgressHtml = `
@@ -363,7 +384,7 @@ export class SelectionPanel {
               <span style="font-size:10px;color:#88f;">${pct}%</span>
             </div>
           </div>`;
-      } else if (this.production.isUpgraded(0, typeName)) {
+      } else if (this.production.isUpgraded(ownerId, typeName)) {
         upgradeProgressHtml = `<div style="font-size:10px;color:#4f4;margin-bottom:2px;">&#x2713; Upgraded</div>`;
       }
     }
@@ -372,12 +393,12 @@ export class SelectionPanel {
     if (isBuilding) {
       // Check if building can be upgraded
       const bDef = def as import('../config/BuildingDefs').BuildingDef | null;
-      const canUpgrade = bDef?.upgradable && this.production && !this.production.isUpgraded(0, typeName)
-        && this.production.canUpgrade(0, typeName);
+      const canUpgrade = bDef?.upgradable && this.production && !this.production.isUpgraded(ownerId, typeName)
+        && this.production.canUpgrade(ownerId, typeName);
       // Don't show upgrade button if upgrade is already in progress
-      const upgradeInProgress = this.production?.getUpgradeProgress(0, typeName) != null;
+      const upgradeInProgress = this.production?.getUpgradeProgress(ownerId, typeName) != null;
       const adjustedUpgradeCost = bDef
-        ? (this.production ? Math.round(bDef.upgradeCost * this.production.getCostMultiplier(0)) : bDef.upgradeCost)
+        ? (this.production ? Math.round(bDef.upgradeCost * this.production.getCostMultiplier(ownerId)) : bDef.upgradeCost)
         : 0;
       const upgradeBtn = (canUpgrade && !upgradeInProgress)
         ? `<button id="upgrade-btn" style="padding:4px 12px;background:#111144;border:1px solid #44f;color:#88f;cursor:pointer;font-size:11px;">Upgrade $${adjustedUpgradeCost}</button>`
@@ -587,5 +608,15 @@ export class SelectionPanel {
         (el.querySelector('div') as HTMLElement).style.borderColor = '#444';
       });
     });
+  }
+
+  dispose(): void {
+    EventBus.off('unit:selected', this.onSelected);
+    EventBus.off('unit:deselected', this.onDeselected);
+    EventBus.off('unit:died', this.onDied);
+    EventBus.off('production:complete', this.onProdComplete);
+    EventBus.off('harvest:delivered', this.onHarvest);
+    if (this.sellConfirmTimer) clearTimeout(this.sellConfirmTimer);
+    this.messageContainer.remove();
   }
 }

@@ -177,16 +177,9 @@ export class VictorySystem {
         else enemyAlive = true;
       }
     } else if (this.victoryCondition === 'conyard') {
-      // ConYard mode: losing your ConYard is defeat, but victory requires annihilation
+      // ConYard mode: lose if player ConYard destroyed, win if all enemy ConYards destroyed
       playerAlive = playerProtectedAlive;
-      for (const eid of buildings) {
-        if (Health.current[eid] <= 0) continue;
-        if (Owner.playerId[eid] !== this.localPlayerId) enemyAlive = true;
-      }
-      for (const eid of units) {
-        if (Health.current[eid] <= 0) continue;
-        if (Owner.playerId[eid] !== this.localPlayerId) enemyAlive = true;
-      }
+      // enemyAlive already set by the conyard/protect block above
     }
 
     if (this.victoryCondition === 'protect' && !playerProtectedAlive) {
