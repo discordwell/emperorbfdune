@@ -172,9 +172,23 @@ export class AIPlayer implements GameSystem {
 
   /** Reconstruct build phase from existing buildings after save/load.
    *  Also fast-forwards tickCounter to match game tick so difficulty ramp is correct. */
-  reconstructFromWorldState(gameTick: number): void {
+  reconstructFromWorldState(gameTick: number, world?: World): void {
     this.tickCounter = gameTick;
     this.difficulty = 1.0 + Math.min(2.0, gameTick / 7500);
+
+    // Rebuild placedBuildings from actual world state so spacing checks,
+    // wall staggering, and ConYard-anchored base position all work correctly
+    if (world) {
+      this.placedBuildings = [];
+      const buildings = buildingQuery(world);
+      for (const eid of buildings) {
+        if (Owner.playerId[eid] !== this.playerId || Health.current[eid] <= 0) continue;
+        const typeId = BuildingType.id[eid];
+        const name = this.buildingTypeNames[typeId] ?? '';
+        this.placedBuildings.push({ x: Position.x[eid], z: Position.z[eid], name });
+      }
+      this.updateBaseCenterOfMass();
+    }
 
     // Determine build phase by counting what buildings already exist
     const px = this.factionPrefix;

@@ -1087,6 +1087,7 @@ async function main() {
     audioManager.getDialogManager()?.trigger('buildingSold');
 
     effectsManager.clearBuildingDamage(eid);
+    repairingBuildings.delete(eid);
 
     // Clean up from production prerequisites and combat immediately
     if (typeName) {
@@ -1194,7 +1195,10 @@ async function main() {
       // Spawn free unit when building completes (e.g. Harvester from Refinery)
       if (def?.getUnitWhenBuilt) {
         const freeUnitName = def.getUnitWhenBuilt;
+        const buildingEid = eid;
         deferAction(duration, () => {
+          // Only spawn if the building survived construction
+          if (Health.current[buildingEid] <= 0) return;
           const w = game.getWorld();
           const freeEid = spawnUnit(w, freeUnitName, 0, x + 3, z + 3);
           if (freeEid >= 0) {
@@ -1335,6 +1339,8 @@ async function main() {
     // Clean up aircraft ammo tracking
     aircraftAmmo.delete(entityId);
     rearmingAircraft.delete(entityId);
+    descendingUnits.delete(entityId);
+    repairingBuildings.delete(entityId);
     // Clean up all ability tracking (transport, leech, kobra, NIAB, etc.)
     abilitySystem.handleUnitDeath(entityId);
 
@@ -3241,21 +3247,10 @@ async function main() {
       }
     }
 
-    // Restore AI base positions and state from saved buildings
+    // Restore AI state from saved buildings (base position, target, build phase)
     for (let i = 0; i < aiPlayers.length; i++) {
-      const playerId = i + 1;
-      let sumX = 0, sumZ = 0, count = 0;
+      // Set attack target to player's base (center of player buildings)
       const buildings = buildingQuery(world);
-      for (const eid of buildings) {
-        if (Owner.playerId[eid] !== playerId || Health.current[eid] <= 0) continue;
-        sumX += Position.x[eid];
-        sumZ += Position.z[eid];
-        count++;
-      }
-      if (count > 0) {
-        aiPlayers[i].setBasePosition(sumX / count, sumZ / count);
-      }
-      // Set attack target to player's base (find player's ConYard or center of buildings)
       let pBaseX = 0, pBaseZ = 0, pCount = 0;
       for (const eid of buildings) {
         if (Owner.playerId[eid] !== 0 || Health.current[eid] <= 0) continue;
@@ -3266,8 +3261,8 @@ async function main() {
       if (pCount > 0) {
         aiPlayers[i].setTargetPosition(pBaseX / pCount, pBaseZ / pCount);
       }
-      // Reconstruct AI build phase and difficulty from existing buildings + game tick
-      aiPlayers[i].reconstructFromWorldState(savedGame.tick);
+      // Reconstruct placed buildings, ConYard-anchored base position, build phase, difficulty
+      aiPlayers[i].reconstructFromWorldState(savedGame.tick, world);
     }
 
     // Position camera at player's base after load
