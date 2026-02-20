@@ -645,6 +645,7 @@ async function main() {
   }
 
   const sandwormSystem = new SandwormSystem(terrain, effectsManager);
+  sandwormSystem.setRules(gameRules, unitTypeNames);
 
   // AI setup — support multiple opponents
   const opponents: OpponentConfig[] = house.opponents ?? [{ prefix: house.enemyPrefix, difficulty: house.difficulty ?? 'normal' }];
@@ -1238,6 +1239,10 @@ async function main() {
     getTickCount: () => game.getTickCount(),
     housePrefix: house.prefix,
     enemyPrefix: house.enemyPrefix,
+    getTerrainType: (x: number, z: number) => {
+      const tile = worldToTile(x, z);
+      return terrain.getTerrainType(tile.tx, tile.tz);
+    },
   });
 
   selectionPanel.setPassengerCountFn((eid) => abilitySystem.getTransportPassengerCount(eid));

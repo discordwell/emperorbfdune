@@ -10,6 +10,7 @@ import { worldToTile, distance2D, randomFloat } from '../utils/MathUtils';
 import { GameConstants } from '../utils/Constants';
 import { EventBus } from '../core/EventBus';
 import type { EffectsManager } from '../rendering/EffectsManager';
+import type { GameRules } from '../config/RulesParser';
 
 interface Worm {
   x: number;
@@ -32,6 +33,10 @@ export class SandwormSystem implements GameSystem {
   private tickCounter = 0;
   private maxWorms: number;
   private spawnChance: number;
+  private rules: GameRules | null = null;
+  private unitTypeNames: string[] = [];
+  // Thumper locations: deployed by units, attract worms
+  private thumpers: Array<{ x: number; z: number; ticksLeft: number }> = [];
 
   constructor(terrain: TerrainRenderer, effects: EffectsManager) {
     this.terrain = terrain;
@@ -41,6 +46,16 @@ export class SandwormSystem implements GameSystem {
   }
 
   init(_world: World): void {}
+
+  setRules(rules: GameRules, unitTypeNames: string[]): void {
+    this.rules = rules;
+    this.unitTypeNames = unitTypeNames;
+  }
+
+  /** Deploy a thumper at a location (attracts worms for ~20 seconds) */
+  deployThumper(x: number, z: number): void {
+    this.thumpers.push({ x, z, ticksLeft: 500 }); // ~20 seconds at 25 TPS
+  }
 
   update(world: World, _dt: number): void {
     this.tickCounter++;
@@ -104,6 +119,32 @@ export class SandwormSystem implements GameSystem {
           this.terrain.setSpice(wormTile.tx, wormTile.tz, Math.max(0, spice - 0.1));
         }
       }
+    }
+
+    // Update thumpers: decay and attract worms
+    for (let i = this.thumpers.length - 1; i >= 0; i--) {
+      this.thumpers[i].ticksLeft--;
+      if (this.thumpers[i].ticksLeft <= 0) {
+        this.thumpers.splice(i, 1);
+        continue;
+      }
+      // Thumpers attract roaming worms toward them
+      if (this.tickCounter % 25 === 0) {
+        const t = this.thumpers[i];
+        for (const worm of this.worms) {
+          if (worm.state !== 'roaming') continue;
+          const dist = distance2D(worm.x, worm.z, t.x, t.z);
+          if (dist < GameConstants.WORM_ATTRACTION_RADIUS * 2) {
+            worm.targetX = t.x;
+            worm.targetZ = t.z;
+          }
+        }
+      }
+    }
+
+    // Thumpers also increase worm spawn chance
+    if (this.thumpers.length > 0 && this.worms.length < this.maxWorms && this.tickCounter % 50 === 25) {
+      this.spawnWorm();
     }
   }
 
@@ -253,10 +294,22 @@ export class SandwormSystem implements GameSystem {
         continue;
       }
 
-      // Harvesters are extra tasty
+      // Calculate attraction multiplier based on unit properties
       const isHarvester = hasComponent(world, Harvester, eid);
+      let attractionMult = 1.0;
+      if (isHarvester) attractionMult = 0.5; // Harvesters attract from further away
+      // Check unit def for wormAttraction and tastyToWorms
+      if (this.rules && hasComponent(world, UnitType, eid)) {
+        const typeName = this.unitTypeNames[UnitType.id[eid]];
+        const def = typeName ? this.rules.units.get(typeName) : null;
+        if (def) {
+          if (def.tastyToWorms) attractionMult *= 0.3; // Very attractive
+          if (def.wormAttraction > 0) attractionMult *= Math.max(0.1, 1 - def.wormAttraction * 0.1);
+          else if (def.wormAttraction < 0) attractionMult *= 3.0; // Negative values repel worms
+        }
+      }
       const dist = distance2D(worm.x, worm.z, Position.x[eid], Position.z[eid]);
-      const effectiveDist = isHarvester ? dist * 0.5 : dist; // Harvesters attract from further away
+      const effectiveDist = dist * attractionMult;
 
       if (effectiveDist < bestDist) {
         bestDist = effectiveDist;

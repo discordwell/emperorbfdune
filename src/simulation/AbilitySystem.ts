@@ -42,6 +42,7 @@ export interface AbilitySystemDeps {
   getTickCount: () => number;
   housePrefix: string;
   enemyPrefix: string;
+  getTerrainType?: (x: number, z: number) => number;
 }
 
 export class AbilitySystem {
@@ -72,6 +73,9 @@ export class AbilitySystem {
   private stealthPrevPositions = new Map<number, { x: number; z: number }>();
   // Persistent unstealth zone tracking (prevents flicker between 25-tick checks)
   private unitsInUnstealthZone = new Set<number>();
+
+  // --- Dust Scout burrowing ---
+  private burrowedUnits = new Set<number>();
 
   // --- APC Transport system ---
   private transportPassengers = new Map<number, number[]>();
@@ -106,6 +110,7 @@ export class AbilitySystem {
     this.stealthTimers.delete(entityId);
     this.stealthPrevPositions.delete(entityId);
     this.unitsInUnstealthZone.delete(entityId);
+    this.burrowedUnits.delete(entityId);
 
     // Kobra: restore base range on death (for ECS entity recycling safety)
     if (this.kobraDeployed.has(entityId)) {
@@ -154,6 +159,7 @@ export class AbilitySystem {
     this.updateLeech(world, tickCount);
     this.updateProjectorDecay(world, tickCount);
     this.updateKobra(world, tickCount);
+    this.updateBurrowed(world, tickCount);
     this.updateNiabCooldowns(world, tickCount);
     this.updatePassiveRepair(world, tickCount);
     this.updateRepairVehicles(world, tickCount);
@@ -210,11 +216,31 @@ export class AbilitySystem {
     this.transportPassengers.set(eid, passengers);
   }
 
+  /** Check if a unit is burrowed (Dust Scout ability). */
+  isBurrowed(eid: number): boolean {
+    return this.burrowedUnits.has(eid);
+  }
+
+  /** Cancel burrow when unit receives a move or attack order. */
+  cancelBurrow(eid: number): void {
+    if (this.burrowedUnits.has(eid)) {
+      this.burrowedUnits.delete(eid);
+      this.deps.combatSystem.setStealthed(eid, false);
+    }
+  }
+
   // =========================================================================
   // EVENT HANDLER SETUP
   // =========================================================================
 
   private setupEventHandlers(): void {
+    // Cancel burrow when units receive move orders
+    EventBus.on('unit:move', ({ entityIds }) => {
+      for (const eid of entityIds) {
+        this.cancelBurrow(eid);
+      }
+    });
+
     // Stealth: when a stealthed unit fires, break stealth and set fire cooldown
     EventBus.on('combat:fire', ({ attackerEntity }) => {
       if (attackerEntity === undefined) return;
@@ -756,6 +782,17 @@ export class AbilitySystem {
     }
   }
 
+  /** Burrowed Dust Scouts: immobile, stealthed, cannot attack */
+  private updateBurrowed(_world: World, tickCount: number): void {
+    if (tickCount % 10 !== 0 || this.burrowedUnits.size === 0) return;
+    for (const eid of this.burrowedUnits) {
+      if (Health.current[eid] <= 0) { this.burrowedUnits.delete(eid); continue; }
+      // Prevent movement and attacking while burrowed
+      MoveTarget.active[eid] = 0;
+      AttackTarget.active[eid] = 0;
+    }
+  }
+
   /** NIAB Tank teleport cooldowns */
   private updateNiabCooldowns(_world: World, tickCount: number): void {
     if (tickCount % 25 !== 0 || this.niabCooldowns.size === 0) return;
@@ -1013,6 +1050,34 @@ export class AbilitySystem {
           MoveTarget.active[eid] = 0;
           selectionPanel.addMessage('Kobra deployed - range doubled!', '#44ff44');
           audioManager.playSfx('build');
+        }
+        handled = true;
+      }
+
+      // Dust Scout burrow/unburrow toggle
+      if (def?.dustScout) {
+        if (this.burrowedUnits.has(eid)) {
+          // Unburrow
+          this.burrowedUnits.delete(eid);
+          this.deps.combatSystem.setStealthed(eid, false);
+          selectionPanel.addMessage('Dust Scout surfaced', '#aaa');
+          audioManager.playSfx('build');
+        } else {
+          // Can only burrow on sand/dune terrain
+          const getTerrainType = this.deps.getTerrainType;
+          if (getTerrainType) {
+            const tType = getTerrainType(Position.x[eid], Position.z[eid]);
+            if (tType === 0 || tType === 2 || tType === 3 || tType === 4) { // Sand, SpiceLow, SpiceHigh, or Dunes
+              this.burrowedUnits.add(eid);
+              MoveTarget.active[eid] = 0;
+              AttackTarget.active[eid] = 0;
+              this.deps.combatSystem.setStealthed(eid, true);
+              selectionPanel.addMessage('Dust Scout burrowed!', '#c8a060');
+              audioManager.playSfx('build');
+            } else {
+              selectionPanel.addMessage('Can only burrow on sand terrain', '#f88');
+            }
+          }
         }
         handled = true;
       }
