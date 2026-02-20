@@ -122,6 +122,8 @@ export class PathfindingSystem {
 
       const key = current.tz * mapW + current.tx;
       if (closedSet.has(key)) continue;
+      // Skip stale heap entries whose g-score was superseded by a shorter path
+      if (current.g > (bestG.get(key) ?? Infinity)) continue;
       closedSet.add(key);
 
       // Track the node closest to goal for partial path fallback (after closedSet guard)

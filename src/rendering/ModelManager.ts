@@ -174,5 +174,8 @@ export class ModelManager {
       });
     });
     this.cache.clear();
+    this.loading.clear();
+    this.notFound.clear();
+    this.loadResults.clear();
   }
 }

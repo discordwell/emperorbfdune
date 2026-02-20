@@ -8,6 +8,7 @@ interface Label {
 export class MenuTextOverlay {
   private container: HTMLDivElement;
   private labels = new Map<string, Label>();
+  private _tempVec = new THREE.Vector3();
 
   constructor() {
     this.container = document.createElement('div');
@@ -48,7 +49,7 @@ export class MenuTextOverlay {
 
   updatePositions(camera: THREE.PerspectiveCamera): void {
     for (const label of this.labels.values()) {
-      const v = label.worldPos.clone().project(camera);
+      const v = this._tempVec.copy(label.worldPos).project(camera);
       if (v.z > 1) {
         // Behind camera
         label.element.style.display = 'none';

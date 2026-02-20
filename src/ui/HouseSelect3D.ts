@@ -40,6 +40,7 @@ export class HouseSelect3D {
   private stars: THREE.Object3D[] = [];
   private heighliners: THREE.Object3D[] = [];
   private rings: THREE.Object3D[] = [];
+  private static _tempScale = new THREE.Vector3();
 
   // DOM buttons for accept/cancel (replaces broken glTF mesh buttons)
   private buttonOverlay: HTMLDivElement | null = null;
@@ -332,7 +333,8 @@ export class HouseSelect3D {
     for (const h of this.houses) {
       const isHovered = h.sphere === mesh;
       const targetScale = isHovered ? 1.08 : 1.0;
-      h.sphere.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), 0.2);
+      HouseSelect3D._tempScale.set(targetScale, targetScale, targetScale);
+      h.sphere.scale.lerp(HouseSelect3D._tempScale, 0.2);
     }
 
     document.body.style.cursor = mesh ? 'pointer' : 'default';
