@@ -550,6 +550,8 @@ export class EffectsManager {
       let vis = this.wormVisuals.get(i);
       if (!vis) {
         vis = this.createWormVisual();
+        vis.prevX = worm.x; // Initialize to worm position to prevent trail at origin
+        vis.prevZ = worm.z;
         this.wormVisuals.set(i, vis);
         this.sceneManager.scene.add(vis.group);
       }

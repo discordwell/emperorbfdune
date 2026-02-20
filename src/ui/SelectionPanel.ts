@@ -69,15 +69,27 @@ export class SelectionPanel {
     EventBus.on('unit:selected', ({ entityIds }) => {
       this.selectedEntities = entityIds;
       this.sellConfirmEid = null;
+      if (this.sellConfirmTimer) { clearTimeout(this.sellConfirmTimer); this.sellConfirmTimer = null; }
       this.render();
     });
     EventBus.on('unit:deselected', () => {
       this.selectedEntities = [];
       this.sellConfirmEid = null;
+      if (this.sellConfirmTimer) { clearTimeout(this.sellConfirmTimer); this.sellConfirmTimer = null; }
       this.render();
     });
     EventBus.on('unit:died', ({ entityId }) => {
       this.addMessage('Unit destroyed', '#ff4444');
+      // Remove dead entity from selection to prevent stale data / ID recycling issues
+      const idx = this.selectedEntities.indexOf(entityId);
+      if (idx >= 0) {
+        this.selectedEntities.splice(idx, 1);
+        if (this.sellConfirmEid === entityId) {
+          this.sellConfirmEid = null;
+          if (this.sellConfirmTimer) { clearTimeout(this.sellConfirmTimer); this.sellConfirmTimer = null; }
+        }
+        this.render();
+      }
     });
     EventBus.on('production:complete', ({ unitType }) => {
       const name = unitType.replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, '');

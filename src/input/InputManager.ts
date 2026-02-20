@@ -28,7 +28,7 @@ export class InputManager implements GameSystem {
     window.addEventListener('mousedown', this.onMouseDown);
     window.addEventListener('mouseup', this.onMouseUp);
     window.addEventListener('wheel', this.onWheel, { passive: false });
-    window.addEventListener('contextmenu', e => e.preventDefault());
+    window.addEventListener('contextmenu', this.onContextMenu);
     // Clear all pressed keys when window loses focus to prevent stuck keys
     // (keyup events fire in the other window, not this one)
     window.addEventListener('blur', this.onBlur);
@@ -160,6 +160,10 @@ export class InputManager implements GameSystem {
     this.sceneManager.zoom(delta);
   };
 
+  private onContextMenu = (e: Event): void => {
+    e.preventDefault();
+  };
+
   private onBlur = (): void => {
     this.keys.clear();
     this.mouseDown = false;
@@ -168,4 +172,20 @@ export class InputManager implements GameSystem {
     this.middleDragPrev = null;
     this.dragStart = null;
   };
+
+  /** Remove a key from the pressed set (used when ability system consumes a key) */
+  consumeKey(key: string): void {
+    this.keys.delete(key);
+  }
+
+  dispose(): void {
+    window.removeEventListener('keydown', this.onKeyDown);
+    window.removeEventListener('keyup', this.onKeyUp);
+    window.removeEventListener('mousemove', this.onMouseMove);
+    window.removeEventListener('mousedown', this.onMouseDown);
+    window.removeEventListener('mouseup', this.onMouseUp);
+    window.removeEventListener('wheel', this.onWheel);
+    window.removeEventListener('contextmenu', this.onContextMenu);
+    window.removeEventListener('blur', this.onBlur);
+  }
 }

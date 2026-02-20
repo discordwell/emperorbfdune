@@ -2842,7 +2842,10 @@ async function main() {
       // L=load transport, U=unload transport, W=mount worm
       const selected = selectionManager.getSelectedEntities();
       const handled = abilitySystem.handleKeyCommand(e.key, selected, game.getWorld());
-      if (handled) e.stopImmediatePropagation(); // Prevent sidebar from also handling the key
+      if (handled) {
+        e.stopImmediatePropagation(); // Prevent sidebar from also handling the key
+        input.consumeKey(e.key); // Remove from key set to prevent camera scroll
+      }
       // X key fallback: scatter if no ability consumed it
       if (!handled && e.key === 'x' && selected.length > 0) {
         commandManager.issueScatterCommand(selected);
