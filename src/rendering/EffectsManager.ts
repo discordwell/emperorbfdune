@@ -1406,4 +1406,53 @@ export class EffectsManager {
       if (mesh.position.z < camZ - 100) mesh.position.z = camZ + 100;
     }
   }
+
+  // --- Ground Splat System (InkVine toxic residue, Death Hand fallout) ---
+  private groundSplatVisuals = new Map<string, THREE.Mesh>();
+  private groundSplatGeo: THREE.CircleGeometry | null = null;
+
+  private getSplatKey(x: number, z: number): string {
+    return `${x.toFixed(1)}_${z.toFixed(1)}`;
+  }
+
+  spawnGroundSplat(x: number, z: number, type: string): void {
+    if (!this.groundSplatGeo) {
+      this.groundSplatGeo = new THREE.CircleGeometry(6, 16); // 6 unit radius = ~3 tiles
+    }
+    const color = type === 'inkvine' ? 0x44aa22 : 0xaa4400; // Green for inkvine, brown for fallout
+    const mat = new THREE.MeshBasicMaterial({
+      color, transparent: true, opacity: 0.35,
+      side: THREE.DoubleSide, depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(this.groundSplatGeo, mat);
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.set(x, 0.05, z); // Just above ground
+    this.sceneManager.scene.add(mesh);
+    this.groundSplatVisuals.set(this.getSplatKey(x, z), mesh);
+  }
+
+  fadeGroundSplat(x: number, z: number, alpha: number): void {
+    const mesh = this.groundSplatVisuals.get(this.getSplatKey(x, z));
+    if (mesh) {
+      (mesh.material as THREE.MeshBasicMaterial).opacity = 0.35 * alpha;
+    }
+  }
+
+  removeGroundSplat(x: number, z: number): void {
+    const key = this.getSplatKey(x, z);
+    const mesh = this.groundSplatVisuals.get(key);
+    if (mesh) {
+      this.sceneManager.scene.remove(mesh);
+      (mesh.material as THREE.Material).dispose();
+      this.groundSplatVisuals.delete(key);
+    }
+  }
+
+  clearAllGroundSplats(): void {
+    for (const mesh of this.groundSplatVisuals.values()) {
+      this.sceneManager.scene.remove(mesh);
+      (mesh.material as THREE.Material).dispose();
+    }
+    this.groundSplatVisuals.clear();
+  }
 }

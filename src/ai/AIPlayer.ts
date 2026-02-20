@@ -1213,6 +1213,18 @@ export class AIPlayer implements GameSystem {
     const solaris = this.harvestSystem.getSolaris(this.playerId);
     const px = this.factionPrefix;
 
+    // Emergency power check: always prioritize windtraps when in power deficit
+    const powerMult = this.production.getPowerMultiplier(this.playerId);
+    if (powerMult < 1.0 && solaris >= 250) {
+      const windtrapName = `${px}SmWindtrap`;
+      const bldQueue = this.production.getQueue(this.playerId, true);
+      const alreadyQueued = bldQueue.some(q => q.typeName === windtrapName);
+      if (!alreadyQueued && this.production.canBuild(this.playerId, windtrapName, true)) {
+        this.production.startProduction(this.playerId, windtrapName, true);
+        return;
+      }
+    }
+
     let totalBuildings = 0;
     const buildings = buildingQuery(world);
     for (const eid of buildings) {

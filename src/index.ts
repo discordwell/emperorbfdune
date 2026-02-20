@@ -97,6 +97,7 @@ interface SaveData {
   superweaponCharge?: Array<{ playerId: number; palaceType: string; charge: number }>;
   victoryTick?: number;
   controlGroups?: Record<number, number[]>;
+  groundSplats?: Array<{ x: number; z: number; ticksLeft: number; ownerPlayerId: number; type: string }>;
 }
 
 // ID maps
@@ -1589,12 +1590,31 @@ async function main() {
     if (attackerEntity !== undefined && targetEntity !== undefined) {
       abilitySystem.handleCombatHit(attackerEntity, targetEntity);
     }
+
+    // InkVine Catapult: create toxic ground splat at impact location
+    if (wt.includes('inkvine') && attackerEntity !== undefined) {
+      groundSplats.push({
+        x: targetX, z: targetZ,
+        ticksLeft: 1000, // 40 seconds
+        ownerPlayerId: Owner.playerId[attackerEntity],
+        type: 'inkvine',
+      });
+      effectsManager.spawnGroundSplat(targetX, targetZ, 'inkvine');
+    }
   });
 
   // AoE blast visual effects — sized by blast radius
   EventBus.on('combat:blast', ({ x, z, radius }) => {
     const size: 'small' | 'medium' | 'large' = radius <= 2 ? 'small' : radius <= 5 ? 'medium' : 'large';
     effectsManager.spawnExplosion(x, 0, z, size);
+  });
+
+  // Death Hand missile: leave radioactive fallout splat
+  EventBus.on('superweapon:fired', ({ owner, type, x, z }) => {
+    if (type === 'HKPalace') {
+      groundSplats.push({ x, z, ticksLeft: 1000, ownerPlayerId: owner, type: 'fallout' });
+      effectsManager.spawnGroundSplat(x, z, 'fallout');
+    }
   });
 
   EventBus.on('unit:move', ({ entityIds }) => {
@@ -1848,6 +1868,15 @@ async function main() {
   // Crate/power-up state
   let nextCrateId = 0;
   const activeCrates = new Map<number, { x: number; z: number; type: string }>();
+
+  // Ground-denial splats: InkVine toxic residue and Death Hand radioactive fallout
+  interface GroundSplat {
+    x: number; z: number;
+    ticksLeft: number;
+    ownerPlayerId: number;
+    type: 'inkvine' | 'fallout'; // inkvine = infantry only, fallout = all units
+  }
+  const groundSplats: GroundSplat[] = [];
 
   // --- APC TRANSPORT SYSTEM (delegated to AbilitySystem) ---
 
@@ -2459,6 +2488,44 @@ async function main() {
       EventBus.on('game:tick', stormDamage);
     }
 
+    // InkVine ground splat DoT: damage infantry in toxic zones every 25 ticks
+    if (game.getTickCount() % 25 === 0 && groundSplats.length > 0) {
+      const splatRadius = 6; // ~3 tiles (3x3 tile coverage = 6 world units radius)
+      const splatRadiusSq = splatRadius * splatRadius;
+      const allUnits = unitQuery(world);
+      for (let i = groundSplats.length - 1; i >= 0; i--) {
+        const splat = groundSplats[i];
+        splat.ticksLeft -= 25;
+        if (splat.ticksLeft <= 0) {
+          groundSplats.splice(i, 1);
+          effectsManager.removeGroundSplat(splat.x, splat.z);
+          continue;
+        }
+        // Damage units standing in the splat
+        const dmg = splat.type === 'inkvine' ? 3 : 15; // InkVinePoison_B vs DeathHandSplat_B
+        for (const eid of allUnits) {
+          if (Health.current[eid] <= 0) continue;
+          if (Owner.playerId[eid] === splat.ownerPlayerId) continue; // Don't damage own units
+          const typeId = UnitType.id[eid];
+          const tName = unitTypeNames[typeId];
+          const uDef = tName ? gameRules.units.get(tName) : null;
+          if (splat.type === 'inkvine' && !uDef?.infantry) continue; // Poison_W only affects infantry
+          const dx = Position.x[eid] - splat.x;
+          const dz = Position.z[eid] - splat.z;
+          if (dx * dx + dz * dz < splatRadiusSq) {
+            Health.current[eid] = Math.max(0, Health.current[eid] - dmg);
+            if (Health.current[eid] <= 0) {
+              EventBus.emit('unit:died', { entityId: eid, killerEntity: -1 });
+            }
+          }
+        }
+        // Fade visual as splat expires
+        if (splat.ticksLeft < 100) {
+          effectsManager.fadeGroundSplat(splat.x, splat.z, splat.ticksLeft / 100);
+        }
+      }
+    }
+
     // Sample stats for post-game graphs every 250 ticks (~10 seconds)
     if (game.getTickCount() % 250 === 0) {
       const allU = unitQuery(world);
@@ -2959,6 +3026,7 @@ async function main() {
         }
         return Object.keys(cg).length > 0 ? cg : undefined;
       })(),
+      groundSplats: groundSplats.length > 0 ? groundSplats.map(s => ({ ...s })) : undefined,
     };
   }
 
@@ -3116,6 +3184,17 @@ async function main() {
         if (eids.length > 0) restoredGroups.set(Number(key), eids);
       }
       selectionManager.setControlGroups(restoredGroups);
+    }
+
+    // Restore ground splats (InkVine toxic residue and Death Hand fallout)
+    effectsManager.clearAllGroundSplats();
+    groundSplats.length = 0;
+    if (savedGame.groundSplats) {
+      for (const s of savedGame.groundSplats) {
+        const splatType = (s.type === 'fallout' ? 'fallout' : 'inkvine') as 'inkvine' | 'fallout';
+        groundSplats.push({ x: s.x, z: s.z, ticksLeft: s.ticksLeft, ownerPlayerId: s.ownerPlayerId, type: splatType });
+        effectsManager.spawnGroundSplat(s.x, s.z, splatType);
+      }
     }
 
     // Restore AI base positions from saved buildings (placedBuildings is empty after load)

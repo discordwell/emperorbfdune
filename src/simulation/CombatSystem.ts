@@ -403,6 +403,14 @@ export class CombatSystem implements GameSystem {
 
       let range = Combat.attackRange[eid];
 
+      // Veterancy range bonus
+      if (hasComponent(world, Veterancy, eid)) {
+        const vetLevel = this.getVetLevel(eid);
+        if (vetLevel && vetLevel.extraRange > 0) {
+          range += vetLevel.extraRange;
+        }
+      }
+
       // Terrain range bonuses
       if (this.terrain) {
         const aTypeName = this.unitTypeMap.get(eid);
@@ -779,7 +787,13 @@ export class CombatSystem implements GameSystem {
 
   private findNearestEnemy(world: World, eid: number, _entities: readonly number[]): number {
     const myOwner = Owner.playerId[eid];
-    let viewRange = Combat.attackRange[eid] * 2; // Auto-acquire at 2x attack range
+    let baseRange = Combat.attackRange[eid];
+    // Veterancy range bonus for auto-acquire
+    if (hasComponent(world, Veterancy, eid)) {
+      const vetLevel = this.getVetLevel(eid);
+      if (vetLevel && vetLevel.extraRange > 0) baseRange += vetLevel.extraRange;
+    }
+    let viewRange = baseRange * 2; // Auto-acquire at 2x attack range
     // Sandstorm reduces visibility: halve auto-acquire range for ground units
     // Buildings are fortified and unaffected by sandstorm visibility
     if (this.sandstormActiveFn && this.sandstormActiveFn() && !hasComponent(world, BuildingType, eid)) {
