@@ -1071,8 +1071,10 @@ async function main() {
     const typeName = buildingTypeNames[typeId];
     const def = typeName ? gameRules.buildings.get(typeName) : null;
     // Refund scales by building HP ratio (damaged buildings return less)
+    // Use difficulty-adjusted cost so Easy/Hard modes refund correctly
+    const adjustedCost = typeName ? productionSystem.getAdjustedCost(0, typeName, true) : (def?.cost ?? 0);
     const hpRatio = Health.max[eid] > 0 ? Health.current[eid] / Health.max[eid] : 1;
-    const refund = def ? Math.floor(def.cost * 0.5 * hpRatio) : 0;
+    const refund = Math.floor(adjustedCost * 0.5 * hpRatio);
 
     harvestSystem.addSolaris(0, refund);
     selectionPanel.addMessage(`Sold for ${refund} Solaris`, '#f0c040');
@@ -3206,7 +3208,7 @@ async function main() {
       }
     }
 
-    // Restore AI base positions from saved buildings (placedBuildings is empty after load)
+    // Restore AI base positions and state from saved buildings
     for (let i = 0; i < aiPlayers.length; i++) {
       const playerId = i + 1;
       let sumX = 0, sumZ = 0, count = 0;
@@ -3231,6 +3233,8 @@ async function main() {
       if (pCount > 0) {
         aiPlayers[i].setTargetPosition(pBaseX / pCount, pBaseZ / pCount);
       }
+      // Reconstruct AI build phase and difficulty from existing buildings + game tick
+      aiPlayers[i].reconstructFromWorldState(savedGame.tick);
     }
 
     // Position camera at player's base after load

@@ -19,6 +19,9 @@ export class MovementSystem implements GameSystem {
   // Path cache per entity
   private paths = new Map<number, { x: number; z: number }[]>();
   private pathIndex = new Map<number, number>();
+  // Stuck detection: count ticks with no movement progress
+  private stuckTicks = new Map<number, number>();
+  private lastPos = new Map<number, { x: number; z: number }>();
   // Flying entities skip pathfinding
   private flyingEntities = new Set<number>();
   // Infantry entities use infantry passability for pathfinding
@@ -94,6 +97,8 @@ export class MovementSystem implements GameSystem {
       if (hasComponent(world, Health, eid) && Health.current[eid] <= 0) {
         this.paths.delete(eid);
         this.pathIndex.delete(eid);
+        this.stuckTicks.delete(eid);
+        this.lastPos.delete(eid);
         continue;
       }
 
@@ -202,6 +207,8 @@ export class MovementSystem implements GameSystem {
         Velocity.z[eid] = 0;
         this.paths.delete(eid);
         this.pathIndex.delete(eid);
+        this.stuckTicks.delete(eid);
+        this.lastPos.delete(eid);
         continue;
       }
 
@@ -301,12 +308,29 @@ export class MovementSystem implements GameSystem {
             Position.x[eid] = safeX;
             Position.z[eid] = safeZ;
           }
-          // If even safe direction is impassable, don't move (stuck, will repath next tick)
+          // If even safe direction is impassable, don't move (stuck)
         } else {
           Position.x[eid] = safeX;
           Position.z[eid] = safeZ;
         }
       }
+
+      // Stuck detection: if unit hasn't moved for 15 ticks, force repath
+      const lastP = this.lastPos.get(eid);
+      const cx = Position.x[eid], cz = Position.z[eid];
+      if (lastP && Math.abs(cx - lastP.x) < 0.05 && Math.abs(cz - lastP.z) < 0.05) {
+        const stuck = (this.stuckTicks.get(eid) ?? 0) + 1;
+        this.stuckTicks.set(eid, stuck);
+        if (stuck >= 15) {
+          this.paths.delete(eid);
+          this.pathIndex.delete(eid);
+          this.stuckTicks.set(eid, 0);
+        }
+      } else {
+        this.stuckTicks.set(eid, 0);
+      }
+      const lp = this.lastPos.get(eid);
+      if (lp) { lp.x = cx; lp.z = cz; } else { this.lastPos.set(eid, { x: cx, z: cz }); }
 
       // Ground units follow terrain height
       if (this.terrain) {
@@ -319,5 +343,7 @@ export class MovementSystem implements GameSystem {
   clearPath(eid: number): void {
     this.paths.delete(eid);
     this.pathIndex.delete(eid);
+    this.stuckTicks.delete(eid);
+    this.lastPos.delete(eid);
   }
 }

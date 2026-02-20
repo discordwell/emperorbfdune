@@ -170,6 +170,53 @@ export class AIPlayer implements GameSystem {
     }
   }
 
+  /** Reconstruct build phase from existing buildings after save/load.
+   *  Also fast-forwards tickCounter to match game tick so difficulty ramp is correct. */
+  reconstructFromWorldState(gameTick: number): void {
+    this.tickCounter = gameTick;
+    this.difficulty = 1.0 + Math.min(2.0, gameTick / 7500);
+
+    // Determine build phase by counting what buildings already exist
+    const px = this.factionPrefix;
+    const buildOrder = [
+      `${px}SmWindtrap`,   // phase 0
+      `${px}Refinery`,     // phase 1
+      `${px}Barracks`,     // phase 2
+      `${px}Factory`,      // phase 3
+      `${px}Outpost`,      // phase 4
+      `${px}SmWindtrap`,   // phase 5 (second)
+      `${px}SmWindtrap`,   // phase 6 (third)
+      `${px}Refinery`,     // phase 7 (second)
+      `${px}Hanger`,       // phase 8
+      `${px}SmWindtrap`,   // phase 9 (fourth)
+    ];
+    // Count owned buildings by type
+    const ownedCounts = new Map<string, number>();
+    if (this.production) {
+      const owned = this.production.getPlayerBuildings(this.playerId);
+      if (owned) {
+        for (const [name, count] of owned) {
+          if (count > 0) ownedCounts.set(name, count);
+        }
+      }
+    }
+    // Walk through build order, consuming from owned counts
+    const consumed = new Map<string, number>();
+    let phase = 0;
+    for (let i = 0; i < buildOrder.length; i++) {
+      const name = buildOrder[i];
+      const used = consumed.get(name) ?? 0;
+      const available = (ownedCounts.get(name) ?? 0) - used;
+      if (available > 0) {
+        consumed.set(name, used + 1);
+        phase = i + 1;
+      } else {
+        break; // Stop at first missing building
+      }
+    }
+    this.buildPhase = phase;
+  }
+
   constructor(rules: GameRules, combatSystem: CombatSystem, playerId: number, baseX: number, baseZ: number, targetX: number, targetZ: number) {
     this.rules = rules;
     this.combatSystem = combatSystem;

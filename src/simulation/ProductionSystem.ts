@@ -164,6 +164,10 @@ export class ProductionSystem {
     return owned ? (owned.get(buildingType) ?? 0) > 0 : false;
   }
 
+  getPlayerBuildings(playerId: number): Map<string, number> | undefined {
+    return this.playerBuildings.get(playerId);
+  }
+
   ownsAnyBuildingSuffix(playerId: number, suffix: string): boolean {
     const owned = this.playerBuildings.get(playerId);
     if (!owned) return false;
@@ -184,7 +188,8 @@ export class ProductionSystem {
     return total;
   }
 
-  /** Get production speed multiplier from multiple factories */
+  /** Get production speed multiplier from multiple factories.
+   *  Returns 0 if no production building exists (pauses production). */
   private getFactorySpeedBonus(playerId: number, queueType: 'building' | 'infantry' | 'vehicle'): number {
     let count: number;
     if (queueType === 'building') {
@@ -195,6 +200,8 @@ export class ProductionSystem {
       // Vehicle: count both Factory and Heavy Factory variants
       count = this.countBuildingSuffix(playerId, 'Factory');
     }
+    // No production building = production paused (0 speed)
+    if (count === 0) return 0;
     // Diminishing returns: 1st factory = 1x, 2nd = +0.5x, 3rd+ = +0.25x each
     if (count <= 1) return 1.0;
     return 1.0 + 0.5 + (count - 2) * 0.25;
@@ -315,54 +322,7 @@ export class ProductionSystem {
   }
 
   canBuild(playerId: number, typeName: string, isBuilding: boolean): boolean {
-    const def = isBuilding
-      ? this.rules.buildings.get(typeName)
-      : this.rules.units.get(typeName);
-    if (!def) return false;
-
-    // Check cost (difficulty-adjusted)
-    const adjustedCost = this.getAdjustedCost(playerId, typeName, isBuilding);
-    if (this.harvestSystem.getSolaris(playerId) < adjustedCost) return false;
-
-    // Check prerequisites (primary building must exist)
-    const owned = this.playerBuildings.get(playerId);
-    if (def.primaryBuilding) {
-      const hasReq = (name: string) => owned && owned.has(name) && (owned.get(name) ?? 0) > 0;
-      if (!hasReq(def.primaryBuilding)) {
-        // Check alternatives (e.g. walls accept ANY faction's ConYard)
-        const bDef = isBuilding ? this.rules.buildings.get(typeName) : null;
-        const alts = bDef?.primaryBuildingAlts ?? [];
-        if (alts.length === 0 || !alts.some(alt => hasReq(alt))) return false;
-      }
-    }
-
-    // Check secondary building prerequisites
-    if (def.secondaryBuildings && def.secondaryBuildings.length > 0) {
-      for (const req of def.secondaryBuildings) {
-        if (!owned || !owned.has(req) || (owned.get(req) ?? 0) <= 0) return false;
-      }
-    }
-
-    // Check if upgraded primary building is required
-    if (def.upgradedPrimaryRequired && def.primaryBuilding) {
-      if (!this.isUpgraded(playerId, def.primaryBuilding)) return false;
-    }
-
-    // Tech level requirement
-    if (def.techLevel > 0) {
-      const playerTech = this.getPlayerTechLevel(playerId);
-      if (def.techLevel > playerTech) return false;
-    }
-
-    // Unit population cap (only for units, not buildings)
-    // Include units already in production queues to prevent queue-stuffing past the cap
-    if (!isBuilding && this.unitCountCallback) {
-      const queuedUnits = (this.infantryQueues.get(playerId)?.length ?? 0)
-                        + (this.vehicleQueues.get(playerId)?.length ?? 0);
-      if (this.unitCountCallback(playerId) + queuedUnits >= this.maxUnits) return false;
-    }
-
-    return true;
+    return this.getBuildBlockReason(playerId, typeName, isBuilding) === null;
   }
 
   /** Returns the reason a unit/building can't be built, or null if it can */
