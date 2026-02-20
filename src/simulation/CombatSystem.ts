@@ -60,6 +60,8 @@ export class CombatSystem implements GameSystem {
   private infantrySuppressed = new Set<number>();
   // Terrain reference for height/infantry rock bonuses
   private terrain: TerrainRenderer | null = null;
+  // Sandstorm active callback (reduces accuracy and auto-acquire range)
+  private sandstormActiveFn: (() => boolean) | null = null;
 
   constructor(rules: GameRules) {
     this.rules = rules;
@@ -115,6 +117,10 @@ export class CombatSystem implements GameSystem {
   setFogOfWar(fog: FogOfWar, localPlayerId = 0): void {
     this.fogOfWar = fog;
     this.localPlayerId = localPlayerId;
+  }
+
+  setSandstormCallback(fn: () => boolean): void {
+    this.sandstormActiveFn = fn;
   }
 
   setPowerMultiplier(playerId: number, multiplier: number): void {
@@ -691,6 +697,16 @@ export class CombatSystem implements GameSystem {
       baseDamage = Math.round(baseDamage * degradation);
     }
 
+    // Sandstorm accuracy penalty: 30% damage reduction for ground units during storms
+    // Buildings are fortified and unaffected by sandstorm visibility
+    if (this.sandstormActiveFn && this.sandstormActiveFn() && !hasComponent(world, BuildingType, attackerEid)) {
+      const attackerTypeName = this.unitTypeMap.get(attackerEid);
+      const aDef = attackerTypeName ? this.rules.units.get(attackerTypeName) : null;
+      if (!aDef?.canFly) {
+        baseDamage = Math.round(baseDamage * 0.7);
+      }
+    }
+
     // Terrain bonuses: infantry on InfantryRock get +50% damage
     if (this.terrain) {
       const attackerTypeName = this.unitTypeMap.get(attackerEid);
@@ -742,7 +758,14 @@ export class CombatSystem implements GameSystem {
 
   private findNearestEnemy(world: World, eid: number, _entities: readonly number[]): number {
     const myOwner = Owner.playerId[eid];
-    const viewRange = Combat.attackRange[eid] * 2; // Auto-acquire at 2x attack range
+    let viewRange = Combat.attackRange[eid] * 2; // Auto-acquire at 2x attack range
+    // Sandstorm reduces visibility: halve auto-acquire range for ground units
+    // Buildings are fortified and unaffected by sandstorm visibility
+    if (this.sandstormActiveFn && this.sandstormActiveFn() && !hasComponent(world, BuildingType, eid)) {
+      const typeName = this.unitTypeMap.get(eid);
+      const uDef = typeName ? this.rules.units.get(typeName) : null;
+      if (!uDef?.canFly) viewRange *= 0.5;
+    }
     let bestScore = Infinity;
     let bestTarget = -1;
 

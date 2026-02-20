@@ -428,7 +428,17 @@ async function main() {
   combatSystem.setFogOfWar(fogOfWar, 0);
   combatSystem.setSpatialGrid(movement.getSpatialGrid());
   combatSystem.setTerrain(terrain);
-  movement.setSpeedModifier((eid: number) => combatSystem.getHitSlowdownMultiplier(eid));
+  combatSystem.setSandstormCallback(() => effectsManager.isSandstormActive());
+  movement.setSpeedModifier((eid: number) => {
+    let mult = combatSystem.getHitSlowdownMultiplier(eid);
+    // Sandstorm: 50% speed reduction for ground units on sand/dune terrain
+    if (effectsManager.isSandstormActive()) {
+      const tile = worldToTile(Position.x[eid], Position.z[eid]);
+      const tType = terrain.getTerrainType(tile.tx, tile.tz);
+      if (tType === TerrainType.Sand || tType === TerrainType.Dunes) mult *= 0.5;
+    }
+    return mult;
+  });
   combatSystem.setPlayerFaction(0, house.prefix);
   combatSystem.setPlayerFaction(1, house.enemyPrefix);  // AI player 1 (additional AIs registered below)
 
@@ -2306,10 +2316,9 @@ async function main() {
             const dmg = uDef?.stormDamage ?? 5;
             if (dmg <= 0) continue;
             // Only damage units on sand terrain
-            const tileX = Math.floor(Position.x[eid] / 2);
-            const tileZ = Math.floor(Position.z[eid] / 2);
-            const terrType = terrain.getTerrainType(tileX, tileZ);
-            if (terrType === 0 || terrType === 4) { // Sand or Dunes
+            const stormTile = worldToTile(Position.x[eid], Position.z[eid]);
+            const terrType = terrain.getTerrainType(stormTile.tx, stormTile.tz);
+            if (terrType === TerrainType.Sand || terrType === TerrainType.Dunes) {
               Health.current[eid] = Math.max(0, Health.current[eid] - dmg);
               if (Health.current[eid] <= 0) {
                 EventBus.emit('unit:died', { entityId: eid, killerEntity: -1 });
