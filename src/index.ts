@@ -908,6 +908,8 @@ async function main() {
     Selectable.selected[eid] = 0;
     MoveTarget.active[eid] = 0;
     AttackTarget.active[eid] = 0;
+    AttackTarget.entityId[eid] = 0;
+    Velocity.x[eid] = 0; Velocity.y[eid] = 0; Velocity.z[eid] = 0;
     Speed.max[eid] = def.speed;
     Speed.turnRate[eid] = def.turnRate;
     Renderable.modelId[eid] = unitTypeIdMap.get(typeName) ?? 0;
@@ -999,8 +1001,8 @@ async function main() {
     // Concrete slab bonus: buildings on concrete get 50% more health
     let healthBonus = 1.0;
     const bTile = worldToTile(x, z);
-    const bHalfW = 1; // 3x3 footprint => half = 1
-    const bHalfH = 1;
+    const bHalfW = Math.max(1, Math.floor((def.occupy[0]?.length || 3) / 2));
+    const bHalfH = Math.max(1, Math.floor((def.occupy.length || 3) / 2));
     let concreteCount = 0;
     let totalTiles = 0;
     for (let dtz = -bHalfH; dtz <= bHalfH; dtz++) {
@@ -1041,8 +1043,12 @@ async function main() {
       Speed.turnRate[eid] = 0;
       MoveTarget.active[eid] = 0;
       AttackTarget.active[eid] = 0;
+      AttackTarget.entityId[eid] = 0;
+      Velocity.x[eid] = 0; Velocity.y[eid] = 0; Velocity.z[eid] = 0;
       const turret = gameRules.turrets.get(def.turretAttach);
       const bullet = turret ? gameRules.bullets.get(turret.bullet) : null;
+      Combat.weaponId[eid] = 0;
+      Combat.fireTimer[eid] = 0;
       Combat.attackRange[eid] = bullet ? bullet.maxRange * 2 : 12;
       Combat.rof[eid] = turret?.reloadCount ?? 45;
       // Register in combat system so damage lookups work
@@ -1087,6 +1093,7 @@ async function main() {
       productionSystem.removePlayerBuilding(0, typeName);
     }
     combatSystem.unregisterUnit(eid);
+    movement.unregisterEntity(eid);
 
     const bx = Position.x[eid];
     const bz = Position.z[eid];
@@ -2550,8 +2557,8 @@ async function main() {
       selectionPanel.addMessage('Autosaved', '#888');
     }
 
-    // Pause game on victory/defeat
-    if (victorySystem.getOutcome() !== 'playing') {
+    // Pause game on victory/defeat (non-toggle to prevent oscillation)
+    if (victorySystem.getOutcome() !== 'playing' && !game.isPaused()) {
       game.pause();
     }
   });
@@ -2902,8 +2909,10 @@ async function main() {
       e.preventDefault();
       if (pauseMenu.isOpen) {
         pauseMenu.close();
-        if (game.isPaused()) game.pause(); // Unpause
+        if (pauseMenu.pausedByMenu && game.isPaused()) game.pause(); // Only unpause if menu caused it
+        pauseMenu.pausedByMenu = false;
       } else {
+        pauseMenu.pausedByMenu = !game.isPaused(); // Track if we're the ones pausing
         if (!game.isPaused()) game.pause();
         pauseMenu.show();
       }

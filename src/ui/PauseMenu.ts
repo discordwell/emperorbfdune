@@ -28,6 +28,8 @@ export interface PauseMenuDeps {
 export class PauseMenu {
   private deps: PauseMenuDeps;
   private overlay: HTMLDivElement | null = null;
+  /** Tracks whether the pause menu itself triggered the pause (vs F9 manual pause) */
+  pausedByMenu = false;
 
   constructor(deps: PauseMenuDeps) {
     this.deps = deps;
