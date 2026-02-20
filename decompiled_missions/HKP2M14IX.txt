@@ -1,0 +1,117 @@
+// File: HKP2M14IX.tok
+// Size: 1895 bytes, segments: 203, vars: 48
+
+int (v0)
+int (v1)
+int (v2)
+pos (v3)
+int (v4)
+int (v5)
+int (v6)
+int (v7)
+int (v8)
+int (v9)
+obj (v10)
+int (v11)
+obj (v12)
+int (v13)
+int (v14)
+if (ModelTick () == 0)
+  int_1 = CreateSide ()
+  SetSideColor (int_1, 5)
+  pos_3 = GetSideBasePoint (GetEnemySide ())
+  obj_12 = NewObject (int_1, STR[10], pos_3)
+  NewObject (int_1, STR[49], pos_3)
+  NewObject (int_1, STR[49], pos_3)
+  NewObject (int_1, STR[48], pos_3)
+  NewObject (int_1, STR[48], pos_3)
+  SideAIControl (int_1)
+  SideFriendTo (int_1, GetEnemySide ())
+  SideFriendTo (GetEnemySide (), int_1)
+  SideEnemyTo (GetPlayerSide (), int_1)
+  SideEnemyTo (int_1, GetPlayerSide ())
+endif;
+if (ModelTick () == 900)
+  NewObject (GetPlayerSide (), STR[47], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[46], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[46], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[46], GetEntrancePoint (GetPlayerSide ()))
+  int_8 = TRUE
+endif;
+if ((ModelTick () == 925) && (int_8 == TRUE))
+  PIPCameraLookAtPoint (GetEntrancePoint (GetPlayerSide ()))
+  Message (24)
+endif;
+if ((ModelTick () == 1050) && (int_8 == TRUE))
+  PIPRelease ()
+endif;
+if ((int_2 == FALSE) && (SideVisibleToSide (int_1, GetPlayerSide ()) == TRUE))
+  int_4 = PIPRelease () + 1500
+  int_2 = TRUE
+  int_5 = PIPRelease ()
+  PIPCameraTrackObject (obj_12)
+  RemoveShroud (GetObjectPosition (obj_12), 12)
+endif;
+if ((int_2 == TRUE) && (ModelTick () == int_5 + 25))
+  Message (25)
+  RadarAlert (GetObjectPosition (obj_12))
+endif;
+if ((int_2 == TRUE) && (ModelTick () == int_5 + 205))
+  PIPRelease ()
+endif;
+if ((ModelTick () == int_4) && (int_2 == TRUE) && (int_14 < 2))
+  NewObject (GetPlayerSide (), STR[47], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[46], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[46], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[46], GetEntrancePoint (GetPlayerSide ()))
+  RadarAlert (GetEntrancePoint (GetPlayerSide ()))
+  int_7 = TRUE
+  int_14 = int_14 + 1
+  int_4 = int_4 + 3500
+  int_4 = int_0 int_0 (3000) + int_4
+  int_6 = PIPRelease ()
+endif;
+if ((ModelTick () == int_6 + 25) && (int_7 == TRUE))
+  PIPCameraLookAtPoint (GetEntrancePoint (GetPlayerSide ()))
+  Message (26)
+endif;
+if ((ModelTick () == int_6 + 200) && (int_7 == TRUE))
+  PIPRelease ()
+endif;
+if ((int_9 == FALSE) && (int_2 == TRUE) && (SideUnitCount (int_1) <= 1))
+  RadarAlert (GetEntrancePoint (GetEnemySide ()))
+  int_9 = TRUE
+  NewObject (int_1, STR[49], GetEntrancePoint (GetEnemySide ()))
+  NewObject (int_1, STR[48], GetEntrancePoint (GetEnemySide ()))
+  NewObject (int_1, STR[49], GetEntrancePoint (GetEnemySide ()))
+  NewObject (int_1, STR[48], GetEntrancePoint (GetEnemySide ()))
+  NewObject (int_1, STR[49], GetEntrancePoint (GetEnemySide ()))
+  NewObject (int_1, STR[48], GetEntrancePoint (GetEnemySide ()))
+  NewObject (int_1, STR[49], GetEntrancePoint (GetEnemySide ()))
+  obj_10 = NewObject (int_1, STR[48], GetEntrancePoint (GetEnemySide ()))
+  NewObject (int_1, STR[49], GetEntrancePoint (GetEnemySide ()))
+  NewObject (int_1, STR[48], GetEntrancePoint (GetEnemySide ()))
+  NewObject (int_1, STR[49], GetEntrancePoint (GetEnemySide ()))
+  NewObject (int_1, STR[48], GetEntrancePoint (GetEnemySide ()))
+  SideAIAggressive (int_1)
+  int_11 = PIPRelease ()
+endif;
+if ((ModelTick () == int_11 + 25) && (int_9 == TRUE))
+  PIPCameraTrackObject (obj_10)
+  Message (56)
+endif;
+if ((ModelTick () >= int_11 + 25) && (ModelTick () <= int_11 + 205) && (int_9 == TRUE))
+  RemoveShroud (GetSidePosition (int_1), 12)
+endif;
+if ((ModelTick () == int_11 + 205) && (int_9 == TRUE))
+  PIPRelease ()
+endif;
+if ((EventObjectDestroyed (obj_12) == TRUE) && (int_0 == FALSE))
+  int_0 = TRUE
+  Message (27)
+  MissionOutcome (TRUE)
+  int_13 = PIPRelease () + 400
+endif;
+if ((int_0 == TRUE) && (ModelTick () == int_13))
+  Message (17)
+endif;

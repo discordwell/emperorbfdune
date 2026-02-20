@@ -1,0 +1,177 @@
+// File: ORP2D4OR.tok
+// Size: 2993 bytes, segments: 327, vars: 58
+
+obj (v0)
+obj (v1)
+obj (v2)
+obj (v3)
+obj (v4)
+obj (v5)
+obj (v6)
+int (v7)
+int (v8)
+int (v9)
+int (v10)
+int (v11)
+int (v12)
+int (v13)
+int (v14)
+obj (v15)
+int (v16)
+int (v17)
+int (v18)
+int (v19)
+if (ModelTick () == 0)
+  int_7 = CreateSide ()
+  SideEnemyTo (int_7, GetPlayerSide ())
+  SideEnemyTo (GetPlayerSide (), int_7)
+  SideFriendTo (int_7, GetEnemySide ())
+  SideFriendTo (GetEnemySide (), int_7)
+  obj_0 = NewObject (GetPlayerSide (), STR[0], GetSidePosition (GetPlayerSide ()))
+  obj_1 = NewObject (GetPlayerSide (), STR[0], GetSidePosition (GetPlayerSide ()))
+  obj_2 = NewObject (GetPlayerSide (), STR[1], GetSidePosition (GetPlayerSide ()))
+  obj_3 = NewObject (GetPlayerSide (), STR[1], GetSidePosition (GetPlayerSide ()))
+  obj_4 = NewObject (GetPlayerSide (), STR[3], GetSidePosition (GetPlayerSide ()))
+  obj_5 = NewObject (GetPlayerSide (), STR[3], GetSidePosition (GetPlayerSide ()))
+  obj_6 = NewObject (GetPlayerSide (), STR[4], GetSidePosition (GetPlayerSide ()))
+  Message (111)
+endif;
+if (ModelTick () == 800)
+  ObjectChangeSide (obj_0, int_7)
+  ObjectChangeSide (obj_1, int_7)
+  ObjectChangeSide (obj_2, int_7)
+  ObjectChangeSide (obj_3, int_7)
+  ObjectChangeSide (obj_4, int_7)
+  ObjectChangeSide (obj_5, int_7)
+  ObjectChangeSide (obj_6, int_7)
+  SideAIMove (int_7, GetSidePosition (GetEnemySide ()))
+  int_8 = TRUE
+endif;
+if (ModelTick () == 1100)
+  SideAIEncounterAttack (int_7)
+endif;
+if ((ModelTick () == 825) && (int_8 == TRUE))
+  PIPCameraTrackObject (obj_3)
+  Message (110)
+endif;
+if ((ModelTick () == 905) && (int_8 == TRUE))
+  Message (112)
+endif;
+if ((ModelTick () == 1050) && (int_8 == TRUE))
+  PIPRelease ()
+endif;
+if ((int_8 == TRUE) && (SideUnitCount (int_7) > 0) && (ModelTick () < 1050))
+  RemoveShroud (GetObjectPosition (obj_3), 12)
+endif;
+if ((int_8 == TRUE) && (int_11 == FALSE))
+  if (SideUnitCount (int_7) == 0)
+    int_14 = PIPRelease () + 2000
+    int_11 = TRUE
+    Message (107)
+    int_18 = TRUE
+  endif;
+endif;
+if ((SideNearToSideBase (int_7, GetEnemySide ()) == TRUE) && (int_8 == TRUE) && (int_11 == FALSE))
+  SideChangeSide (int_7, GetEnemySide ())
+  int_11 = TRUE
+  int_14 = PIPRelease () + 1500
+endif;
+if ((ModelTick () == int_14) && (int_11 == TRUE) && (int_12 == FALSE))
+  NewObject (int_7, STR[1], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_7, STR[1], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_7, STR[1], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_7, STR[1], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_7, STR[1], GetEntrancePoint (GetPlayerSide ()))
+  obj_15 = NewObject (int_7, STR[0], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_7, STR[0], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_7, STR[0], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_7, STR[0], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_7, STR[0], GetEntrancePoint (GetPlayerSide ()))
+  SideAIMove (int_7, GetSidePosition (GetEnemySide ()))
+  SideAIEncounterAttack (int_7)
+  int_9 = TRUE
+endif;
+if ((ModelTick () == int_14 + 25) && (int_11 == TRUE) && (int_17 == FALSE))
+  PIPCameraTrackObject (obj_15)
+  int_17 = TRUE
+  Message (109)
+endif;
+if ((ModelTick () == int_14 + 105) && (int_11 == TRUE))
+endif;
+if ((ModelTick () == int_14 + 250) && (int_11 == TRUE))
+  PIPRelease ()
+endif;
+if ((int_11 == TRUE) && (SideUnitCount (int_7) > 0) && (ModelTick () < int_14 + 250))
+  RemoveShroud (GetObjectPosition (obj_15), 12)
+endif;
+if ((int_9 == TRUE) && (int_12 == FALSE))
+  if (SideUnitCount (int_7) == 0)
+    int_14 = PIPRelease () + 3000
+    int_12 = TRUE
+    Message (107)
+    int_19 = TRUE
+  endif;
+endif;
+if (int_12 == FALSE)
+  if ((SideNearToSideBase (int_7, GetEnemySide ()) == TRUE) && (int_9 == TRUE) && (int_11 == TRUE))
+    SideChangeSide (int_7, GetEnemySide ())
+    int_12 = TRUE
+    int_14 = PIPRelease () + 2500
+  endif;
+endif;
+if ((ModelTick () == int_14) && (int_12 == TRUE))
+  NewObject (int_7, STR[3], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_7, STR[3], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_7, STR[3], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_7, STR[3], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_7, STR[3], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_7, STR[3], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_7, STR[3], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_7, STR[3], GetEntrancePoint (GetPlayerSide ()))
+  obj_1 = NewObject (int_7, STR[4], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_7, STR[4], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_7, STR[4], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_7, STR[4], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_7, STR[4], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_7, STR[4], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_7, STR[4], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_7, STR[2], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_7, STR[2], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_7, STR[2], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_7, STR[2], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_7, STR[2], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_7, STR[2], GetEntrancePoint (GetPlayerSide ()))
+  SideAIMove (int_7, GetSidePosition (GetEnemySide ()))
+  SideAIEncounterAttack (int_7)
+  int_10 = TRUE
+endif;
+if ((ModelTick () == int_14 + 25) && (int_12 == TRUE) && (int_16 == FALSE))
+  PIPCameraTrackObject (obj_1)
+  int_16 = TRUE
+  Message (109)
+endif;
+if ((ModelTick () == int_14 + 105) && (int_12 == TRUE))
+endif;
+if ((ModelTick () == int_14 + 250) && (int_12 == TRUE))
+  PIPRelease ()
+endif;
+if ((int_12 == TRUE) && (SideUnitCount (int_7) > 0) && (ModelTick () < int_14 + 250))
+  RemoveShroud (GetObjectPosition (obj_1), 12)
+endif;
+if ((int_10 == TRUE) && (int_13 == FALSE))
+  if (SideUnitCount (int_7) == 0)
+    int_13 = TRUE
+    if ((int_18 == TRUE) && (int_19 == TRUE))
+      Message (74)
+      MissionOutcome (TRUE)
+    else;
+      Message (107)
+    endif;
+  endif;
+endif;
+if (int_13 == FALSE)
+  if ((SideNearToSideBase (int_7, GetEnemySide ()) == TRUE) && (int_10 == TRUE) && (int_12 == TRUE))
+    SideChangeSide (int_7, GetEnemySide ())
+    int_13 = TRUE
+  endif;
+endif;

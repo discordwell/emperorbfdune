@@ -1,0 +1,7 @@
+// File: ATP1D11ORFail.tok
+// Size: 90 bytes, segments: 43, vars: 38
+
+if (ModelTick () == 0)
+  Message (40)
+  AddSideCash (GetEnemySide (), 5000)
+endif;

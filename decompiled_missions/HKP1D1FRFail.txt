@@ -1,0 +1,7 @@
+// File: HKP1D1FRFail.tok
+// Size: 93 bytes, segments: 46, vars: 41
+
+if (ModelTick () == 0)
+  AddSideCash (GetEnemySide (), 5000)
+  Message (125)
+endif;

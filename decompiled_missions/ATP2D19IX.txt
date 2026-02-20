@@ -1,0 +1,145 @@
+// File: ATP2D19IX.tok
+// Size: 2580 bytes, segments: 212, vars: 40
+
+int (v0)
+int (v1)
+int (v2)
+int (v3)
+int (v4)
+obj (v5)
+obj (v6)
+obj (v7)
+obj (v8)
+obj (v9)
+obj (v10)
+int (v11)
+int (v12)
+if (ModelTick () == 0)
+  Message (77)
+  AddSideCash (GetPlayerSide (), 3000)
+  int_0 = CreateSide ()
+  SideFriendTo (int_0, GetPlayerSide ())
+  SideFriendTo (GetPlayerSide (), int_0)
+  SideEnemyTo (int_0, GetEnemySide ())
+  SideEnemyTo (GetEnemySide (), int_0)
+  int_2 = 4000
+endif;
+if (ModelTick () == 400)
+  Message (93)
+  NewObject (GetEnemySide (), STR[49], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[49], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[49], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[49], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[49], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[49], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[49], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[49], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[49], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[49], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[49], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[49], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[48], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[48], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[48], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[48], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[48], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[48], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[48], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[48], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[48], GetSidePosition (GetEnemySide ()))
+endif;
+if (ModelTick () == int_2)
+  obj_9 = NewObject (int_0, STR[47], GetNeutralEntrancePoint ())
+  obj_8 = NewObject (int_0, STR[47], GetNeutralEntrancePoint ())
+  obj_6 = NewObject (int_0, STR[47], GetNeutralEntrancePoint ())
+  obj_5 = NewObject (int_0, STR[47], GetNeutralEntrancePoint ())
+  obj_7 = NewObject (int_0, STR[47], GetNeutralEntrancePoint ())
+  obj_10 = NewObject (int_0, STR[47], GetNeutralEntrancePoint ())
+  RadarAlert (GetSidePosition (int_0))
+  SideAIMove (int_0, GetSidePosition (GetPlayerSide ()))
+  int_4 = TRUE
+endif;
+if ((ModelTick () == int_2 + 25) && (int_4 == TRUE))
+  SideAIMove (int_0, GetSidePosition (GetPlayerSide ()))
+  PIPCameraTrackObject (obj_8)
+  Message (78)
+endif;
+if ((ModelTick () == int_2 + 300) && (int_4 == TRUE))
+  PIPRelease ()
+endif;
+if ((int_4 == TRUE) && (SideUnitCount (int_0) > 0))
+  RemoveShroud (GetSidePosition (int_0), 20)
+endif;
+if ((SideNearToSide (int_0, GetPlayerSide ()) == TRUE) && (int_1 == FALSE))
+  RadarAlert (GetSidePosition (int_0))
+  int_1 = TRUE
+  int_3 = PIPRelease ()
+endif;
+if ((ModelTick () == int_3 + 300) && (int_1 == TRUE))
+  RadarAlert (GetSidePosition (int_0))
+  Message (79)
+  SideChangeSide (int_0, GetPlayerSide ())
+  NewObject (GetPlayerSide (), STR[46], GetSidePosition (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[46], GetSidePosition (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[46], GetSidePosition (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[46], GetSidePosition (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[46], GetSidePosition (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[46], GetSidePosition (GetPlayerSide ()))
+endif;
+if ((EventSideAttacksSide (GetPlayerSide (), int_0) == TRUE) && (int_1 == FALSE))
+  int_1 = TRUE
+  SideEnemyTo (int_0, GetPlayerSide ())
+  SideEnemyTo (GetPlayerSide (), int_0)
+  SideAIExitMap (int_0)
+  int_11 = PIPRelease ()
+endif;
+if ((ModelTick () == int_11 + 105) && (int_1 == TRUE))
+  Message (80)
+  if ((ObjectValid (obj_5) == TRUE) && (int_12 == FALSE))
+    PIPCameraTrackObject (obj_5)
+    int_12 = TRUE
+  endif;
+  if ((ObjectValid (obj_6) == TRUE) && (int_12 == FALSE))
+    PIPCameraTrackObject (obj_6)
+    int_12 = TRUE
+  endif;
+  if ((ObjectValid (obj_7) == TRUE) && (int_12 == FALSE))
+    PIPCameraTrackObject (obj_7)
+    int_12 = TRUE
+  endif;
+  if ((ObjectValid (obj_8) == TRUE) && (int_12 == FALSE))
+    PIPCameraTrackObject (obj_8)
+    int_12 = TRUE
+  endif;
+  if ((ObjectValid (obj_9) == TRUE) && (int_12 == FALSE))
+    PIPCameraTrackObject (obj_9)
+    int_12 = TRUE
+  endif;
+  if ((ObjectValid (obj_10) == TRUE) && (int_12 == FALSE))
+    PIPCameraTrackObject (obj_10)
+    int_12 = TRUE
+  endif;
+endif;
+if ((ModelTick () == int_11 + 300) && (int_1 == TRUE))
+  PIPRelease ()
+endif;
+if (ModelTick () == 10000)
+  NewObject (GetEnemySide (), STR[49], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[49], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[49], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[49], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[49], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[49], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[49], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[49], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[49], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[48], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[48], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[48], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[48], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[48], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[48], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[48], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[48], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[48], GetSidePosition (GetEnemySide ()))
+endif;

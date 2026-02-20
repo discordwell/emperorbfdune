@@ -1,0 +1,6 @@
+// File: ATP3D10FRFail.tok
+// Size: 81 bytes, segments: 42, vars: 38
+
+if (ModelTick () == 0)
+  AddSideCash (GetEnemySide (), 5000)
+endif;

@@ -1,0 +1,313 @@
+// File: ATP3M8TL.tok
+// Size: 5680 bytes, segments: 459, vars: 44
+
+pos (v0)
+int (v1)
+int (v2)
+int (v3)
+int (v4)
+obj (v5)
+obj (v6)
+int (v7)
+int (v8)
+int (v9)
+int (v10)
+int (v11)
+int (v12)
+obj (v13)
+obj (v14)
+int (v15)
+int (v16)
+int (v17)
+int (v18)
+int (v19)
+int (v20)
+obj (v21)
+int (v22)
+if (ModelTick () == 0)
+  pos_0 = GetUnusedBasePoint ()
+  int_1 = CreateSide ()
+  int_2 = CreateSide ()
+  AddSideCash (int_1, 5000)
+  SideEnemyTo (int_1, GetPlayerSide ())
+  SideEnemyTo (GetPlayerSide (), int_1)
+  SideEnemyTo (int_2, GetPlayerSide ())
+  SideEnemyTo (GetPlayerSide (), int_2)
+  obj_5 = NewObjectOffsetOrientation (int_1, STR[24], pos_0, 0, 0, 2)
+  NewObjectOffsetOrientation (int_1, STR[114], pos_0, Neg (4), 0, 2)
+  NewObjectOffsetOrientation (int_1, STR[114], pos_0, 4, 0, 2)
+  NewObjectOffsetOrientation (int_1, STR[107], pos_0, Neg (3), Neg (5), 0)
+  NewObjectOffsetOrientation (int_1, STR[107], pos_0, 3, Neg (5), 0)
+  NewObjectOffsetOrientation (int_1, STR[107], pos_0, Neg (5), Neg (5), 0)
+  NewObjectOffsetOrientation (int_1, STR[107], pos_0, 5, Neg (5), 0)
+  NewObjectOffsetOrientation (int_1, STR[114], pos_0, Neg (4), Neg (8), 2)
+  NewObjectOffsetOrientation (int_1, STR[114], pos_0, 4, Neg (8), 2)
+  SetSideColor (int_1, 5)
+  NewObject (GetEnemySide (), STR[49], GetSideBasePoint (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[49], GetSideBasePoint (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[49], GetSideBasePoint (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[49], GetSideBasePoint (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[49], GetSideBasePoint (GetEnemySide ()))
+  obj_21 = NewObject (GetEnemySide (), STR[48], GetSideBasePoint (GetEnemySide ()))
+  SetVeterancy (obj_21, 3)
+  NewObject (GetEnemySide (), STR[48], GetSideBasePoint (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[48], GetSideBasePoint (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[48], GetSideBasePoint (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[48], GetSideBasePoint (GetEnemySide ()))
+  obj_21 = NewObject (GetEnemySide (), STR[48], GetSideBasePoint (GetEnemySide ()))
+  SetVeterancy (obj_21, 3)
+  NewObject (GetEnemySide (), STR[48], GetSideBasePoint (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[48], GetSideBasePoint (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[48], GetSideBasePoint (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[48], GetSideBasePoint (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[48], GetSideBasePoint (GetEnemySide ()))
+  obj_21 = NewObject (GetEnemySide (), STR[48], GetSideBasePoint (GetEnemySide ()))
+  SetVeterancy (obj_21, 3)
+  NewObject (GetEnemySide (), STR[48], GetSideBasePoint (GetEnemySide ()))
+  AddSideCash (GetEnemySide (), 5000)
+  Message (31)
+  AddSideCash (GetPlayerSide (), 3000)
+  SideAIControl (int_2)
+  SideAIAggressive (int_1)
+  SetReinforcements (GetPlayerSide (), 300)
+  NewObject (int_2, STR[49], pos_0)
+  NewObject (int_2, STR[49], pos_0)
+  obj_21 = NewObject (int_2, STR[49], pos_0)
+  SetVeterancy (obj_21, 3)
+  NewObject (int_2, STR[49], pos_0)
+  NewObject (int_2, STR[48], pos_0)
+  obj_21 = NewObject (int_2, STR[48], pos_0)
+  SetVeterancy (obj_21, 3)
+  NewObject (int_2, STR[48], pos_0)
+  NewObject (int_2, STR[48], pos_0)
+  int_11 = 6000
+endif;
+if (ModelTick () == 2500)
+  Message (32)
+endif;
+if (ModelTick () == 3750)
+  Message (33)
+endif;
+if (ModelTick () == 7500)
+  Message (34)
+endif;
+if (ModelTick () == 8000)
+  int_18 = TRUE
+  RadarAlert (GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[53], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[53], GetEntrancePoint (GetPlayerSide ()))
+  obj_21 = NewObject (GetPlayerSide (), STR[53], GetEntrancePoint (GetPlayerSide ()))
+  SetVeterancy (obj_21, 3)
+  NewObject (GetPlayerSide (), STR[53], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[53], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[53], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[53], GetEntrancePoint (GetPlayerSide ()))
+  obj_21 = NewObject (GetPlayerSide (), STR[53], GetEntrancePoint (GetPlayerSide ()))
+  SetVeterancy (obj_21, 3)
+  NewObject (GetPlayerSide (), STR[53], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[53], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[53], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[53], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[54], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[54], GetEntrancePoint (GetPlayerSide ()))
+  int_17 = PIPRelease ()
+endif;
+if ((ModelTick () == int_17 + 25) && (int_18 == TRUE))
+  Message (39)
+  PIPCameraLookAtPoint (GetEntrancePoint (GetPlayerSide ()))
+endif;
+if ((ModelTick () == int_17 + 50) && (int_18 == TRUE))
+  PIPCameraStartRotate (2, 1)
+endif;
+if ((ModelTick () == int_17 + 150) && (int_18 == TRUE))
+  PIPCameraStopRotate ()
+endif;
+if ((ModelTick () == int_17 + 160) && (int_18 == TRUE))
+  PIPRelease ()
+endif;
+if ((ObjectDestroyed (obj_5) == FALSE) && (int_4 == FALSE) && (ModelTick () > 3000))
+  if ((SideUnitCount (int_2) < 12) || (SideNearToSideBase (GetPlayerSide (), int_1) == TRUE))
+    BuildObject (int_1, STR[48])
+    int_4 = TRUE
+  endif;
+endif;
+if (EventObjectConstructed (int_1, obj_6))
+  ObjectChangeSide (obj_6, int_2)
+  int_4 = FALSE
+endif;
+if ((SideUnitCount (int_2) >= 12) && (SideNearToSideBase (GetPlayerSide (), int_1) == FALSE))
+  SideChangeSide (int_2, int_1)
+  Message (37)
+endif;
+if ((int_7 == FALSE) && (SideNearToSideBase (int_1, GetPlayerSide ()) == TRUE))
+  int_7 = TRUE
+  Message (38)
+  int_8 = PIPRelease () + 2000
+  NewObject (GetPlayerSide (), STR[25], GetEntrancePoint (GetPlayerSide ()))
+  obj_21 = NewObject (GetPlayerSide (), STR[25], GetEntrancePoint (GetPlayerSide ()))
+  SetVeterancy (obj_21, 3)
+  NewObject (GetPlayerSide (), STR[25], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[21], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[21], GetEntrancePoint (GetPlayerSide ()))
+  obj_21 = NewObject (GetPlayerSide (), STR[21], GetEntrancePoint (GetPlayerSide ()))
+  SetVeterancy (obj_21, 3)
+  NewObject (GetPlayerSide (), STR[124], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[124], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[124], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[124], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[124], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[22], GetEntrancePoint (GetPlayerSide ()))
+  RadarAlert (GetEntrancePoint (GetPlayerSide ()))
+endif;
+if (ModelTick () == int_8)
+  int_7 = FALSE
+endif;
+if (ModelTick () == 4000)
+  Message (35)
+  NewObject (GetPlayerSide (), STR[53], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[53], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[53], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[53], GetEntrancePoint (GetPlayerSide ()))
+  obj_21 = NewObject (GetPlayerSide (), STR[53], GetEntrancePoint (GetPlayerSide ()))
+  SetVeterancy (obj_21, 3)
+  NewObject (GetPlayerSide (), STR[53], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[53], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[53], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[53], GetEntrancePoint (GetPlayerSide ()))
+  obj_21 = NewObject (GetPlayerSide (), STR[53], GetEntrancePoint (GetPlayerSide ()))
+  SetVeterancy (obj_21, 3)
+  NewObject (GetPlayerSide (), STR[54], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[54], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[54], GetEntrancePoint (GetPlayerSide ()))
+  PIPCameraLookAtPoint (GetEntrancePoint (GetPlayerSide ()))
+endif;
+if (ModelTick () == 4010)
+  PIPCameraStartRotate (2, 1)
+endif;
+if (ModelTick () == 4160)
+  PIPCameraStopRotate ()
+endif;
+if (ModelTick () == 4170)
+  PIPRelease ()
+endif;
+if (int_9 == FALSE)
+  if (ObjectTypeVisibleToSide (STR[49], GetPlayerSide ()) == TRUE)
+    Message (40)
+    int_9 = TRUE
+  endif;
+endif;
+if (int_10 == FALSE)
+  if (ObjectTypeVisibleToSide (STR[48], GetPlayerSide ()) == TRUE)
+    int_10 = TRUE
+    Message (41)
+  endif;
+endif;
+if (int_22 == FALSE)
+  if ((SideUnitCount (int_2) == 0) && (SideUnitCount (int_1) == 0) && (SideBuildingCount (int_1) == 0))
+    int_22 = TRUE
+    if (int_12 < 3)
+      int_12 = 3
+      int_11 = PIPRelease () + 50
+    endif;
+  endif;
+endif;
+if ((ModelTick () == int_11) && (int_12 < 3) && (int_16 == FALSE))
+  int_11 = int_11 + 2000
+  int_11 = int_11 + pos_0 pos_0 (2000)
+  RadarAlert (GetEntranceNearToPos (GetSidePosition (GetEnemySide ())))
+  NewObject (GetEnemySide (), STR[49], GetEntranceNearToPos (GetSidePosition (GetEnemySide ())))
+  NewObject (GetEnemySide (), STR[49], GetEntranceNearToPos (GetSidePosition (GetEnemySide ())))
+  obj_21 = NewObject (GetEnemySide (), STR[49], GetEntranceNearToPos (GetSidePosition (GetEnemySide ())))
+  SetVeterancy (obj_21, 3)
+  NewObject (GetEnemySide (), STR[49], GetEntranceNearToPos (GetSidePosition (GetEnemySide ())))
+  NewObject (GetEnemySide (), STR[49], GetEntranceNearToPos (GetSidePosition (GetEnemySide ())))
+  NewObject (GetEnemySide (), STR[49], GetEntranceNearToPos (GetSidePosition (GetEnemySide ())))
+  NewObject (GetEnemySide (), STR[49], GetEntranceNearToPos (GetSidePosition (GetEnemySide ())))
+  NewObject (GetEnemySide (), STR[49], GetEntranceNearToPos (GetSidePosition (GetEnemySide ())))
+  obj_21 = NewObject (GetEnemySide (), STR[49], GetEntranceNearToPos (GetSidePosition (GetEnemySide ())))
+  SetVeterancy (obj_21, 3)
+  NewObject (GetEnemySide (), STR[49], GetEntranceNearToPos (GetSidePosition (GetEnemySide ())))
+  NewObject (GetEnemySide (), STR[49], GetEntranceNearToPos (GetSidePosition (GetEnemySide ())))
+  NewObject (GetEnemySide (), STR[48], GetEntranceNearToPos (GetSidePosition (GetEnemySide ())))
+  NewObject (GetEnemySide (), STR[48], GetEntranceNearToPos (GetSidePosition (GetEnemySide ())))
+  NewObject (GetEnemySide (), STR[48], GetEntranceNearToPos (GetSidePosition (GetEnemySide ())))
+  NewObject (GetEnemySide (), STR[48], GetEntranceNearToPos (GetSidePosition (GetEnemySide ())))
+  NewObject (GetEnemySide (), STR[48], GetEntranceNearToPos (GetSidePosition (GetEnemySide ())))
+  obj_21 = NewObject (GetEnemySide (), STR[48], GetEntranceNearToPos (GetSidePosition (GetEnemySide ())))
+  SetVeterancy (obj_21, 3)
+  NewObject (GetEnemySide (), STR[48], GetEntranceNearToPos (GetSidePosition (GetEnemySide ())))
+  NewObject (GetEnemySide (), STR[48], GetEntranceNearToPos (GetSidePosition (GetEnemySide ())))
+  NewObject (GetEnemySide (), STR[48], GetEntranceNearToPos (GetSidePosition (GetEnemySide ())))
+  NewObject (GetEnemySide (), STR[48], GetEntranceNearToPos (GetSidePosition (GetEnemySide ())))
+  NewObject (GetEnemySide (), STR[48], GetEntranceNearToPos (GetSidePosition (GetEnemySide ())))
+  Message (42)
+  int_12 = int_12 + 1
+  if (int_12 == 3)
+    int_11 = PIPRelease () + 300
+  endif;
+endif;
+if ((ModelTick () == int_11) && (int_12 == 3))
+  Message (43)
+  int_11 = PIPRelease () + 1500
+  int_12 = int_12 + 1
+endif;
+if ((ModelTick () == int_11) && (int_12 == 4))
+  Message (44)
+  int_11 = PIPRelease () + 1500
+  int_12 = int_12 + 1
+endif;
+if ((ModelTick () == int_11) && (int_12 == 5))
+  int_12 = int_12 + 1
+  RadarAlert (GetEntranceNearToPos (GetSidePosition (GetEnemySide ())))
+  obj_21 = NewObject (GetPlayerSide (), STR[25], GetEntranceNearToPos (GetSidePosition (GetEnemySide ())))
+  SetVeterancy (obj_21, 2)
+  obj_21 = NewObject (GetPlayerSide (), STR[25], GetEntranceNearToPos (GetSidePosition (GetEnemySide ())))
+  SetVeterancy (obj_21, 1)
+  obj_13 = NewObject (GetPlayerSide (), STR[22], GetEntranceNearToPos (GetSidePosition (GetEnemySide ())))
+  SetVeterancy (obj_13, 2)
+  obj_14 = NewObject (GetPlayerSide (), STR[22], GetEntranceNearToPos (GetSidePosition (GetEnemySide ())))
+  SetVeterancy (obj_14, 2)
+  obj_21 = NewObjectInAPC (GetPlayerSide (), STR[124], obj_13)
+  SetVeterancy (obj_21, 3)
+  NewObjectInAPC (GetPlayerSide (), STR[124], obj_13)
+  SetVeterancy (obj_21, 2)
+  obj_21 = NewObjectInAPC (GetPlayerSide (), STR[124], obj_13)
+  SetVeterancy (obj_21, 2)
+  NewObjectInAPC (GetPlayerSide (), STR[126], obj_14)
+  SetVeterancy (obj_21, 3)
+  obj_21 = NewObjectInAPC (GetPlayerSide (), STR[126], obj_14)
+  SetVeterancy (obj_21, 2)
+  obj_21 = NewObjectInAPC (GetPlayerSide (), STR[126], obj_14)
+  SetVeterancy (obj_21, 2)
+  NewObjectInAPC (GetPlayerSide (), STR[125], obj_13)
+  NewObjectInAPC (GetPlayerSide (), STR[125], obj_13)
+  NewObjectInAPC (GetPlayerSide (), STR[125], obj_14)
+  NewObject (GetPlayerSide (), STR[23], GetEntranceNearToPos (GetSidePosition (GetEnemySide ())))
+  NewObject (GetPlayerSide (), STR[23], GetEntranceNearToPos (GetSidePosition (GetEnemySide ())))
+  obj_21 = NewObject (GetPlayerSide (), STR[21], GetEntranceNearToPos (GetSidePosition (GetEnemySide ())))
+  SetVeterancy (obj_21, 2)
+  obj_21 = NewObject (GetPlayerSide (), STR[21], GetEntranceNearToPos (GetSidePosition (GetEnemySide ())))
+  SetVeterancy (obj_21, 2)
+  obj_21 = NewObject (GetPlayerSide (), STR[24], GetEntranceNearToPos (GetSidePosition (GetEnemySide ())))
+  SetVeterancy (obj_21, 3)
+  int_19 = TRUE
+  int_20 = PIPRelease ()
+endif;
+if ((ModelTick () == int_20 + 25) && (int_19 == TRUE))
+  PIPCameraTrackObject (obj_13)
+  Message (45)
+endif;
+if ((ModelTick () == int_20 + 250) && (int_19 == TRUE))
+  PIPRelease ()
+endif;
+if (int_12 >= 3)
+  if ((int_16 == FALSE) && (SideObjectCount (GetEnemySide (), STR[49]) == 0) && (SideObjectCount (GetEnemySide (), STR[48]) == 0))
+    MissionOutcome (TRUE)
+    Message (47)
+    int_15 = PIPRelease () + 200
+    int_16 = TRUE
+  endif;
+endif;
+if ((ModelTick () == int_15) && (int_16 == TRUE))
+  Message (74)
+endif;

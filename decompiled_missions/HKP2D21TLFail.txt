@@ -1,0 +1,7 @@
+// File: HKP2D21TLFail.tok
+// Size: 98 bytes, segments: 45, vars: 40
+
+if (ModelTick () == 0)
+  AddSideCash (GetEnemySide (), 7500)
+  SetReinforcements (GetEnemySide (), 150)
+endif;

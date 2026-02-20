@@ -1,0 +1,193 @@
+// File: ORJump_reb.tok
+// Size: 2873 bytes, segments: 307, vars: 49
+
+int (v0)
+int (v1)
+int (v2)
+int (v3)
+int (v4)
+int (v5)
+pos (v6)
+pos (v7)
+pos (v8)
+obj (v9)
+int (v10)
+int (v11)
+obj (v12)
+obj (v13)
+obj (v14)
+obj (v15)
+int (v16)
+obj (v17)
+obj (v18)
+obj (v19)
+int (v20)
+if (ModelTick () == 0)
+  pos_7 = GetUnusedBasePoint ()
+  pos_6 = GetSidePosition (GetPlayerSide ())
+  pos_8 = GetSidePosition (GetEnemySide ())
+  int_1 = CreateSide ()
+  int_2 = CreateSide ()
+  int_3 = CreateSide ()
+  int_4 = CreateSide ()
+  int_5 = CreateSide ()
+  int_0 = GetPlayerSide ()
+  SideEnemyTo (int_0, int_1)
+  SideEnemyTo (int_1, int_0)
+  SideEnemyTo (int_0, int_2)
+  SideEnemyTo (int_2, int_0)
+  SideEnemyTo (int_0, int_3)
+  SideEnemyTo (int_3, int_0)
+  SideEnemyTo (int_0, int_4)
+  SideEnemyTo (int_4, int_0)
+  SideEnemyTo (int_0, int_5)
+  SideEnemyTo (int_5, int_0)
+  AddSideCash (GetEnemySide (), 5000)
+  NewObjectOffsetOrientation (GetPlayerSide (), STR[54], pos_7, 5, 5, 0)
+  NewObjectOffsetOrientation (GetPlayerSide (), STR[54], pos_7, 5, Neg (5), 0)
+  NewObjectOffsetOrientation (GetPlayerSide (), STR[53], pos_7, Neg (5), 5, 0)
+  NewObjectOffsetOrientation (GetPlayerSide (), STR[53], pos_7, Neg (5), Neg (5), 0)
+  NewObjectOffsetOrientation (GetPlayerSide (), STR[53], pos_7, 0, 5, 0)
+  NewObject (GetPlayerSide (), STR[100], pos_7)
+  NewObjectOffsetOrientation (GetPlayerSide (), STR[101], pos_7, Neg (2), 5, 2)
+  NewObjectOffsetOrientation (GetPlayerSide (), STR[102], pos_7, Neg (7), 0, 1)
+  NewObjectOffsetOrientation (GetPlayerSide (), STR[102], pos_7, 5, 0, 3)
+  NewObjectOffsetOrientation (GetPlayerSide (), STR[28], pos_7, 0, Neg (5), 0)
+  RadarAlert (pos_7)
+  int_20 = 1
+  AddSideCash (GetPlayerSide (), 5000)
+endif;
+if (ModelTick () == 50)
+  DisableUI ()
+  FreezeGame ()
+  CameraStore ()
+  CameraPanToPoint (pos_7, 100)
+endif;
+if (ModelTick () == 150)
+  Message (21)
+  CameraStartRotate (2, 1)
+endif;
+if (ModelTick () == 330)
+  CameraStopRotate ()
+  CameraRestore (100)
+endif;
+if (ModelTick () == 430)
+  UnFreezeGame ()
+  EnableUI ()
+endif;
+if ((ModelTick () == 800) && (int_20 == 1))
+  Message (12)
+  int_20 = 2
+endif;
+if ((ModelTick () == 1200) && (int_20 == 2))
+  Message (35)
+  int_20 = 3
+endif;
+if ((ModelTick () == 3000) && (int_20 == 3))
+  int_20 = 4
+  RadarAlert (GetEntrancePoint (GetEnemySide ()))
+  obj_17 = NewObject (int_4, STR[39], GetEntrancePoint (GetEnemySide ()))
+  obj_18 = NewObject (int_4, STR[39], GetEntrancePoint (GetEnemySide ()))
+  obj_19 = NewObject (int_4, STR[39], GetEntrancePoint (GetEnemySide ()))
+  SideAIMove (int_4, pos_7)
+endif;
+if ((SideNearToPoint (int_4, pos_7) == TRUE) && (int_16 == FALSE))
+  int_16 = TRUE
+  ObjectDeploy (obj_17)
+  ObjectDeploy (obj_18)
+  ObjectDeploy (obj_19)
+  SideAIAggressive (int_4)
+endif;
+if ((ModelTick () == 3025) && (int_20 == 4))
+  PIPCameraTrackObject (obj_18)
+  PIPCameraZoomTo (0, 20)
+  Message (17)
+endif;
+if ((ModelTick () == 3205) && (int_20 == 4))
+  PIPRelease ()
+endif;
+if ((int_20 == 4) && (SideUnitCount (int_4) > 0) && (ModelTick () < 3250))
+  RemoveShroud (GetSidePosition (int_4), 12)
+endif;
+if ((ModelTick () == 5000) && (int_20 == 4))
+  Message (16)
+  int_20 = 5
+  SideAIExitMap (int_4)
+endif;
+if ((ModelTick () == 7000) && (int_20 == 5))
+  int_20 = 6
+  RadarAlert (GetEntrancePoint (int_0))
+  NewObject (int_1, STR[0], GetEntrancePoint (int_0))
+  NewObject (int_1, STR[0], GetEntrancePoint (int_0))
+  NewObject (int_1, STR[0], GetEntrancePoint (int_0))
+  NewObject (int_1, STR[1], GetEntrancePoint (int_0))
+  NewObject (int_1, STR[1], GetEntrancePoint (int_0))
+  obj_13 = NewObject (int_1, STR[1], GetEntrancePoint (int_0))
+  NewObject (int_1, STR[1], GetEntrancePoint (int_0))
+  NewObject (int_1, STR[1], GetEntrancePoint (int_0))
+  NewObject (int_1, STR[3], GetEntrancePoint (int_0))
+  NewObject (int_1, STR[3], GetEntrancePoint (int_0))
+  NewObject (int_1, STR[3], GetEntrancePoint (int_0))
+  NewObject (int_1, STR[3], GetEntrancePoint (int_0))
+  SideAIMove (int_1, pos_7)
+endif;
+if ((ModelTick () == 7025) && (int_20 == 6))
+  PIPCameraTrackObject (obj_13)
+  Message (16)
+endif;
+if ((ModelTick () == 7205) && (int_20 == 6))
+  PIPRelease ()
+endif;
+if ((int_20 == 6) && (SideUnitCount (int_1) > 0) && (ModelTick () < 7250))
+  RemoveShroud (GetSidePosition (int_1), 12)
+endif;
+if ((SideNearToPoint (int_1, pos_7) == TRUE) && (int_20 == 6))
+  Message (29)
+  SideAIAggressive (int_1)
+  int_20 = 7
+endif;
+if ((SideUnitCount (int_1) < 1) && (ModelTick () >= 9000) && (int_20 == 7))
+  int_20 = 8
+  RadarAlert (pos_8)
+  NewObjectOffsetOrientation (int_2, STR[27], pos_8, Neg (5), Neg (10), 2)
+  NewObjectOffsetOrientation (int_2, STR[27], pos_8, 5, Neg (10), 2)
+  obj_14 = NewObject (int_2, STR[29], pos_8)
+  NewObject (int_2, STR[29], pos_8)
+  NewObject (int_2, STR[29], pos_8)
+  SideAIMove (int_2, pos_6)
+  int_10 = PIPRelease ()
+endif;
+if ((ModelTick () == int_10 + 25) && (int_20 == 8))
+  PIPCameraTrackObject (obj_14)
+  Message (16)
+endif;
+if ((ModelTick () == int_10 + 205) && (int_20 == 8))
+  PIPRelease ()
+endif;
+if ((int_20 == 8) && (SideUnitCount (int_2) > 0) && (ModelTick () < int_10 + 250))
+  RemoveShroud (GetSidePosition (int_2), 12)
+endif;
+if ((SideNearToPoint (int_2, pos_6) == TRUE) && (int_20 == 8))
+  Message (60)
+  SideAIAggressive (int_2)
+  int_20 = 9
+endif;
+if ((SideUnitCount (int_2) < 1) && (ModelTick () >= 10000) && (int_20 == 9))
+  int_20 = 10
+  NewObjectOffsetOrientation (int_3, STR[27], pos_8, 5, 5, 0)
+  NewObjectOffsetOrientation (int_3, STR[27], pos_8, 5, Neg (5), 0)
+  obj_15 = NewObject (int_3, STR[26], pos_8)
+  NewObject (int_3, STR[26], pos_8)
+  NewObject (int_3, STR[26], pos_8)
+  SideAIAggressive (int_3)
+endif;
+if ((ModelTick () == int_11 + 25) && (int_20 == 10))
+  PIPCameraTrackObject (obj_15)
+  Message (16)
+endif;
+if ((ModelTick () == int_11 + 205) && (int_20 == 10))
+  PIPRelease ()
+endif;
+if ((int_20 == 10) && (SideUnitCount (int_3) > 0) && (ModelTick () < int_11 + 250))
+  RemoveShroud (GetSidePosition (int_3), 12)
+endif;

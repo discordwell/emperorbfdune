@@ -1,0 +1,6 @@
+// File: ORP2D5SMFail.tok
+// Size: 88 bytes, segments: 49, vars: 45
+
+if (ModelTick () == 0)
+  AddSideCash (GetEnemySide (), 5000)
+endif;

@@ -1,0 +1,144 @@
+// File: ATP1D4FR.tok
+// Size: 2192 bytes, segments: 270, vars: 41
+
+int (v0)
+int (v1)
+int (v2)
+int (v3)
+int (v4)
+int (v5)
+int (v6)
+int (v7)
+int (v8)
+pos (v9)
+int (v10)
+int (v11)
+obj (v12)
+int (v13)
+obj (v14)
+int (v15)
+if (ModelTick () == 0)
+  int_0 = CreateSide ()
+  int_1 = CreateSide ()
+  SetSideColor (int_1, 1)
+  SideFriendTo (int_0, GetPlayerSide ())
+  SideFriendTo (GetPlayerSide (), int_0)
+  Message (79)
+  pos_9 = GetSideBasePoint (GetPlayerSide ())
+  int_10 = 3500
+endif;
+if (ModelTick () == int_10)
+  NewObject (int_0, STR[55], GetNeutralEntrancePoint ())
+  NewObject (int_0, STR[53], GetNeutralEntrancePoint ())
+  NewObject (int_0, STR[55], GetNeutralEntrancePoint ())
+  NewObject (int_0, STR[53], GetNeutralEntrancePoint ())
+  NewObject (int_0, STR[55], GetNeutralEntrancePoint ())
+  obj_12 = NewObject (int_0, STR[55], GetNeutralEntrancePoint ())
+  NewObject (int_0, STR[53], GetNeutralEntrancePoint ())
+  RadarAlert (GetSidePosition (int_0))
+  SideAIMove (int_0, GetSideBasePoint (GetPlayerSide ()))
+  int_13 = TRUE
+endif;
+if ((ModelTick () == int_10 + 25) && (int_13 == TRUE))
+  PIPCameraTrackObject (obj_12)
+  Message (80)
+endif;
+if ((int_13 == TRUE) && (SideUnitCount (int_0) > 0) && (ModelTick () >= int_10 + 25) && (ModelTick () <= int_10 + 250))
+  RemoveShroud (GetSidePosition (int_0), 10)
+endif;
+if ((ModelTick () == int_10 + 250) && (int_13 == TRUE))
+  PIPRelease ()
+endif;
+if ((SideUnitCount (int_0) == 0) && (ModelTick () > int_10) && (int_2 == FALSE))
+  Message (83)
+  int_2 = TRUE
+  int_6 = PIPRelease () + 1500
+endif;
+if ((SideNearToSideBase (int_0, GetPlayerSide ()) == TRUE) && (int_2 == FALSE))
+  SideChangeSide (int_0, GetPlayerSide ())
+  int_2 = TRUE
+  Message (81)
+  RadarAlert (GetSidePosition (GetPlayerSide ()))
+  int_6 = PIPRelease () + 800
+endif;
+if ((int_2 == TRUE) && (ModelTick () == int_6) && (int_3 == FALSE))
+  NewObject (int_0, STR[55], GetNeutralEntrancePoint ())
+  NewObject (int_0, STR[53], GetNeutralEntrancePoint ())
+  NewObject (int_0, STR[55], GetNeutralEntrancePoint ())
+  NewObject (int_0, STR[53], GetNeutralEntrancePoint ())
+  obj_14 = NewObject (int_0, STR[55], GetNeutralEntrancePoint ())
+  NewObject (int_0, STR[53], GetNeutralEntrancePoint ())
+  NewObject (int_0, STR[55], GetNeutralEntrancePoint ())
+  NewObject (int_0, STR[53], GetNeutralEntrancePoint ())
+  NewObject (int_0, STR[55], GetNeutralEntrancePoint ())
+  int_6 = PIPRelease ()
+  SideAIMove (int_0, GetSidePosition (GetPlayerSide ()))
+  RadarAlert (GetSidePosition (int_0))
+  int_3 = TRUE
+  PIPCameraTrackObject (obj_14)
+endif;
+if ((ModelTick () == int_6 + 25) && (int_3 == TRUE))
+  Message (82)
+endif;
+if ((ModelTick () == int_6 + 200) && (int_3 == TRUE))
+  PIPRelease ()
+endif;
+if ((int_3 == TRUE) && (ModelTick () == int_6 + 230) && (int_4 == FALSE))
+  NewObject (int_1, STR[14], GetNeutralEntrancePoint ())
+  obj_12 = NewObject (int_1, STR[14], GetNeutralEntrancePoint ())
+  NewObject (int_1, STR[14], GetNeutralEntrancePoint ())
+  NewObject (int_1, STR[14], GetNeutralEntrancePoint ())
+  SideEnemyTo (int_0, int_1)
+  SideEnemyTo (int_1, int_0)
+  SideEnemyTo (GetPlayerSide (), int_1)
+  int_4 = TRUE
+  SideAIAggressiveTowards (int_1, int_0)
+endif;
+if ((ModelTick () == int_6 + 255) && (int_4 == TRUE))
+  PIPCameraTrackObject (obj_12)
+  Message (83)
+endif;
+if ((ModelTick () == int_6 + 480) && (int_4 == TRUE))
+  PIPRelease ()
+endif;
+if ((int_4 == TRUE) && (SideUnitCount (int_1) > 0) && (ModelTick () <= int_6 + 480))
+  RemoveShroud (GetSidePosition (int_1), 12)
+endif;
+if ((EventSideAttacksSide (GetPlayerSide (), int_1) == TRUE) && (int_7 == FALSE))
+  int_7 = TRUE
+  Message (84)
+  SideEnemyTo (int_1, GetPlayerSide ())
+endif;
+if ((SideUnitCount (int_1) == 0) && (int_4 == TRUE) && (int_8 == FALSE))
+  int_8 = TRUE
+  MissionOutcome (TRUE)
+  if (int_11 == FALSE)
+    if (int_7 == TRUE)
+      Message (85)
+    else;
+      Message (86)
+    endif;
+  else;
+    Message (27)
+  endif;
+endif;
+if ((SideNearToSideBase (int_0, GetPlayerSide ()) == TRUE) && (int_5 == FALSE) && (int_3 == TRUE))
+  RadarAlert (GetSidePosition (int_0))
+  Message (87)
+  int_5 = TRUE
+  SideEnemyTo (int_1, GetPlayerSide ())
+  SideAIStop (int_0)
+  int_15 = PIPRelease ()
+endif;
+if ((int_5 == TRUE) && (ModelTick () == int_15 + 100))
+  SideChangeSide (int_0, GetPlayerSide ())
+endif;
+if ((int_3 == TRUE) && (int_5 == FALSE))
+  if (SideUnitCount (int_0) == 0)
+    Message (83)
+    SideEnemyTo (int_1, GetPlayerSide ())
+    SideAIAggressive (int_1)
+    int_5 = TRUE
+    int_11 = TRUE
+  endif;
+endif;

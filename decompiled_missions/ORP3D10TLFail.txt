@@ -1,0 +1,6 @@
+// File: ORP3D10TLFail.tok
+// Size: 90 bytes, segments: 50, vars: 46
+
+if (ModelTick () == 0)
+  AddSideCash (GetEnemySide (), 10000)
+endif;

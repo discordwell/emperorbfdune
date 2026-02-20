@@ -1,0 +1,6 @@
+// File: HKP1D17SAFail.tok
+// Size: 85 bytes, segments: 45, vars: 41
+
+if (ModelTick () == 0)
+  AddSideCash (GetEnemySide (), 10000)
+endif;

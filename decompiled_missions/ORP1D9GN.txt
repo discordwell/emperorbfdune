@@ -1,0 +1,171 @@
+// File: ORP1D9GN.tok
+// Size: 2480 bytes, segments: 314, vars: 51
+
+pos (v0)
+int (v1)
+int (v2)
+int (v3)
+int (v4)
+int (v5)
+int (v6)
+int (v7)
+int (v8)
+obj (v9)
+int (v10)
+int (v11)
+obj (v12)
+obj (v13)
+int (v14)
+int (v15)
+if (ModelTick () == 0)
+  int_3 = CreateSide ()
+  int_4 = CreateSide ()
+  pos_0 = GetUnusedBasePoint ()
+  int_1 = GetPlayerSide ()
+  int_2 = GetEnemySide ()
+  SideEnemyTo (int_1, int_2)
+  SideEnemyTo (int_2, int_1)
+  NewObject (int_1, STR[22], pos_0)
+  NewObject (int_1, STR[20], pos_0)
+  NewObject (int_1, STR[17], pos_0)
+  NewObject (int_1, STR[20], pos_0)
+  NewObject (int_1, STR[18], pos_0)
+  NewObject (int_1, STR[18], pos_0)
+  NewObject (int_1, STR[11], pos_0)
+  SideEnemyTo (int_3, int_1)
+  SideEnemyTo (int_1, int_3)
+  SideEnemyTo (int_4, int_1)
+  SideEnemyTo (int_1, int_4)
+  int_5 = 1
+endif;
+if (ModelTick () == 80)
+  DisableUI ()
+  FreezeGame ()
+  CameraPanToPoint (pos_0, 100)
+endif;
+if (ModelTick () == 180)
+  Message (121)
+  CameraStartRotate (2, 1)
+endif;
+if (ModelTick () == 360)
+  CameraStopRotate ()
+  CameraPanToPoint (GetSidePosition (GetPlayerSide ()), 100)
+endif;
+if (ModelTick () == 460)
+  UnFreezeGame ()
+  EnableUI ()
+endif;
+if ((ModelTick () == 800) && (int_5 == 1))
+  int_5 = 2
+endif;
+if ((ModelTick () == 1500) && (int_5 == 2))
+  int_5 = 3
+  Message (68)
+endif;
+if ((ModelTick () == 2500) && (int_5 == 3))
+  int_5 = 4
+endif;
+if ((ModelTick () == 3500) && (int_5 == 4))
+  int_5 = 5
+  NewObject (int_3, STR[55], GetNeutralEntrancePoint ())
+  NewObject (int_3, STR[53], GetNeutralEntrancePoint ())
+  NewObject (int_3, STR[53], GetNeutralEntrancePoint ())
+  NewObject (int_3, STR[55], GetNeutralEntrancePoint ())
+  obj_9 = NewObject (int_3, STR[54], GetNeutralEntrancePoint ())
+  SetVeterancy (obj_9, 3)
+  obj_9 = NewObject (int_3, STR[56], GetNeutralEntrancePoint ())
+  SetVeterancy (obj_9, 2)
+  obj_9 = NewObject (int_3, STR[56], GetNeutralEntrancePoint ())
+  SetVeterancy (obj_9, 2)
+  obj_9 = NewObject (int_3, STR[53], GetNeutralEntrancePoint ())
+  SetVeterancy (obj_9, 1)
+  obj_12 = NewObject (int_3, STR[55], GetNeutralEntrancePoint ())
+  NewObject (int_3, STR[53], GetNeutralEntrancePoint ())
+  NewObject (int_3, STR[53], GetNeutralEntrancePoint ())
+  obj_9 = NewObject (int_3, STR[53], GetNeutralEntrancePoint ())
+  SetVeterancy (obj_9, 2)
+  NewObject (int_3, STR[53], GetNeutralEntrancePoint ())
+  NewObject (int_3, STR[56], GetNeutralEntrancePoint ())
+  NewObject (int_3, STR[54], GetNeutralEntrancePoint ())
+  NewObject (int_3, STR[56], GetNeutralEntrancePoint ())
+  RadarAlert (GetNeutralEntrancePoint ())
+  RemoveShroud (GetNeutralEntrancePoint (), 12)
+  SideAIMove (int_3, pos_0)
+  SideAIEncounterAttack (int_3)
+  int_10 = PIPRelease ()
+endif;
+if ((ModelTick () == int_10 + 25) && (int_5 == 5))
+  Message (98)
+endif;
+if ((int_5 == 5) && (SideUnitCount (int_3) > 0))
+  RemoveShroud (GetSidePosition (int_3), 12)
+endif;
+if (((SideNearToPoint (int_3, pos_0) == TRUE) || (EventSideAttacksSide (int_3, GetPlayerSide ()) == TRUE)) && (int_5 == 5))
+  int_5 = 6
+  SideAIStop (int_3)
+  SideAIAggressive (int_3)
+  Message (1)
+  RadarAlert (GetSidePosition (int_3))
+  RemoveShroud (GetSidePosition (int_3), 12)
+endif;
+if ((ModelTick () == 8000) && (int_5 == 6))
+  int_5 = 7
+  NewObject (int_4, STR[123], GetNeutralEntrancePoint ())
+  NewObject (int_4, STR[123], GetNeutralEntrancePoint ())
+  NewObject (int_4, STR[124], GetNeutralEntrancePoint ())
+  NewObject (int_4, STR[124], GetNeutralEntrancePoint ())
+  NewObject (int_4, STR[124], GetNeutralEntrancePoint ())
+  NewObject (int_4, STR[124], GetNeutralEntrancePoint ())
+  NewObject (int_4, STR[123], GetNeutralEntrancePoint ())
+  NewObject (int_4, STR[126], GetNeutralEntrancePoint ())
+  NewObject (int_4, STR[126], GetNeutralEntrancePoint ())
+  NewObject (int_4, STR[126], GetNeutralEntrancePoint ())
+  obj_13 = NewObject (int_4, STR[124], GetNeutralEntrancePoint ())
+  NewObject (int_4, STR[124], GetNeutralEntrancePoint ())
+  NewObject (int_4, STR[124], GetNeutralEntrancePoint ())
+  NewObject (int_4, STR[21], GetNeutralEntrancePoint ())
+  NewObject (int_4, STR[24], GetNeutralEntrancePoint ())
+  NewObject (int_4, STR[24], GetNeutralEntrancePoint ())
+  NewObject (int_4, STR[21], GetNeutralEntrancePoint ())
+  NewObject (int_4, STR[21], GetNeutralEntrancePoint ())
+  NewObject (int_4, STR[25], GetNeutralEntrancePoint ())
+  NewObject (int_4, STR[25], GetNeutralEntrancePoint ())
+  RadarAlert (GetNeutralEntrancePoint ())
+  RemoveShroud (GetNeutralEntrancePoint (), 12)
+  SideAIMove (int_4, pos_0)
+  SideAIEncounterAttack (int_4)
+  int_11 = PIPRelease ()
+endif;
+if ((ModelTick () == int_11 + 25) && (int_5 == 7))
+  Message (98)
+endif;
+if ((int_5 >= 7) && (SideUnitCount (int_4) > 0))
+  RemoveShroud (GetSidePosition (int_4), 12)
+endif;
+if (((SideNearToPoint (int_4, pos_0)) || (EventSideAttacksSide (int_4, GetPlayerSide ()))) && (int_5 == 7))
+  int_5 = 8
+  SideAIStop (int_4)
+  SideAIAggressive (int_4)
+  Message (3)
+  RadarAlert (GetSidePosition (int_4))
+  RemoveShroud (GetSidePosition (int_4), 12)
+endif;
+if ((SideUnitCount (int_3) < 1) && (ModelTick () > 3501) && (int_6 == FALSE))
+  int_6 = TRUE
+  Message (27)
+  if (int_5 == 5)
+    int_5 = 6
+  endif;
+endif;
+if ((SideUnitCount (int_4) == 2) && (ModelTick () > 6001) && (int_7 == FALSE))
+  int_7 = TRUE
+  SideAIExitMap (int_4)
+  Message (63)
+  if ((int_5 == 6) || (int_5 == 7))
+    int_5 = 8
+  endif;
+endif;
+if ((int_7 == TRUE) && (int_6 == TRUE) && (int_8 == FALSE) && (SideUnitCount (int_4) == 0))
+  int_8 = TRUE
+  Message (73)
+endif;

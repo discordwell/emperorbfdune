@@ -1,0 +1,90 @@
+// File: ATP1M11OR.tok
+// Size: 1275 bytes, segments: 193, vars: 41
+
+pos (v0)
+pos (v1)
+obj (v2)
+int (v3)
+int (v4)
+int (v5)
+int (v6)
+int (v7)
+int (v8)
+obj (v9)
+obj (v10)
+int (v11)
+int (v12)
+int (v13)
+if (ModelTick () == 0)
+  int_5 = CreateSide ()
+  int_6 = CreateSide ()
+  pos_0 = GetNeutralEntrancePoint ()
+  pos_1 = GetEntrancePoint (GetEnemySide ())
+  SideEnemyTo (int_6, GetPlayerSide ())
+  SideEnemyTo (GetPlayerSide (), int_6)
+  int_3 = 4000
+  Message (69)
+endif;
+if (ModelTick () == int_3)
+  obj_2 = NewObject (int_5, STR[67], pos_0)
+  ObjectToolTip (obj_2, 69)
+  SetThreatLevel (STR[67], 100)
+  SideAIMove (int_5, pos_1)
+  PIPCameraTrackObject (obj_2)
+  int_11 = TRUE
+endif;
+if ((ModelTick () == int_3 + 25) && (int_11 == TRUE))
+  Message (70)
+endif;
+if ((ModelTick () == int_3 + 250) && (int_11 == TRUE))
+  PIPRelease ()
+endif;
+if ((int_11 == TRUE) && (ObjectValid (obj_2) == TRUE))
+  RemoveShroud (GetObjectPosition (obj_2), 12)
+endif;
+if ((int_8 == FALSE) && (SideNearToPoint (int_5, pos_1) == TRUE) && (int_7 == FALSE))
+  Message (79)
+  SideAIExitMap (int_5)
+  MissionOutcome (FALSE)
+  int_8 = TRUE
+  int_7 = TRUE
+endif;
+if ((int_7 == FALSE) && (ObjectNearToSide (obj_2, GetPlayerSide ()) == TRUE))
+  int_7 = TRUE
+  Message (72)
+  ObjectChangeSide (obj_2, GetPlayerSide ())
+  int_4 = PIPRelease () + 3500
+  MissionOutcome (TRUE)
+endif;
+if ((ModelTick () == int_4) && (int_7 == TRUE))
+  obj_10 = NewObject (int_6, STR[27], GetNeutralEntrancePoint ())
+  SetVeterancy (obj_10, 3)
+  obj_10 = NewObject (int_6, STR[27], GetNeutralEntrancePoint ())
+  SetVeterancy (obj_10, 3)
+  obj_9 = NewObject (int_6, STR[27], GetNeutralEntrancePoint ())
+  SetVeterancy (obj_9, 3)
+  obj_10 = NewObject (int_6, STR[27], GetNeutralEntrancePoint ())
+  SetVeterancy (obj_10, 3)
+  obj_10 = NewObject (int_6, STR[27], GetNeutralEntrancePoint ())
+  SetVeterancy (obj_10, 3)
+  SideAIAggressive (int_6)
+  int_12 = TRUE
+  PIPCameraTrackObject (obj_9)
+endif;
+if ((ModelTick () == int_4 + 25) && (int_7 == TRUE))
+  Message (28)
+endif;
+if ((ModelTick () == int_4 + 250) && (int_7 == TRUE))
+  PIPRelease ()
+endif;
+if ((ModelTick () < int_4 + 275) && (ObjectValid (obj_9) == TRUE))
+  RemoveShroud (GetObjectPosition (obj_9), 12)
+endif;
+if (EventObjectDestroyed (obj_2) == TRUE)
+  Message (82)
+  MissionOutcome (FALSE)
+endif;
+if ((int_12 == TRUE) && (SideUnitCount (int_6) == 0) && (int_13 == FALSE))
+  int_13 = TRUE
+  Message (27)
+endif;

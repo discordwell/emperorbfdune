@@ -1,0 +1,153 @@
+// File: ATP2D7FR.tok
+// Size: 2238 bytes, segments: 293, vars: 44
+
+int (v0)
+int (v1)
+int (v2)
+int (v3)
+int (v4)
+int (v5)
+pos (v6)
+obj (v7)
+obj (v8)
+obj (v9)
+obj (v10)
+obj (v11)
+obj (v12)
+obj (v13)
+obj (v14)
+obj (v15)
+obj (v16)
+obj (v17)
+obj (v18)
+obj (v19)
+int (v20)
+int (v21)
+int (v22)
+int (v23)
+int (v24)
+int (v25)
+if (ModelTick () == 0)
+  int_0 = CreateSide ()
+  pos_6 = GetUnusedBasePoint ()
+  obj_7 = NewObject (int_0, STR[55], pos_6)
+  obj_8 = NewObject (int_0, STR[53], pos_6)
+  obj_9 = NewObject (int_0, STR[55], pos_6)
+  obj_10 = NewObject (int_0, STR[53], pos_6)
+  obj_11 = NewObject (int_0, STR[55], pos_6)
+  obj_12 = NewObject (int_0, STR[53], pos_6)
+  obj_13 = NewObject (int_0, STR[55], pos_6)
+  obj_14 = NewObject (int_0, STR[53], pos_6)
+  obj_15 = NewObject (int_0, STR[55], pos_6)
+  obj_16 = NewObject (int_0, STR[53], pos_6)
+  obj_17 = NewObject (int_0, STR[55], pos_6)
+  obj_18 = NewObject (int_0, STR[54], pos_6)
+  obj_19 = NewObject (int_0, STR[56], pos_6)
+  Message (20)
+  SideFriendTo (int_0, GetPlayerSide ())
+  SideFriendTo (GetPlayerSide (), int_0)
+  SideEnemyTo (GetEnemySide (), int_0)
+  SideEnemyTo (int_0, GetEnemySide ())
+  int_23 = TRUE
+  SideAIControl (int_0)
+endif;
+if (ModelTick () == 500)
+  Message (21)
+endif;
+if ((ModelTick () == 125) && (int_23 == TRUE))
+  PIPCameraTrackObject (obj_12)
+endif;
+if ((ModelTick () == 205) && (int_23 == TRUE))
+endif;
+if ((ModelTick () == 365) && (int_23 == TRUE))
+  PIPRelease ()
+endif;
+if ((int_23 == TRUE) && (SideUnitCount (int_0) > 0))
+  RemoveShroud (GetSidePosition (int_0), 20)
+endif;
+if ((SideNearToSide (GetPlayerSide (), int_0) == TRUE) && (int_1 == FALSE))
+  Message (23)
+  SideAIMove (int_0, GetSideBasePoint (GetPlayerSide ()))
+  int_1 = TRUE
+endif;
+if ((SideNearToSideBase (int_0, GetPlayerSide ()) == TRUE) && (int_1 == TRUE) && (int_4 == FALSE))
+  int_4 = TRUE
+  int_5 = PIPRelease ()
+endif;
+if ((ModelTick () == int_5 + 500) && (int_3 == TRUE))
+  Message (24)
+endif;
+if ((SideNearToSideBase (int_0, GetPlayerSide ()) == TRUE) && (ModelTick () >= int_5 + 750) && (int_20 == FALSE))
+  Message (25)
+  int_20 = TRUE
+endif;
+if ((SideNearToSideBase (int_0, GetPlayerSide ()) == TRUE) && (ModelTick () >= int_5 + 2000) && (int_21 == FALSE))
+  Message (26)
+  int_21 = TRUE
+  SideEnemyTo (int_0, GetPlayerSide ())
+  SideEnemyTo (GetPlayerSide (), int_0)
+  SideAIAggressiveTowards (int_0, GetPlayerSide ())
+  int_24 = PIPRelease ()
+endif;
+if ((ModelTick () == int_24 + 25) && (int_21 == TRUE))
+  if ((ObjectValid (obj_7) == TRUE) && (int_25 == FALSE))
+    int_25 = TRUE
+    PIPCameraTrackObject (obj_7)
+  endif;
+  if ((ObjectValid (obj_8) == TRUE) && (int_25 == FALSE))
+    int_25 = TRUE
+    PIPCameraTrackObject (obj_8)
+  endif;
+  if ((ObjectValid (obj_9) == TRUE) && (int_25 == FALSE))
+    int_25 = TRUE
+    PIPCameraTrackObject (obj_9)
+  endif;
+  if ((ObjectValid (obj_10) == TRUE) && (int_25 == FALSE))
+    int_25 = TRUE
+    PIPCameraTrackObject (obj_10)
+  endif;
+  if ((ObjectValid (obj_11) == TRUE) && (int_25 == FALSE))
+    int_25 = TRUE
+    PIPCameraTrackObject (obj_11)
+  endif;
+  if ((ObjectValid (obj_12) == TRUE) && (int_25 == FALSE))
+    int_25 = TRUE
+    PIPCameraTrackObject (obj_12)
+  endif;
+  if ((ObjectValid (obj_13) == TRUE) && (int_25 == FALSE))
+    int_25 = TRUE
+    PIPCameraTrackObject (obj_13)
+  endif;
+  if ((ObjectValid (obj_14) == TRUE) && (int_25 == FALSE))
+    int_25 = TRUE
+    PIPCameraTrackObject (obj_14)
+  endif;
+  if ((ObjectValid (obj_15) == TRUE) && (int_25 == FALSE))
+    int_25 = TRUE
+    PIPCameraTrackObject (obj_15)
+  endif;
+  if ((ObjectValid (obj_16) == TRUE) && (int_25 == FALSE))
+    int_25 = TRUE
+    PIPCameraTrackObject (obj_16)
+  endif;
+  if ((ObjectValid (obj_17) == TRUE) && (int_25 == FALSE))
+    int_25 = TRUE
+    PIPCameraTrackObject (obj_17)
+  endif;
+  if ((ObjectValid (obj_18) == TRUE) && (int_25 == FALSE))
+    int_25 = TRUE
+    PIPCameraTrackObject (obj_18)
+  endif;
+  if ((ObjectValid (obj_19) == TRUE) && (int_25 == FALSE))
+    int_25 = TRUE
+    PIPCameraTrackObject (obj_19)
+  endif;
+endif;
+if ((ModelTick () == int_24 + 300) && (int_21 == TRUE))
+  PIPRelease ()
+endif;
+if ((SideUnitCount (int_0) == 0) && (int_22 == FALSE))
+  MissionOutcome (TRUE)
+  Message (4)
+  int_22 = TRUE
+endif;

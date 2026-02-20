@@ -1,0 +1,156 @@
+// File: HKP1D6SA.tok
+// Size: 2178 bytes, segments: 255, vars: 43
+
+int (v0)
+int (v1)
+int (v2)
+pos (v3)
+pos (v4)
+int (v5)
+int (v6)
+int (v7)
+int (v8)
+int (v9)
+int (v10)
+int (v11)
+int (v12)
+int (v13)
+int (v14)
+int (v15)
+obj (v16)
+obj (v17)
+int (v18)
+if (ModelTick () == 0)
+  int_0 = CreateSide ()
+  int_1 = CreateSide ()
+  SetSideColor (int_1, 2)
+  SideEnemyTo (int_0, int_1)
+  SideEnemyTo (int_1, int_0)
+  SideFriendTo (int_0, GetPlayerSide ())
+  SideFriendTo (GetPlayerSide (), int_0)
+  SideEnemyTo (GetPlayerSide (), int_1)
+  int_2 = 3500
+  Message (106)
+endif;
+if (ModelTick () == int_2)
+  pos_3 = GetNeutralEntrancePoint ()
+  pos_4 = GetNeutralExitPoint (pos_3)
+  NewObject (int_1, STR[63], pos_3)
+  NewObject (int_1, STR[63], pos_3)
+  NewObject (int_1, STR[63], pos_3)
+  SetThreatLevel (STR[63], 20)
+  NewObject (int_1, STR[27], pos_3)
+  NewObject (int_1, STR[26], pos_3)
+  NewObject (int_1, STR[26], pos_3)
+  NewObject (int_1, STR[26], pos_3)
+  NewObject (int_1, STR[64], pos_3)
+  NewObject (int_1, STR[64], pos_3)
+  NewObject (int_1, STR[0], pos_3)
+  NewObject (int_1, STR[0], pos_3)
+  NewObject (int_1, STR[0], pos_3)
+  obj_16 = NewObject (int_1, STR[0], pos_3)
+  NewObject (int_1, STR[0], pos_3)
+  NewObject (int_1, STR[0], pos_3)
+  NewObject (int_1, STR[0], pos_3)
+  NewObject (int_1, STR[0], pos_3)
+  NewObject (int_1, STR[1], pos_3)
+  NewObject (int_1, STR[1], pos_3)
+  NewObject (int_1, STR[1], pos_3)
+  NewObject (int_1, STR[1], pos_3)
+  NewObject (int_1, STR[64], pos_3)
+  SetThreatLevel (STR[64], 20)
+  SideAIMove (int_1, pos_4)
+  SideAIEncounterAttack (int_1)
+  RadarAlert (GetSidePosition (int_1))
+  int_14 = TRUE
+  int_5 = TRUE
+  PIPCameraTrackObject (obj_16)
+  int_18 = PIPRelease () + 2000
+endif;
+if ((ModelTick () == int_2 + 25) && (int_14 == TRUE))
+  Message (107)
+endif;
+if ((ModelTick () == int_2 + 250) && (int_14 == TRUE))
+  PIPRelease ()
+endif;
+if ((int_14 == TRUE) && (SideUnitCount (int_1) > 0))
+  RemoveShroud (GetSidePosition (int_1), 12)
+endif;
+if (ModelTick () == int_2 + 500)
+  int_15 = TRUE
+  NewObject (int_0, STR[50], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_0, STR[50], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_0, STR[50], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_0, STR[50], GetEntrancePoint (GetPlayerSide ()))
+  obj_17 = NewObject (int_0, STR[50], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_0, STR[50], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_0, STR[51], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_0, STR[51], GetEntrancePoint (GetPlayerSide ()))
+  SideAIAggressive (int_0)
+  PIPCameraTrackObject (obj_17)
+endif;
+if ((ModelTick () == int_2 + 525) && (int_15 == TRUE))
+  Message (108)
+endif;
+if ((ModelTick () == int_2 + 700) && (int_15 == TRUE))
+  PIPRelease ()
+endif;
+if ((ModelTick () == int_2 + 880) && (SideUnitCount (int_1) > 0))
+  Message (109)
+endif;
+if ((ModelTick () == int_2 + 1065) && (SideUnitCount (int_1) > 0))
+  int_6 = PIPRelease () + 100
+endif;
+if ((int_5 == TRUE) && (ModelTick () == int_6) && (SideUnitCount (int_1) > 0))
+  RadarAlert (GetSidePosition (int_1))
+  int_6 = PIPRelease () + 200
+endif;
+if ((int_7 == FALSE) && (EventSideAttacksSide (GetPlayerSide (), int_1) == TRUE))
+  Message (110)
+  SideEnemyTo (int_1, GetPlayerSide ())
+  int_7 = TRUE
+endif;
+if ((int_5 == TRUE) && (SideUnitCount (int_1) == 0))
+  int_5 = FALSE
+  int_8 = TRUE
+  if (SideUnitCount (int_0) > 0)
+    if (int_7 == TRUE)
+      MissionOutcome (TRUE)
+      int_9 = PIPRelease () + 1500
+      Message (111)
+      int_10 = TRUE
+      int_13 = PIPRelease () + 300
+    else;
+      Message (112)
+      int_11 = TRUE
+      int_12 = PIPRelease () + 300
+    endif;
+    SideAIExitMap (int_0)
+  else;
+    Message (113)
+  endif;
+endif;
+if (int_5 == TRUE)
+  if (SideNearToPoint (int_1, pos_4) == TRUE)
+    SideAIExitMap (int_1)
+    SideAIExitMap (int_0)
+    MissionOutcome (FALSE)
+    Message (114)
+    int_5 = FALSE
+    int_11 = TRUE
+    int_12 = PIPRelease () + 300
+  endif;
+endif;
+if ((ModelTick () == int_12) && (int_11 == TRUE))
+  Message (7)
+endif;
+if ((ModelTick () == int_13) && (int_10 == TRUE))
+  Message (5)
+endif;
+if ((ModelTick () == int_18) && (int_14 == TRUE) && (int_5 == TRUE))
+  if ((int_8 == FALSE) && (int_11 == FALSE) && (int_10 == FALSE))
+    SideAIMove (int_1, pos_4)
+    SideAIEncounterAttack (int_1)
+    int_18 = PIPRelease () + 2000
+  endif;
+endif;

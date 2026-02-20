@@ -1,0 +1,111 @@
+// File: ORP2M4OR.tok
+// Size: 1501 bytes, segments: 200, vars: 51
+
+int (v0)
+int (v1)
+int (v2)
+int (v3)
+obj (v4)
+pos (v5)
+pos (v6)
+int (v7)
+int (v8)
+int (v9)
+int (v10)
+int (v11)
+int (v12)
+int (v13)
+int (v14)
+int (v15)
+int (v16)
+if (ModelTick () == 0)
+  int_0 = CreateSide ()
+  pos_5 = GetNeutralEntrancePoint ()
+  int_7 = 5000
+  Message (111)
+endif;
+if (ModelTick () == int_7)
+  obj_4 = NewObject (int_0, STR[67], pos_5)
+  pos_6 = GetEntrancePoint (GetEnemySide ())
+  SideAIMove (int_0, pos_6)
+  SideAIEncounterIgnore (int_0)
+  RadarAlert (pos_5)
+  PIPCameraTrackObject (obj_4)
+  RemoveShroud (pos_5, 15)
+endif;
+if (ModelTick () == int_7 + 25)
+  Message (123)
+  RadarAlert (GetObjectPosition (obj_4))
+endif;
+if (ModelTick () == int_7 + 190)
+  RadarAlert (GetObjectPosition (obj_4))
+  PIPRelease ()
+endif;
+if ((SideNearToSide (int_0, GetPlayerSide ()) == TRUE) && (ModelTick () >= (int_7 + 150)))
+  if (int_1 == FALSE)
+    ObjectChangeSide (obj_4, GetPlayerSide ())
+    Message (124)
+    int_1 = TRUE
+    MissionOutcome (TRUE)
+  endif;
+endif;
+if (int_1 == TRUE)
+  if ((ObjectNearToSideBase (obj_4, GetPlayerSide ()) == TRUE) && (int_10 == FALSE))
+    int_10 = TRUE
+    int_11 = PIPRelease () + 500
+  endif;
+endif;
+if ((ModelTick () == int_11) && (int_10 == TRUE))
+  Message (125)
+  int_8 = TRUE
+  SideFriendTo (int_0, GetPlayerSide ())
+  ObjectChangeSide (obj_4, int_0)
+  pos_6 = GetSidePosition (GetEnemySide ())
+  SideAIMove (int_0, pos_6)
+endif;
+if ((ObjectNearToSideBase (obj_4, GetEnemySide ()) == TRUE) && (ObjectVisibleToSide (obj_4, GetEnemySide ()) == TRUE) && (int_1 == TRUE))
+  if ((int_2 == FALSE) && (int_8 == TRUE))
+    int_15 = TRUE
+    RadarAlert (GetObjectPosition (obj_4))
+    int_2 = TRUE
+    int_13 = PIPRelease ()
+  endif;
+endif;
+if ((int_2 == TRUE) && (int_1 == TRUE))
+  if (SideAIDone (int_0) == TRUE)
+    ObjectDetonate (obj_4, STR[84])
+    int_12 = TRUE
+    Message (126)
+  endif;
+endif;
+if ((ModelTick () == int_13 + 25) && (int_2 == TRUE))
+  PIPCameraTrackObject (obj_4)
+endif;
+if ((int_16 == FALSE) && ((int_12 == TRUE) || (ModelTick () == int_13 + 250)) && (int_2 == TRUE))
+  PIPRelease ()
+  int_16 = TRUE
+endif;
+if ((int_2 == TRUE) && (ObjectValid (obj_4) == TRUE))
+  RemoveShroud (GetObjectPosition (obj_4), 12)
+endif;
+if ((int_1 == FALSE) && (EventObjectDestroyed (obj_4) == TRUE) && (int_9 == FALSE))
+  MissionOutcome (FALSE)
+  int_9 = TRUE
+  Message (26)
+endif;
+if ((int_1 == TRUE) && (EventObjectDestroyed (obj_4) == TRUE) && (int_15 == FALSE))
+  MissionOutcome (FALSE)
+  int_15 = TRUE
+  Message (26)
+  if (int_2 == TRUE)
+    int_12 = TRUE
+  endif;
+endif;
+if ((int_1 == FALSE) && (ModelTick () > int_7))
+  if ((SideAIDone (int_0) == TRUE) && (int_9 == FALSE))
+    MissionOutcome (FALSE)
+    Message (127)
+    SideAIExitMap (int_0)
+    int_9 = TRUE
+  endif;
+endif;

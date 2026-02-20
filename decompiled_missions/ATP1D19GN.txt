@@ -1,0 +1,34 @@
+// File: ATP1D19GN.tok
+// Size: 436 bytes, segments: 87, vars: 42
+
+pos (v0)
+int (v1)
+int (v2)
+int (v3)
+int (v4)
+if (ModelTick () == 0)
+  int_1 = PIPRelease ()
+  int_4 = CreateSide ()
+  pos_0 = GetUnusedBasePoint ()
+  NewCrateUnit (pos_0, STR[25])
+  NewObject (int_4, STR[113], pos_0)
+  NewCrateUnit (pos_0, STR[25])
+  NewCrateUnit (pos_0, STR[25])
+  NewObject (int_4, STR[113], pos_0)
+  NewCrateCash (pos_0)
+  NewObject (int_4, STR[113], pos_0)
+  NewCrateCash (pos_0)
+  NewCrateCash (pos_0)
+  RadarAlert (pos_0)
+  Message (107)
+endif;
+if ((int_2 == FALSE) && (ModelTick () == int_1))
+  int_1 = PIPRelease () + 400
+  RadarAlert (pos_0)
+endif;
+if ((SideNearToPoint (GetPlayerSide (), pos_0)) && (int_2 == FALSE))
+  int_2 = TRUE
+  int_3 = PIPRelease ()
+endif;
+if ((ModelTick () == int_3 + 150) && (int_2 == TRUE))
+endif;

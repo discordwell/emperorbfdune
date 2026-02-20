@@ -1,0 +1,46 @@
+// File: ORP1D3SA.tok
+// Size: 647 bytes, segments: 111, vars: 50
+
+int (v0)
+int (v1)
+pos (v2)
+int (v3)
+int (v4)
+int (v5)
+obj (v6)
+if (ModelTick () == 0)
+  int_0 = CreateSide ()
+  pos_2 = GetNeutralEntrancePoint ()
+  int_1 = int_0 int_0 (1000)
+  int_1 = int_1 + 6000
+  SideEnemyTo (int_0, GetEnemySide ())
+  SideEnemyTo (GetEnemySide (), int_0)
+  Message (86)
+endif;
+if (ModelTick () == int_1)
+  NewObject (int_0, STR[50], pos_2)
+  NewObject (int_0, STR[50], pos_2)
+  obj_6 = NewObject (int_0, STR[50], pos_2)
+  NewObject (int_0, STR[50], pos_2)
+  NewObject (int_0, STR[51], pos_2)
+  RadarAlert (pos_2)
+  SideAIAggressive (int_0)
+  int_5 = TRUE
+endif;
+if ((ModelTick () == int_1 + 25) && (int_5 == TRUE))
+  Message (39)
+  PIPCameraTrackObject (obj_6)
+endif;
+if ((ModelTick () == int_1 + 300) && (int_5 == TRUE))
+  PIPRelease ()
+  int_1 = int_0 int_0 (1000) + int_1
+  int_1 = int_1 + 3500
+  int_4 = FALSE
+endif;
+if ((int_5 == TRUE) && (SideUnitCount (int_0) > 0) && (ModelTick () < int_1 + 290))
+  RemoveShroud (GetSidePosition (int_0), 12)
+endif;
+if ((EventSideAttacksSide (int_0, GetEnemySide ()) == TRUE) && (int_4 == FALSE))
+  Message (8)
+  int_4 = TRUE
+endif;

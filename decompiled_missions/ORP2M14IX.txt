@@ -1,0 +1,103 @@
+// File: ORP2M14IX.tok
+// Size: 1531 bytes, segments: 189, vars: 52
+
+int (v0)
+int (v1)
+int (v2)
+obj (v3)
+pos (v4)
+int (v5)
+int (v6)
+int (v7)
+int (v8)
+int (v9)
+obj (v10)
+int (v11)
+if (ModelTick () == 0)
+  int_0 = CreateSide ()
+  pos_4 = GetUnusedBasePoint ()
+  NewObject (int_0, STR[26], pos_4)
+  obj_10 = NewObjectOffsetOrientation (int_0, STR[108], pos_4, 1, Neg (5), 2)
+  NewObjectOffsetOrientation (int_0, STR[109], pos_4, Neg (3), 0, 3)
+  NewObjectOffsetOrientation (int_0, STR[109], pos_4, 4, 2, 1)
+  NewObject (GetEnemySide (), STR[24], GetSidePosition (GetEnemySide ()))
+  AddSideCash (GetEnemySide (), 5000)
+  NewObject (GetEnemySide (), STR[48], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[48], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[48], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[48], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[48], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[48], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[48], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[49], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[49], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[49], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[49], GetSidePosition (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[49], GetSidePosition (GetEnemySide ()))
+  NewObject (int_0, STR[47], pos_4)
+  NewObject (int_0, STR[46], pos_4)
+  NewObject (int_0, STR[47], pos_4)
+  NewObject (int_0, STR[47], pos_4)
+  NewObject (int_0, STR[46], pos_4)
+  NewObject (int_0, STR[46], pos_4)
+  NewObject (int_0, STR[9], pos_4)
+  NewObject (int_0, STR[9], pos_4)
+  NewObject (int_0, STR[9], pos_4)
+  SideFriendTo (int_0, GetPlayerSide ())
+  SideFriendTo (GetPlayerSide (), int_0)
+  CameraStore ()
+  CameraPanToPoint (pos_4, 100)
+  FreezeGame ()
+  DisableUI ()
+  RemoveShroud (pos_4, 12)
+endif;
+if (ModelTick () == 100)
+  Message (50)
+  CameraStartRotate (2, 1)
+endif;
+if (ModelTick () == 280)
+  CameraStopRotate ()
+  CameraRestore (100)
+endif;
+if (ModelTick () == 380)
+  UnFreezeGame ()
+  EnableUI ()
+endif;
+if ((GetSideSpice (int_0) >= 3000) && (int_1 == FALSE))
+  if ((int_6 < 5) && (int_5 == FALSE))
+    BuildObject (int_0, STR[46])
+    int_1 = TRUE
+    if (int_8 == FALSE)
+      Message (51)
+      int_8 = TRUE
+    endif;
+  endif;
+endif;
+if ((EventObjectConstructed (int_0, obj_3) == TRUE) && (int_2 == FALSE) && (ModelTick () > 100))
+  if (int_2 == FALSE)
+    ObjectChangeSide (obj_3, GetPlayerSide ())
+    Message (53)
+  endif;
+  int_1 = FALSE
+  int_6 = int_6 + 1
+endif;
+if ((GetSideSpice (int_0) >= 5000) && (int_7 == FALSE) && (int_6 == 5))
+  int_7 = TRUE
+  Message (54)
+  MissionOutcome (TRUE)
+  int_9 = PIPRelease ()
+endif;
+if ((ModelTick () == int_9 + 400) && (int_7 == TRUE))
+  Message (86)
+endif;
+if ((EventSideAttacksSide (GetPlayerSide (), int_0) == TRUE) && (int_2 == FALSE))
+  int_2 = TRUE
+  Message (52)
+  SideEnemyTo (GetPlayerSide (), int_0)
+  SideEnemyTo (int_0, GetPlayerSide ())
+  MissionOutcome (FALSE)
+endif;
+if ((EventObjectDestroyed (obj_10) == TRUE) && (int_11 == FALSE))
+  int_11 = TRUE
+  Message (112)
+endif;

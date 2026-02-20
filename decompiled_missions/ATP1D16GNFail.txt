@@ -1,0 +1,7 @@
+// File: ATP1D16GNFail.tok
+// Size: 91 bytes, segments: 43, vars: 38
+
+if (ModelTick () == 0)
+  Message (40)
+  AddSideCash (GetEnemySide (), 10000)
+endif;

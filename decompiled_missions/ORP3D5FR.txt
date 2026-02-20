@@ -1,0 +1,58 @@
+// File: ORP3D5FR.tok
+// Size: 782 bytes, segments: 129, vars: 50
+
+int (v0)
+pos (v1)
+int (v2)
+int (v3)
+int (v4)
+int (v5)
+int (v6)
+obj (v7)
+if (ModelTick () == 0)
+  int_4 = 1
+  SetReinforcements (GetEnemySide (), 150)
+  int_0 = CreateSide ()
+  pos_1 = GetEntrancePoint (GetEnemySide ())
+  Message (49)
+  SideEnemyTo (int_0, GetEnemySide ())
+  SideEnemyTo (GetEnemySide (), int_0)
+  int_2 = int_0 int_0 (1000)
+  int_2 = int_2 + 2000
+  SideAIAggressive (int_0)
+  MissionOutcome (TRUE)
+endif;
+if (ModelTick () == int_2)
+  int_4 = int_4 + 1
+  if (SideUnitCount (int_0) < 20)
+    NewObject (int_0, STR[55], pos_1)
+    NewObject (int_0, STR[53], pos_1)
+    NewObject (int_0, STR[55], pos_1)
+    NewObject (int_0, STR[53], pos_1)
+    obj_7 = NewObject (int_0, STR[55], pos_1)
+    NewObject (int_0, STR[54], pos_1)
+    NewObject (int_0, STR[55], pos_1)
+    NewObject (int_0, STR[54], pos_1)
+    NewObject (int_0, STR[55], pos_1)
+    NewObject (int_0, STR[54], pos_1)
+    Message (50)
+    RemoveShroud (pos_1, 15)
+    RadarAlert (pos_1)
+    int_6 = TRUE
+  endif;
+endif;
+if ((ModelTick () == int_2 + 25) && (int_6 == TRUE))
+  PIPCameraTrackObject (obj_7)
+endif;
+if ((ModelTick () == int_2 + 205) && (int_6 == TRUE))
+  PIPRelease ()
+  int_2 = (int_2 + int_0 int_0 (2500))
+  int_2 = int_2 + 1500
+endif;
+if ((int_6 == TRUE) && (SideUnitCount (int_0) > 0))
+  RemoveShroud (GetSidePosition (int_0), 20)
+endif;
+if ((int_4 == 6) && (int_5 == FALSE))
+  int_5 = TRUE
+  SetReinforcements (GetEnemySide (), 100)
+endif;

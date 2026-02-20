@@ -1,0 +1,220 @@
+// File: ATP1M9GN.tok
+// Size: 3049 bytes, segments: 362, vars: 48
+
+int (v0)
+int (v1)
+int (v2)
+int (v3)
+int (v4)
+int (v5)
+int (v6)
+int (v7)
+int (v8)
+int (v9)
+int (v10)
+int (v11)
+int (v12)
+int (v13)
+int (v14)
+int (v15)
+int (v16)
+int (v17)
+int (v18)
+int (v19)
+pos (v20)
+obj (v21)
+obj (v22)
+obj (v23)
+obj (v24)
+obj (v25)
+obj (v26)
+obj (v27)
+obj (v28)
+obj (v29)
+obj (v30)
+int (v31)
+int (v32)
+int (v33)
+int (v34)
+obj (v35)
+int (v36)
+if (ModelTick () == 0)
+  int_1 = GetPlayerSide ()
+  int_0 = GetEnemySide ()
+  int_3 = CreateSide ()
+  SetSideColor (int_3, 0)
+  int_2 = CreateSide ()
+  SetSideColor (int_2, 0)
+  int_10 = CreateSide ()
+  SetSideColor (int_10, 0)
+  int_12 = CreateSide ()
+  SetSideColor (int_12, 0)
+  SideEnemyTo (int_2, GetEnemySide ())
+  SideEnemyTo (GetEnemySide (), int_2)
+  SideEnemyTo (GetEnemySide (), int_3)
+  SideEnemyTo (int_3, GetEnemySide ())
+  SideEnemyTo (int_10, int_3)
+  SideEnemyTo (int_3, int_10)
+  SideEnemyTo (int_10, int_2)
+  SideEnemyTo (int_2, int_10)
+  SideFriendTo (int_2, GetPlayerSide ())
+  SideFriendTo (GetPlayerSide (), int_2)
+  SideFriendTo (int_3, GetPlayerSide ())
+  SideFriendTo (GetPlayerSide (), int_3)
+  pos_20 = GetUnusedBasePoint ()
+  NewObject (GetNeutralSide (), STR[113], pos_20)
+  obj_21 = NewObject (int_3, STR[6], pos_20)
+  NewObject (int_2, STR[124], pos_20)
+  obj_30 = NewObject (int_2, STR[124], pos_20)
+  ObjectSetHealth (obj_30, 400)
+  obj_30 = NewObject (int_2, STR[124], pos_20)
+  ObjectSetHealth (obj_30, 350)
+  obj_30 = NewObject (int_2, STR[124], pos_20)
+  ObjectSetHealth (obj_30, 500)
+  NewObject (int_2, STR[124], pos_20)
+  obj_30 = NewObject (int_2, STR[21], pos_20)
+  ObjectSetHealth (obj_30, 600)
+  obj_30 = NewObject (int_2, STR[21], pos_20)
+  ObjectSetHealth (obj_30, 1200)
+  SideAIControl (int_3)
+  SideAIControl (int_2)
+  Message (55)
+  SideEnemyTo (GetEnemySide (), int_3)
+  SideEnemyTo (GetEnemySide (), int_2)
+  SideFriendTo (int_12, GetPlayerSide ())
+endif;
+if (ModelTick () == 70)
+  FreezeGame ()
+  DisableUI ()
+  CameraPanToPoint (pos_20, 100)
+  RemoveShroud (pos_20, 10)
+endif;
+if (ModelTick () == 170)
+  CameraStartRotate (2, 1)
+endif;
+if (ModelTick () == 350)
+  CameraStopRotate ()
+  CameraPanToPoint (GetSidePosition (GetPlayerSide ()), 100)
+endif;
+if (ModelTick () == 450)
+  UnFreezeGame ()
+  EnableUI ()
+endif;
+if ((SideNearToSide (int_2, GetPlayerSide ()) == TRUE) && (int_4 == FALSE))
+  SideChangeSide (int_2, GetPlayerSide ())
+  Message (24)
+  int_4 = TRUE
+endif;
+if ((EventSideAttacksSide (GetEnemySide (), int_3) == TRUE) || (EventSideAttacksSide (int_0, int_2) == TRUE))
+  if ((int_7 == FALSE) && (int_5 == FALSE))
+    if (int_4 == FALSE)
+      SideAIGuardObject (int_2, obj_21)
+    endif;
+    Message (57)
+    int_7 = TRUE
+  endif;
+endif;
+if ((EventObjectDestroyed (obj_21) == TRUE) && (int_5 == FALSE))
+  Message (58)
+  int_5 = TRUE
+  MissionOutcome (FALSE)
+  int_33 = PIPRelease ()
+endif;
+if ((ModelTick () == int_33 + 200) && (int_5 == TRUE) && (int_19 == TRUE))
+  Message (70)
+endif;
+if ((ObjectNearToSide (obj_21, int_1) == TRUE) && (int_6 == FALSE))
+  ObjectChangeSide (obj_21, GetPlayerSide ())
+  Message (59)
+  int_6 = TRUE
+endif;
+if ((ObjectNearToSideBase (obj_21, GetPlayerSide ()) == TRUE) && (int_6 == TRUE) && (int_8 == FALSE))
+  Message (60)
+  MissionOutcome (TRUE)
+  int_8 = TRUE
+  int_13 = PIPRelease () + 700
+  int_14 = PIPRelease () + 400
+  int_15 = PIPRelease () + 200
+endif;
+if ((int_8 == TRUE) && (ModelTick () == int_13 + 200) && (int_19 == FALSE))
+  if (int_5 == FALSE)
+    Message (74)
+    int_19 = TRUE
+  endif;
+endif;
+if ((int_8 == TRUE) && (ModelTick () == int_15) && (int_17 == FALSE))
+  if (ObjectTypeVisibleToSide (STR[23], GetPlayerSide ()) == FALSE)
+  endif;
+  int_17 = TRUE
+endif;
+if ((int_17 == TRUE) && (ModelTick () == int_14) && (int_16 == FALSE))
+  PIPRelease ()
+  Message (11)
+  int_16 = TRUE
+endif;
+if ((ModelTick () == int_13) && (int_16 == TRUE) && (int_31 < 2))
+  if (int_9 == FALSE)
+    AirStrike (int_12, GetEntrancePoint (GetPlayerSide ()), GetEnemySide (), STR[35], STR[35])
+    SideFriendTo (int_12, GetPlayerSide ())
+    SideFriendTo (GetPlayerSide (), int_12)
+    int_9 = TRUE
+    int_31 = int_31 + 1
+    Message (11)
+  endif;
+endif;
+if (int_9 == TRUE)
+  if (AirStrikeDone (int_12) == TRUE)
+    Message (117)
+    SideAIExitMap (int_12)
+    int_13 = PIPRelease () + 500
+    int_9 = FALSE
+  endif;
+endif;
+if (int_34 == FALSE)
+  if (EventSideAttacksSide (int_12, GetEnemySide ()) == TRUE)
+    RadarAlert (GetSidePosition (int_12))
+    int_34 = TRUE
+    int_36 = PIPRelease () + 200
+  endif;
+endif;
+if ((ModelTick () == int_36) && (int_34 == TRUE))
+endif;
+if ((ModelTick () == 2000) && (int_4 == FALSE) && (int_5 == FALSE))
+  NewObject (int_10, STR[0], GetEntrancePoint (GetEnemySide ()))
+  NewObject (int_10, STR[0], GetEntrancePoint (GetEnemySide ()))
+  obj_22 = NewObject (int_10, STR[0], GetEntrancePoint (GetEnemySide ()))
+  NewObject (int_10, STR[0], GetEntrancePoint (GetEnemySide ()))
+  NewObject (int_10, STR[0], GetEntrancePoint (GetEnemySide ()))
+  NewObject (int_10, STR[1], GetEntrancePoint (GetEnemySide ()))
+  NewObject (int_10, STR[1], GetEntrancePoint (GetEnemySide ()))
+  NewObject (int_10, STR[0], GetEntrancePoint (GetEnemySide ()))
+  SideEnemyTo (GetPlayerSide (), int_10)
+  SideFriendTo (int_10, GetPlayerSide ())
+  SideAIMove (int_10, pos_20)
+  SideAIEncounterAttack (int_10)
+  RadarAlert (GetSidePosition (int_10))
+  RemoveShroud (GetSidePosition (int_10), 12)
+endif;
+if ((ModelTick () == 2025) && (int_8 == TRUE))
+  Message (28)
+endif;
+if ((ModelTick () == 2100) && (int_8 == TRUE))
+  RadarAlert (GetSidePosition (int_10))
+endif;
+if ((ModelTick () == 2200) && (int_8 == TRUE))
+  RadarAlert (GetSidePosition (int_10))
+endif;
+if ((ModelTick () == 2250) && (int_8 == TRUE))
+  RadarAlert (GetSidePosition (int_10))
+  SideEnemyTo (int_10, GetPlayerSide ())
+endif;
+if (int_11 == FALSE)
+  if ((SideVisibleToSide (int_10, int_3) == TRUE) || (SideVisibleToSide (int_10, int_2) == TRUE))
+    SideAIAggressiveTowards (int_10, int_3)
+    SideEnemyTo (int_10, GetPlayerSide ())
+    int_11 = TRUE
+  endif;
+endif;
+if ((int_11 == FALSE) && (EventSideAttacksSide (GetPlayerSide (), int_10) == TRUE))
+  SideEnemyTo (int_10, GetPlayerSide ())
+endif;

@@ -1,0 +1,54 @@
+// File: HKP1D18GN.tok
+// Size: 715 bytes, segments: 110, vars: 41
+
+pos (v0)
+int (v1)
+int (v2)
+int (v3)
+int (v4)
+int (v5)
+obj (v6)
+if (ModelTick () == 0)
+  int_1 = 400
+  pos_0 = GetUnusedBasePoint ()
+  int_5 = CreateSide ()
+  obj_6 = NewObject (int_5, STR[113], pos_0)
+  obj_6 = NewObject (int_5, STR[113], pos_0)
+  obj_6 = NewObject (int_5, STR[113], pos_0)
+  obj_6 = NewObject (int_5, STR[113], pos_0)
+  RadarAlert (pos_0)
+  Message (56)
+endif;
+if ((ObjectVisibleToSide (obj_6, GetPlayerSide ()) == TRUE) && (int_4 == FALSE))
+  int_4 = TRUE
+  NewCrateUnit (pos_0, STR[19])
+  NewCrateCash (pos_0)
+  NewCrateUnit (pos_0, STR[19])
+  NewCrateCash (pos_0)
+  NewCrateUnit (pos_0, STR[19])
+  NewCrateCash (pos_0)
+endif;
+if ((int_2 == FALSE) && (ModelTick () == int_1))
+  int_1 = PIPRelease () + 400
+  RadarAlert (pos_0)
+endif;
+if ((SideNearToPoint (GetPlayerSide (), pos_0)) && (int_2 == FALSE))
+  int_2 = TRUE
+  Message (5)
+  RemoveShroud (pos_0, 10)
+endif;
+if ((ModelTick () == 5000) && (int_4 == FALSE))
+  RemoveShroud (pos_0, 10)
+  int_3 = TRUE
+  PIPCameraLookAtPoint (pos_0)
+endif;
+if ((ModelTick () == 5100) && (int_2 == FALSE))
+  PIPCameraStartRotate (2, 1)
+  Message (5)
+endif;
+if ((ModelTick () == 5280) && (int_2 == FALSE))
+  PIPCameraStopRotate ()
+endif;
+if ((ModelTick () == 5380) && (int_2 == FALSE))
+  PIPRelease ()
+endif;

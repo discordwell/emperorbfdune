@@ -1,0 +1,6 @@
+// File: ORP2D4ORFail.tok
+// Size: 88 bytes, segments: 48, vars: 44
+
+if (ModelTick () == 0)
+  AddSideCash (GetEnemySide (), 10000)
+endif;

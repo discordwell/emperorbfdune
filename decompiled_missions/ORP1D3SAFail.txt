@@ -1,0 +1,6 @@
+// File: ORP1D3SAFail.tok
+// Size: 89 bytes, segments: 50, vars: 46
+
+if (ModelTick () == 0)
+  AddSideCash (GetEnemySide (), 5000)
+endif;

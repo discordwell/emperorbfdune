@@ -1,0 +1,120 @@
+// File: HKP3D8SA.tok
+// Size: 1771 bytes, segments: 193, vars: 42
+
+int (v0)
+int (v1)
+int (v2)
+int (v3)
+pos (v4)
+pos (v5)
+int (v6)
+int (v7)
+int (v8)
+int (v9)
+obj (v10)
+obj (v11)
+if (ModelTick () == 0)
+  int_0 = 6000
+  int_1 = 4000
+  int_2 = CreateSide ()
+  int_3 = CreateSide ()
+  pos_4 = GetEntrancePoint (GetPlayerSide ())
+  pos_5 = GetEntrancePoint (GetEnemySide ())
+  Message (10)
+  SideEnemyTo (int_3, GetPlayerSide ())
+  SideEnemyTo (GetPlayerSide (), int_3)
+  SideEnemyTo (int_2, int_3)
+  SideEnemyTo (int_3, int_2)
+  SideEnemyTo (int_2, GetEnemySide ())
+  SideEnemyTo (GetEnemySide (), int_2)
+  SideFriendTo (int_2, GetPlayerSide ())
+  SideFriendTo (GetPlayerSide (), int_2)
+  SideAIAggressive (int_2)
+endif;
+if ((ModelTick () == int_1) && (int_6 < 5))
+  NewObject (int_3, STR[49], pos_5)
+  NewObject (int_3, STR[49], pos_5)
+  NewObject (int_3, STR[49], pos_5)
+  NewObject (int_3, STR[49], pos_5)
+  NewObject (int_3, STR[49], pos_5)
+  NewObject (int_3, STR[49], pos_5)
+  NewObject (int_3, STR[49], pos_5)
+  obj_10 = NewObject (int_3, STR[48], pos_5)
+  NewObject (int_3, STR[48], pos_5)
+  NewObject (int_3, STR[48], pos_5)
+  NewObject (int_3, STR[48], pos_5)
+  NewObject (int_3, STR[48], pos_5)
+  NewObject (int_3, STR[48], pos_5)
+  NewObject (int_3, STR[48], pos_5)
+  NewObject (int_3, STR[48], pos_5)
+  NewObject (int_3, STR[48], pos_5)
+  NewObject (int_3, STR[48], pos_5)
+  NewObject (int_3, STR[48], pos_5)
+  NewObject (int_3, STR[48], pos_5)
+  NewObject (int_3, STR[48], pos_5)
+  RadarAlert (pos_5)
+  SideAIAggressive (int_3)
+  if (int_6 > 2)
+    NewObject (int_3, STR[49], pos_5)
+    NewObject (int_3, STR[49], pos_5)
+    NewObject (int_3, STR[48], pos_5)
+    NewObject (int_3, STR[48], pos_5)
+  endif;
+  if (int_6 > 4)
+    NewObject (int_3, STR[49], pos_5)
+    NewObject (int_3, STR[49], pos_5)
+    NewObject (int_3, STR[49], pos_5)
+    NewObject (int_3, STR[48], pos_5)
+    NewObject (int_3, STR[48], pos_5)
+    NewObject (int_3, STR[48], pos_5)
+  endif;
+  int_9 = TRUE
+endif;
+if ((ModelTick () == int_1 + 25) && (int_9 == TRUE) && (int_6 < 5))
+  PIPCameraTrackObject (obj_10)
+  Message (56)
+endif;
+if ((ModelTick () == int_1 + 205) && (int_9 == TRUE) && (int_6 < 5))
+  PIPRelease ()
+  if (int_6 < 4)
+    int_6 = int_6 + 1
+    int_1 = int_1 + 3000
+    int_1 = int_0 int_0 (2000) + int_1
+  endif;
+endif;
+if ((int_9 == TRUE) && (SideUnitCount (int_3) > 0) && (ModelTick () < int_1 + 250) && (ModelTick () > int_1))
+  RemoveShroud (GetSidePosition (int_3), 12)
+endif;
+if (ModelTick () == int_1 PIPRelease -1500)
+  Message (103)
+endif;
+if ((ModelTick () == int_1) && (SideUnitCount (int_2) < 15) && (int_7 < 4))
+  NewObject (int_2, STR[50], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_2, STR[50], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_2, STR[50], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_2, STR[50], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_2, STR[50], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_2, STR[50], GetEntrancePoint (GetPlayerSide ()))
+  obj_11 = NewObject (int_2, STR[50], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_2, STR[50], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_2, STR[51], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_2, STR[51], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_2, STR[51], GetEntrancePoint (GetPlayerSide ()))
+  int_8 = TRUE
+endif;
+if ((ModelTick () == int_1 PIPRelease + 25) && (int_8 == TRUE))
+  if (int_7 < 2)
+    PIPCameraTrackObject (obj_11)
+  endif;
+  Message (11)
+endif;
+if ((ModelTick () == int_1 PIPRelease + 205) && (int_8 == TRUE))
+  if (int_7 < 2)
+    PIPRelease ()
+  endif;
+  if (int_7 < 3)
+    int_7 = int_7 + 1
+    int_0 = int_1 PIPRelease + 3500
+    int_0 = int_1 PIPRelease + (Random (2000))
+  endif;
+endif;

@@ -1,0 +1,188 @@
+// File: HKjump_reb.tok
+// Size: 2749 bytes, segments: 310, vars: 50
+
+int (v0)
+int (v1)
+int (v2)
+int (v3)
+int (v4)
+int (v5)
+pos (v6)
+pos (v7)
+pos (v8)
+obj (v9)
+obj (v10)
+obj (v11)
+int (v12)
+obj (v13)
+obj (v14)
+obj (v15)
+obj (v16)
+int (v17)
+int (v18)
+if (ModelTick () == 0)
+  pos_7 = GetUnusedBasePoint ()
+  pos_6 = GetSidePosition (GetPlayerSide ())
+  pos_8 = GetSidePosition (GetEnemySide ())
+  int_1 = CreateSide ()
+  int_2 = CreateSide ()
+  int_3 = CreateSide ()
+  int_4 = CreateSide ()
+  int_5 = CreateSide ()
+  int_0 = GetPlayerSide ()
+  SideEnemyTo (int_0, int_1)
+  SideEnemyTo (int_1, int_0)
+  SideEnemyTo (int_0, int_2)
+  SideEnemyTo (int_2, int_0)
+  SideEnemyTo (int_0, int_3)
+  SideEnemyTo (int_3, int_0)
+  SideEnemyTo (int_0, int_4)
+  SideEnemyTo (int_4, int_0)
+  SideEnemyTo (int_0, int_5)
+  SideEnemyTo (int_5, int_0)
+  AddSideCash (GetEnemySide (), 10000)
+  obj_9 = NewObjectOffsetOrientation (GetPlayerSide (), STR[27], pos_7, 0, 10, 2)
+  NewObjectOffsetOrientation (GetPlayerSide (), STR[105], pos_7, 5, Neg (0), 0)
+  NewObjectOffsetOrientation (GetPlayerSide (), STR[106], pos_7, Neg (5), Neg (0), 0)
+  NewObjectOffsetOrientation (GetPlayerSide (), STR[105], pos_7, Neg (5), 10, 2)
+  NewObjectOffsetOrientation (GetPlayerSide (), STR[50], pos_7, 5, 5, 0)
+  NewObjectOffsetOrientation (GetPlayerSide (), STR[50], pos_7, 5, Neg (5), 0)
+  NewObjectOffsetOrientation (GetPlayerSide (), STR[50], pos_7, Neg (5), 5, 0)
+  NewObjectOffsetOrientation (GetPlayerSide (), STR[50], pos_7, Neg (5), Neg (5), 0)
+  NewObjectOffsetOrientation (GetPlayerSide (), STR[51], pos_7, 0, 5, 0)
+  RadarAlert (pos_7)
+  RemoveShroud (pos_7, 20)
+  int_12 = 1
+endif;
+if (ModelTick () == 80)
+  DisableUI ()
+  FreezeGame ()
+  CameraStore ()
+  CameraPanToPoint (pos_7, 100)
+endif;
+if (ModelTick () == 180)
+  Message (92)
+  CameraStartRotate (2, 1)
+endif;
+if (ModelTick () == 360)
+  CameraStopRotate ()
+  CameraRestore (100)
+endif;
+if (ModelTick () == 460)
+  UnFreezeGame ()
+  EnableUI ()
+endif;
+if ((ModelTick () == 800) && (int_12 == 1))
+  Message (81)
+  int_12 = 2
+endif;
+if ((ModelTick () == 1200) && (int_12 == 2))
+  Message (105)
+  int_12 = 3
+endif;
+if ((ModelTick () == 3000) && (int_12 == 3))
+  int_12 = 4
+  RadarAlert (GetEntrancePoint (GetEnemySide ()))
+  NewObject (int_4, STR[31], GetEntrancePoint (GetEnemySide ()))
+  obj_13 = NewObject (int_4, STR[31], GetEntrancePoint (GetEnemySide ()))
+  NewObject (int_4, STR[31], GetEntrancePoint (GetEnemySide ()))
+  SideAIAggressive (int_4)
+endif;
+if ((ModelTick () == 3025) && (int_12 == 4))
+  PIPCameraTrackObject (obj_13)
+  PIPCameraZoomTo (0, 20)
+  Message (86)
+endif;
+if ((ModelTick () == 3250) && (int_12 == 4))
+  PIPRelease ()
+endif;
+if ((int_12 == 4) && (SideUnitCount (int_4) > 0))
+  RemoveShroud (GetSidePosition (int_4), 20)
+endif;
+if ((ModelTick () == 5000) && (int_12 == 4))
+  Message (85)
+  int_12 = 5
+  SideAIStop (int_4)
+  SideAIExitMap (int_4)
+endif;
+if ((ModelTick () == 7000) && (int_12 == 5))
+  int_12 = 6
+  RadarAlert (GetEntrancePoint (int_0))
+  NewObject (int_1, STR[119], GetEntrancePoint (int_0))
+  NewObject (int_1, STR[119], GetEntrancePoint (int_0))
+  NewObject (int_1, STR[119], GetEntrancePoint (int_0))
+  NewObject (int_1, STR[119], GetEntrancePoint (int_0))
+  obj_14 = NewObject (int_1, STR[119], GetEntrancePoint (int_0))
+  NewObject (int_1, STR[121], GetEntrancePoint (int_0))
+  NewObject (int_1, STR[121], GetEntrancePoint (int_0))
+  NewObject (int_1, STR[121], GetEntrancePoint (int_0))
+  NewObject (int_1, STR[121], GetEntrancePoint (int_0))
+  NewObject (int_1, STR[121], GetEntrancePoint (int_0))
+  SideAIMove (int_1, pos_7)
+endif;
+if ((ModelTick () == 7025) && (int_12 == 6))
+  PIPCameraTrackObject (obj_14)
+  Message (85)
+endif;
+if ((ModelTick () == 7250) && (int_12 == 6))
+  PIPRelease ()
+endif;
+if ((int_12 == 6) && (SideUnitCount (int_1) > 0))
+  RemoveShroud (GetSidePosition (int_1), 20)
+endif;
+if ((SideNearToPoint (int_1, pos_7) == TRUE) && (int_12 == 6))
+  Message (99)
+  SideAIAggressive (int_1)
+  int_12 = 7
+endif;
+if ((SideUnitCount (int_1) < 1) && (ModelTick () >= 9000) && (int_12 == 7))
+  int_12 = 8
+  RadarAlert (pos_8)
+  NewObjectOffsetOrientation (int_2, STR[19], pos_8, Neg (5), Neg (10), 2)
+  NewObjectOffsetOrientation (int_2, STR[19], pos_8, 5, Neg (10), 2)
+  NewObject (int_2, STR[19], pos_8)
+  obj_15 = NewObject (int_2, STR[19], pos_8)
+  NewObject (int_2, STR[19], pos_8)
+  SideAIMove (int_2, pos_6)
+  int_17 = PIPRelease ()
+endif;
+if ((ModelTick () == int_17 + 25) && (int_12 == 8))
+  PIPCameraTrackObject (obj_15)
+  Message (85)
+endif;
+if ((ModelTick () == int_17 + 250) && (int_12 == 8))
+  PIPRelease ()
+endif;
+if ((int_12 == 8) && (SideUnitCount (int_2) > 0))
+  RemoveShroud (GetSidePosition (int_2), 20)
+endif;
+if ((SideNearToPoint (int_2, pos_6) == TRUE) && (int_12 == 8))
+  Message (4)
+  SideAIAggressive (int_2)
+  int_12 = 9
+endif;
+if ((SideUnitCount (int_2) < 1) && (ModelTick () >= 10000) && (int_12 == 9))
+  int_12 = 10
+  NewObjectOffsetOrientation (int_3, STR[14], pos_8, 5, 5, 0)
+  NewObjectOffsetOrientation (int_3, STR[14], pos_8, 5, Neg (5), 0)
+  NewObjectOffsetOrientation (int_3, STR[14], pos_8, Neg (5), 5, 0)
+  NewObject (int_3, STR[14], pos_8)
+  NewObject (int_3, STR[14], pos_8)
+  obj_16 = NewObject (int_3, STR[14], pos_8)
+  NewObject (int_3, STR[18], pos_8)
+  NewObject (int_3, STR[18], pos_8)
+  NewObject (int_3, STR[17], pos_8)
+  NewObject (int_3, STR[17], pos_8)
+  SideAIAggressive (int_3)
+  int_18 = PIPRelease ()
+endif;
+if ((ModelTick () == int_18 + 25) && (int_12 == 10))
+  PIPCameraTrackObject (obj_16)
+  Message (85)
+endif;
+if ((ModelTick () == int_18 + 250) && (int_12 == 10))
+  PIPRelease ()
+endif;
+if ((int_12 == 10) && (SideUnitCount (int_3) > 0))
+  RemoveShroud (GetSidePosition (int_3), 20)
+endif;

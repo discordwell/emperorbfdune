@@ -1,0 +1,105 @@
+// File: ORP3M5FR.tok
+// Size: 1692 bytes, segments: 196, vars: 51
+
+int (v0)
+int (v1)
+int (v2)
+int (v3)
+pos (v4)
+int (v5)
+int (v6)
+if (ModelTick () == 0)
+  int_0 = CreateSide ()
+  pos_4 = GetUnusedBasePoint ()
+  NewObject (int_0, STR[100], pos_4)
+  NewObjectOffsetOrientation (int_0, STR[102], pos_4, 3, 0, 3)
+  NewObjectOffsetOrientation (int_0, STR[102], pos_4, Neg (5), 0, 1)
+  NewObjectOffsetOrientation (int_0, STR[101], pos_4, 5, 4, 3)
+  NewObjectOffsetOrientation (int_0, STR[101], pos_4, Neg (5), 6, 1)
+  NewObjectOffsetOrientation (int_0, STR[102], pos_4, 6, Neg (5), 3)
+  NewObjectOffsetOrientation (int_0, STR[102], pos_4, Neg (5), Neg (4), 1)
+  NewObjectOffsetOrientation (int_0, STR[101], pos_4, 4, Neg (9), 3)
+  NewObjectOffsetOrientation (int_0, STR[101], pos_4, Neg (5), Neg (8), 1)
+  NewObjectOffsetOrientation (int_0, STR[28], pos_4, 0, 5, 2)
+  NewObject (int_0, STR[55], pos_4)
+  NewObject (int_0, STR[55], pos_4)
+  NewObject (int_0, STR[55], pos_4)
+  NewObject (int_0, STR[55], pos_4)
+  NewObjectOffsetOrientation (int_0, STR[53], pos_4, 6, Neg (5), 3)
+  NewObjectOffsetOrientation (int_0, STR[53], pos_4, Neg (5), Neg (4), 1)
+  NewObjectOffsetOrientation (int_0, STR[53], pos_4, Neg (5), Neg (4), 1)
+  NewObjectOffsetOrientation (int_0, STR[53], pos_4, 4, Neg (9), 3)
+  NewObjectOffsetOrientation (int_0, STR[54], pos_4, Neg (5), Neg (8), 1)
+  NewObjectOffsetOrientation (int_0, STR[54], pos_4, 0, 5, 2)
+  NewObjectOffsetOrientation (int_0, STR[54], pos_4, 0, 0, 0)
+  SideAIControl (int_0)
+  RemoveShroud (GetSidePosition (int_0), 20)
+  CameraPanToPoint (pos_4, 100)
+  FreezeGame ()
+  DisableUI ()
+endif;
+if (ModelTick () == 100)
+  Message (14)
+  CameraStartRotate (2, 2)
+endif;
+if (ModelTick () == 280)
+  CameraStopRotate ()
+  CameraPanToPoint (GetSidePosition (GetPlayerSide ()), 100)
+endif;
+if (ModelTick () == 380)
+  UnFreezeGame ()
+  EnableUI ()
+endif;
+if (SideVisibleToSide (GetPlayerSide (), int_0))
+  if (int_1 == FALSE)
+    int_3 = PIPRelease ()
+    int_1 = TRUE
+  endif;
+endif;
+if ((ModelTick () == int_3 + 5) && (int_1 == TRUE))
+  PIPCameraLookAtPoint (pos_4)
+endif;
+if ((ModelTick () == int_3 + 25) && (int_1 == TRUE))
+  Message (15)
+  PIPCameraStartRotate (2, 1)
+endif;
+if ((ModelTick () == int_3 + 185) && (int_1 == TRUE))
+  PIPCameraStopRotate ()
+endif;
+if ((ModelTick () == int_3 + 190) && (int_1 == TRUE))
+  PIPRelease ()
+endif;
+if ((ModelTick () == int_3 + 110) && (int_1 == TRUE) && (int_2 == FALSE))
+  Message (16)
+endif;
+if ((ModelTick () == int_3 + 240) && (int_1 == TRUE) && (int_2 == FALSE))
+  Message (17)
+endif;
+if ((ModelTick () == int_3 + 3200) && (int_1 == TRUE) && (int_2 == FALSE))
+  Message (84)
+endif;
+if ((ModelTick () == int_3 + 500) && (int_1 == TRUE) && (int_2 == FALSE))
+  Message (18)
+  MissionOutcome (TRUE)
+endif;
+if ((ModelTick () == int_3 + 2200) && (int_1 == TRUE) && (int_2 == FALSE))
+  SideEnemyTo (int_0, GetPlayerSide ())
+endif;
+if ((EventSideAttacksSide (int_0, GetPlayerSide ()) == TRUE) && (int_5 == FALSE))
+  int_5 = TRUE
+  SideEnemyTo (int_0, GetPlayerSide ())
+  SideEnemyTo (GetPlayerSide (), int_0)
+endif;
+if ((ModelTick () == int_6 + 4400) && (int_5 == TRUE))
+  Message (80)
+endif;
+if (EventSideAttacksSide (GetPlayerSide (), int_0) == TRUE)
+  if (int_2 == FALSE)
+    int_2 = TRUE
+    Message (19)
+    MissionOutcome (FALSE)
+    SideEnemyTo (int_0, GetPlayerSide ())
+    SideEnemyTo (GetPlayerSide (), int_0)
+    int_6 = PIPRelease ()
+  endif;
+endif;

@@ -1,0 +1,82 @@
+// File: HKP2D12SM.tok
+// Size: 1166 bytes, segments: 153, vars: 41
+
+int (v0)
+pos (v1)
+int (v2)
+int (v3)
+int (v4)
+obj (v5)
+int (v6)
+int (v7)
+int (v8)
+int (v9)
+int (v10)
+if (ModelTick () == 0)
+  int_0 = CreateSide ()
+  pos_1 = GetNeutralEntrancePoint ()
+  int_9 = 3500
+  Message (79)
+endif;
+if ((ModelTick () == int_9) && (int_2 == FALSE))
+  obj_5 = NewObject (int_0, STR[74], pos_1)
+  SideAIMove (int_0, GetSidePosition (GetPlayerSide ()))
+  int_2 = TRUE
+  RemoveShroud (pos_1, 10)
+  int_7 = PIPRelease ()
+endif;
+if ((ModelTick () == int_7 + 25) && (int_2 == TRUE))
+  PIPCameraTrackObject (obj_5)
+  Message (80)
+endif;
+if ((ModelTick () == int_7 + 250) && (int_2 == TRUE))
+  PIPRelease ()
+endif;
+if ((int_2 == TRUE) && (SideUnitCount (int_0) > 0))
+  RemoveShroud (GetSidePosition (int_0), 20)
+endif;
+if (int_2 == TRUE)
+  if (SideAIDone (int_0) == TRUE)
+    RadarAlert (GetSidePosition (int_0))
+    int_8 = PIPRelease ()
+    int_4 = TRUE
+  endif;
+endif;
+if ((ModelTick () == int_8 + 25) && (int_4 == TRUE))
+  PIPCameraTrackObject (obj_5)
+  PIPCameraZoomTo (50, 20)
+endif;
+if ((ModelTick () == int_8 + 200) && (int_4 == TRUE))
+  ObjectDetonate (obj_5, STR[84])
+  Message (81)
+endif;
+if ((ModelTick () == int_8 + 250) && (int_4 == TRUE))
+  PIPRelease ()
+endif;
+if (((EventSideAttacksSide (GetPlayerSide (), int_0) == TRUE) || (SideNearToSide (GetPlayerSide (), int_0) == TRUE)) && (int_3 == FALSE))
+  int_3 = TRUE
+  Message (82)
+  RadarAlert (GetSidePosition (int_0))
+  int_6 = PIPRelease () + 800
+endif;
+if ((ModelTick () == int_6) && (int_3 == TRUE) && (ObjectValid (obj_5) == TRUE))
+  RadarAlert (GetSidePosition (int_0))
+  Message (83)
+  SideEnemyTo (int_0, GetPlayerSide ())
+endif;
+if ((EventObjectDestroyed (obj_5) == TRUE) && (int_4 == FALSE))
+  Message (84)
+  RadarAlert (GetSidePosition (int_0))
+endif;
+if (int_2 == TRUE)
+  if ((ObjectGetHealth (obj_5) < 300) && (int_4 == FALSE))
+    ObjectDetonate (obj_5, STR[84])
+    Message (84)
+    int_4 = TRUE
+  endif;
+endif;
+if ((EventSideAttacksSide (GetPlayerSide (), int_0) == TRUE) && (int_10 == FALSE))
+  SideEnemyTo (int_0, GetPlayerSide ())
+  SideEnemyTo (GetPlayerSide (), int_0)
+  int_10 = TRUE
+endif;

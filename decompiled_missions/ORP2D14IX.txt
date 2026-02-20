@@ -1,0 +1,191 @@
+// File: ORP2D14IX.tok
+// Size: 2923 bytes, segments: 290, vars: 50
+
+int (v0)
+int (v1)
+int (v2)
+int (v3)
+int (v4)
+obj (v5)
+int (v6)
+int (v7)
+int (v8)
+int (v9)
+int (v10)
+int (v11)
+int (v12)
+obj (v13)
+obj (v14)
+obj (v15)
+obj (v16)
+int (v17)
+if (ModelTick () == 0)
+  Message (7)
+  AddSideCash (GetPlayerSide (), 3000)
+  int_0 = CreateSide ()
+  int_6 = CreateSide ()
+  SideFriendTo (int_0, GetPlayerSide ())
+  SideFriendTo (GetPlayerSide (), int_0)
+  SideEnemyTo (int_0, GetEnemySide ())
+  SideEnemyTo (GetEnemySide (), int_0)
+  SideEnemyTo (int_6, GetPlayerSide ())
+  SideEnemyTo (GetPlayerSide (), int_6)
+  int_2 = 4000
+  int_7 = 5000
+  int_8 = 8000
+  int_9 = 10000
+endif;
+if (ModelTick () == int_2)
+  NewObject (int_0, STR[47], GetNeutralEntrancePoint ())
+  NewObject (int_0, STR[47], GetNeutralEntrancePoint ())
+  NewObject (int_0, STR[46], GetNeutralEntrancePoint ())
+  obj_5 = NewObject (int_0, STR[46], GetNeutralEntrancePoint ())
+  NewObject (int_0, STR[46], GetNeutralEntrancePoint ())
+  NewObject (int_0, STR[46], GetNeutralEntrancePoint ())
+  NewObject (int_0, STR[46], GetNeutralEntrancePoint ())
+  NewObject (int_0, STR[46], GetNeutralEntrancePoint ())
+  NewObject (int_0, STR[46], GetNeutralEntrancePoint ())
+  NewObject (int_0, STR[46], GetNeutralEntrancePoint ())
+  Message (10)
+  RadarAlert (GetSidePosition (int_0))
+  SideAIMove (int_0, GetSidePosition (GetPlayerSide ()))
+  int_4 = TRUE
+endif;
+if ((ModelTick () == int_2 + 25) && (int_4 == TRUE))
+  PIPCameraTrackObject (obj_5)
+  Message (8)
+endif;
+if ((ModelTick () == int_2 + 105) && (int_4 == TRUE))
+endif;
+if ((ModelTick () == int_2 + 300) && (int_4 == TRUE))
+  PIPRelease ()
+endif;
+if ((int_4 == TRUE) && (SideUnitCount (int_0) > 0))
+  RemoveShroud (GetSidePosition (int_0), 20)
+endif;
+if ((SideNearToSide (int_0, GetPlayerSide ()) == TRUE) && (int_1 == FALSE))
+  RadarAlert (GetSidePosition (int_0))
+  int_1 = TRUE
+  Message (9)
+  int_3 = PIPRelease () + 200
+endif;
+if (int_1 == TRUE)
+  if (ModelTick () == int_3)
+    SideChangeSide (int_0, GetPlayerSide ())
+  endif;
+endif;
+if ((EventSideAttacksSide (GetPlayerSide (), int_0) == TRUE) && (int_1 == FALSE))
+  int_1 = TRUE
+  SideEnemyTo (int_0, GetPlayerSide ())
+  SideEnemyTo (GetPlayerSide (), int_0)
+  SideAIExitMap (int_0)
+  Message (106)
+endif;
+if (ModelTick () == int_7)
+  int_10 = TRUE
+  RadarAlert (GetEntrancePoint (GetPlayerSide ()))
+  RadarAlert (GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[48], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[48], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[48], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[48], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[48], GetNeutralEntrancePoint ())
+  obj_13 = NewObject (int_6, STR[48], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[48], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[48], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[48], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[48], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[48], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[49], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_6, STR[49], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_6, STR[49], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_6, STR[49], GetEntrancePoint (GetPlayerSide ()))
+  obj_14 = NewObject (int_6, STR[49], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_6, STR[49], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_6, STR[49], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (int_6, STR[49], GetEntrancePoint (GetPlayerSide ()))
+  SideAIAggressive (int_6)
+endif;
+if ((ModelTick () == int_7 + 25) && (int_10 == TRUE))
+  PIPCameraTrackObject (obj_13)
+  Message (126)
+endif;
+if ((ModelTick () == int_7 + 150) && (int_10 == TRUE))
+  PIPCameraTrackObject (obj_14)
+endif;
+if ((ModelTick () == int_7 + 300) && (int_10 == TRUE))
+  PIPRelease ()
+endif;
+if ((int_10 == TRUE) && (SideUnitCount (int_6) > 0))
+  RemoveShroud (GetObjectPosition (obj_13), 20)
+  RemoveShroud (GetObjectPosition (obj_14), 20)
+endif;
+if (ModelTick () == int_8)
+  int_11 = TRUE
+  RadarAlert (GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[48], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[48], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[48], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[48], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[48], GetNeutralEntrancePoint ())
+  obj_15 = NewObject (int_6, STR[48], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[48], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[48], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[48], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[48], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[48], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[48], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[48], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[48], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[48], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[48], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[48], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[48], GetNeutralEntrancePoint ())
+  SideAIAggressive (int_6)
+endif;
+if ((ModelTick () == int_8 + 25) && (int_11 == TRUE))
+  PIPCameraTrackObject (obj_15)
+  Message (126)
+endif;
+if ((ModelTick () == int_8 + 250) && (int_11 == TRUE))
+  PIPRelease ()
+endif;
+if ((int_11 == TRUE) && (SideUnitCount (int_6) > 0))
+  RemoveShroud (GetObjectPosition (obj_15), 20)
+endif;
+if (ModelTick () == int_9)
+  int_12 = TRUE
+  RadarAlert (GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[49], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[49], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[49], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[49], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[49], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[49], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[49], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[49], GetNeutralEntrancePoint ())
+  obj_16 = NewObject (int_6, STR[49], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[49], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[49], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[49], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[49], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[49], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[49], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[49], GetNeutralEntrancePoint ())
+  SideAIAggressive (int_6)
+endif;
+if ((ModelTick () == int_9 + 25) && (int_12 == TRUE))
+  PIPCameraTrackObject (obj_16)
+  Message (126)
+endif;
+if ((ModelTick () == int_9 + 250) && (int_12 == TRUE))
+  PIPRelease ()
+endif;
+if ((int_12 == TRUE) && (SideUnitCount (int_6) > 0))
+  RemoveShroud (GetObjectPosition (obj_16), 20)
+endif;
+if ((ModelTick () > int_9) && (SideUnitCount (int_6) < 10) && (int_17 == FALSE))
+  int_17 = TRUE
+  SideAIExitMap (int_6)
+  Message (116)
+endif;

@@ -1,0 +1,121 @@
+// File: HKP2M12SM.tok
+// Size: 1744 bytes, segments: 209, vars: 48
+
+int (v0)
+int (v1)
+int (v2)
+obj (v3)
+pos (v4)
+int (v5)
+pos (v6)
+int (v7)
+int (v8)
+int (v9)
+int (v10)
+int (v11)
+int (v12)
+int (v13)
+int (v14)
+int (v15)
+int (v16)
+if (ModelTick () == 0)
+  int_0 = CreateSide ()
+  int_7 = CreateSide ()
+  pos_4 = GetNeutralEntrancePoint ()
+  pos_6 = GetEntrancePoint (GetPlayerSide ())
+  SideEnemyTo (GetPlayerSide (), int_0)
+  SideEnemyTo (int_0, GetPlayerSide ())
+  SideEnemyTo (GetPlayerSide (), int_7)
+  SideEnemyTo (int_7, GetPlayerSide ())
+  Message (12)
+  int_10 = 5500
+endif;
+if ((ModelTick () == int_10) && (int_5 == FALSE))
+  NewObject (int_0, STR[63], pos_4)
+  NewObject (int_0, STR[63], pos_4)
+  NewObject (int_0, STR[63], pos_4)
+  NewObject (int_0, STR[64], pos_4)
+  NewObject (int_0, STR[64], pos_4)
+  NewObject (int_0, STR[64], pos_4)
+  NewObject (int_0, STR[64], pos_4)
+  NewObject (int_0, STR[64], pos_4)
+  obj_3 = NewObject (int_0, STR[74], pos_4)
+  NewObject (int_7, STR[73], pos_4)
+  NewObject (int_7, STR[73], pos_4)
+  NewObject (int_7, STR[73], pos_4)
+  NewObject (int_7, STR[73], pos_4)
+  NewObject (int_7, STR[123], pos_4)
+  NewObject (int_7, STR[123], pos_4)
+  NewObject (int_7, STR[118], pos_4)
+  NewObject (int_7, STR[118], pos_4)
+  NewObject (int_7, STR[1], pos_4)
+  NewObject (int_7, STR[1], pos_4)
+  SideAIGuardObject (int_7, obj_3)
+  SideAIMove (int_0, pos_6)
+  int_5 = TRUE
+  RadarAlert (pos_4)
+  int_9 = PIPRelease ()
+  RemoveShroud (GetObjectPosition (obj_3), 12)
+endif;
+if ((ModelTick () == int_9 + 25) && (int_5 == TRUE))
+  PIPCameraTrackObject (obj_3)
+  Message (18)
+endif;
+if ((ModelTick () == int_9 + 250) && (int_5 == TRUE))
+  PIPRelease ()
+endif;
+if ((int_5 == TRUE) && (SideUnitCount (int_7) > 0) && (ModelTick () <= int_9 + 250))
+  RemoveShroud (GetSidePosition (int_7), 12)
+endif;
+if ((SideVisibleToSide (GetPlayerSide (), int_0) == TRUE) && (int_1 == FALSE) && (int_5 == TRUE))
+  if (ModelTick () >= int_9 + 550)
+    Message (13)
+    int_1 = TRUE
+  endif;
+endif;
+if (int_5 == TRUE)
+  if ((int_14 == FALSE) && (int_2 == FALSE) && (SideUnitCount (int_7) == 0))
+    obj_3 = ObjectChange (obj_3, STR[43], GetPlayerSide ())
+    int_14 = TRUE
+    Message (14)
+    MissionOutcome (TRUE)
+    int_8 = PIPRelease () + 1800
+    int_2 = TRUE
+    SideAIExitMap (int_0)
+  endif;
+endif;
+if ((ModelTick () == (int_8 -400)) && (int_2 == TRUE) && (ObjectValid (obj_3) == TRUE))
+  PIPCameraTrackObject (obj_3)
+  Message (16)
+  ObjectToolTip (obj_3, 15)
+  ObjectSetHealth (obj_3, 50)
+  int_13 = PIPRelease () + 25
+  int_12 = 15
+  int_11 = TRUE
+  TimerMessage (int_12)
+endif;
+if ((ModelTick () == int_13) && (int_11 == TRUE) && (int_12 > 0) && (ObjectValid (obj_3) == TRUE))
+  int_13 = PIPRelease () + 25
+  int_12 = int_12 -1
+  TimerMessage (int_12)
+endif;
+if ((ModelTick () == int_13) && (int_11 == TRUE) && (int_12 == 0))
+  TimerMessageRemove ()
+endif;
+if ((ModelTick () == int_8) && (int_2 == TRUE) && (ObjectValid (obj_3) == TRUE))
+  ObjectDetonate (obj_3, STR[56])
+  Message (17)
+  PIPRelease ()
+endif;
+if ((EventObjectDestroyed (obj_3) == TRUE) && (int_2 == FALSE) && (int_15 == FALSE))
+  Message (15)
+  PIPRelease ()
+  int_15 = TRUE
+endif;
+if ((SideNearToPoint (int_0, pos_6) == TRUE) && (int_2 == FALSE) && (int_16 == FALSE))
+  SideAIExitMap (int_0)
+  SideAIExitMap (int_7)
+  Message (7)
+  int_2 = TRUE
+  int_16 = TRUE
+endif;

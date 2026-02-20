@@ -1,0 +1,84 @@
+// File: ATP1D9GN.tok
+// Size: 1265 bytes, segments: 163, vars: 41
+
+int (v0)
+obj (v1)
+int (v2)
+int (v3)
+int (v4)
+int (v5)
+int (v6)
+int (v7)
+if (ModelTick () == 0)
+  Message (101)
+  int_2 = 5000
+  int_0 = CreateSide ()
+  SideEnemyTo (int_0, GetEnemySide ())
+  SideEnemyTo (GetEnemySide (), int_0)
+  SideFriendTo (int_0, GetPlayerSide ())
+  SideFriendTo (GetPlayerSide (), int_0)
+endif;
+if (ModelTick () == int_2)
+  obj_1 = NewObject (int_0, STR[53], GetNeutralEntrancePoint ())
+  NewObject (int_0, STR[55], GetNeutralEntrancePoint ())
+  NewObject (int_0, STR[53], GetNeutralEntrancePoint ())
+  NewObject (int_0, STR[55], GetNeutralEntrancePoint ())
+  NewObject (int_0, STR[53], GetNeutralEntrancePoint ())
+  NewObject (int_0, STR[55], GetNeutralEntrancePoint ())
+  NewObject (int_0, STR[53], GetNeutralEntrancePoint ())
+  NewObject (int_0, STR[55], GetNeutralEntrancePoint ())
+  NewObject (int_0, STR[53], GetNeutralEntrancePoint ())
+  NewObject (int_0, STR[56], GetNeutralEntrancePoint ())
+  NewObject (int_0, STR[54], GetNeutralEntrancePoint ())
+  int_7 = TRUE
+  SideAIAggressive (int_0)
+  RadarAlert (GetNeutralEntrancePoint ())
+  PIPCameraTrackObject (obj_1)
+endif;
+if ((ModelTick () == int_2 + 50) && (int_5 == FALSE))
+  Message (68)
+endif;
+if (ModelTick () == int_2 + 200)
+  PIPRelease ()
+endif;
+if ((int_7 == TRUE) && (SideUnitCount (int_0) > 0))
+  RemoveShroud (GetSidePosition (int_0), 10)
+endif;
+if (ModelTick () == 10000)
+  Message (68)
+  int_3 = PIPRelease () + 6000
+endif;
+if ((ModelTick () == 16000) && (int_5 == FALSE))
+  Message (69)
+  int_3 = PIPRelease () + 6000
+  int_5 = TRUE
+endif;
+if ((ModelTick () == int_3) && (int_5 == TRUE))
+  obj_1 = NewObject (int_0, STR[53], GetNeutralEntrancePoint ())
+  NewObject (int_0, STR[55], GetNeutralEntrancePoint ())
+  NewObject (int_0, STR[53], GetNeutralEntrancePoint ())
+  NewObject (int_0, STR[55], GetNeutralEntrancePoint ())
+  NewObject (int_0, STR[53], GetNeutralEntrancePoint ())
+  NewObject (int_0, STR[55], GetNeutralEntrancePoint ())
+  NewObject (int_0, STR[53], GetNeutralEntrancePoint ())
+  NewObject (int_0, STR[55], GetNeutralEntrancePoint ())
+  NewObject (int_0, STR[53], GetNeutralEntrancePoint ())
+  NewObject (int_0, STR[56], GetNeutralEntrancePoint ())
+  NewObject (int_0, STR[54], GetNeutralEntrancePoint ())
+  int_6 = TRUE
+  SideAIAggressive (int_0)
+  int_2 = PIPRelease ()
+  Message (91)
+  RadarAlert (GetNeutralEntrancePoint ())
+  PIPCameraTrackObject (obj_1)
+endif;
+if ((int_6 == TRUE) && (SideUnitCount (int_0) > 0) && (int_4 == FALSE))
+  RemoveShroud (GetSidePosition (int_0), 10)
+  int_4 = TRUE
+endif;
+if ((ModelTick () == int_2 + 100) && (int_6 == TRUE) && (int_5 == TRUE))
+  Message (68)
+endif;
+if ((ModelTick () == int_2 + 200) && (int_6 == TRUE) && (int_5 == TRUE))
+  PIPRelease ()
+endif;

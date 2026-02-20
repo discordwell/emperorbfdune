@@ -1,0 +1,60 @@
+// File: ATP3D5TLFail.tok
+// Size: 1005 bytes, segments: 117, vars: 39
+
+int (v0)
+int (v1)
+int (v2)
+obj (v3)
+if (ModelTick () == 0)
+  SetReinforcements (GetPlayerSide (), 60)
+  Message (58)
+  AddSideCash (GetEnemySide (), 10000)
+  int_0 = 2500
+  int_1 = 4000
+  int_2 = TRUE
+endif;
+if (ModelTick () == int_1)
+  int_0 = PIPRelease () + 2500
+  obj_3 = NewObject (GetEnemySide (), STR[49], GetEntrancePoint (GetEnemySide ()))
+  SetVeterancy (obj_3, 2)
+  obj_3 = NewObject (GetEnemySide (), STR[49], GetEntrancePoint (GetEnemySide ()))
+  SetVeterancy (obj_3, 2)
+  NewObject (GetEnemySide (), STR[49], GetEntrancePoint (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[49], GetEntrancePoint (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[49], GetEntrancePoint (GetEnemySide ()))
+  obj_3 = NewObject (GetEnemySide (), STR[48], GetEntrancePoint (GetEnemySide ()))
+  SetVeterancy (obj_3, 2)
+  obj_3 = NewObject (GetEnemySide (), STR[48], GetEntrancePoint (GetEnemySide ()))
+  SetVeterancy (obj_3, 2)
+  NewObject (GetEnemySide (), STR[48], GetEntrancePoint (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[48], GetEntrancePoint (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[48], GetEntrancePoint (GetEnemySide ()))
+  NewObject (GetEnemySide (), STR[48], GetEntrancePoint (GetEnemySide ()))
+  Message (106)
+endif;
+if (ModelTick () == int_1)
+  RadarAlert (GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[47], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[47], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[46], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[46], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[46], GetEntrancePoint (GetPlayerSide ()))
+  if (int_2 == FALSE)
+    Message (89)
+  endif;
+endif;
+if ((ModelTick () == int_1 + 25) && (int_2 == TRUE))
+  PIPCameraLookAtPoint (GetEntrancePoint (GetPlayerSide ()))
+  Message (89)
+endif;
+if ((ModelTick () == int_1 + 50) && (int_2 == TRUE))
+  PIPCameraStartRotate (2, 1)
+endif;
+if ((ModelTick () == int_1 + 150) && (int_2 == TRUE))
+  PIPCameraStopRotate ()
+endif;
+if ((ModelTick () == int_1 + 160) && (int_2 == TRUE))
+  PIPRelease ()
+  int_2 = FALSE
+  int_1 = int_1 + 5000
+endif;

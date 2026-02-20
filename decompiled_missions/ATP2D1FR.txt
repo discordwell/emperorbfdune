@@ -1,0 +1,76 @@
+// File: ATP2D1FR.tok
+// Size: 1129 bytes, segments: 182, vars: 46
+
+pos (v0)
+pos (v1)
+obj (v2)
+int (v3)
+int (v4)
+int (v5)
+int (v6)
+int (v7)
+int (v8)
+obj (v9)
+if (ModelTick () == 0)
+  int_5 = CreateSide ()
+  int_6 = CreateSide ()
+  SetSideColor (int_6, 2)
+  pos_0 = GetNeutralEntrancePoint ()
+  pos_1 = GetEntrancePoint (GetEnemySide ())
+  SideEnemyTo (int_6, GetPlayerSide ())
+  SideEnemyTo (GetPlayerSide (), int_6)
+  int_3 = 4000
+  Message (69)
+endif;
+if (ModelTick () == int_3)
+  obj_2 = NewObject (int_5, STR[67], pos_0)
+  SideAIMove (int_5, pos_1)
+  PIPCameraTrackObject (obj_2)
+endif;
+if ((ModelTick () == int_3 + 25) && (int_7 == TRUE))
+  Message (70)
+endif;
+if ((ModelTick () == int_3 + 250) && (int_7 == TRUE))
+  PIPRelease ()
+endif;
+if ((ModelTick () < int_3 + 275) && (ObjectValid (obj_2) == TRUE))
+  RemoveShroud (GetObjectPosition (obj_2), 12)
+endif;
+if ((int_8 == FALSE) && (SideNearToPoint (int_5, pos_1) == TRUE) && (int_7 == FALSE))
+  Message (79)
+  SideAIExitMap (int_5)
+  int_8 = TRUE
+  int_7 = TRUE
+endif;
+if ((int_7 == FALSE) && (ObjectNearToSide (obj_2, GetPlayerSide ()) == TRUE))
+  int_7 = TRUE
+  Message (72)
+  ObjectChangeSide (obj_2, GetPlayerSide ())
+  int_4 = PIPRelease () + 3500
+  MissionOutcome (TRUE)
+endif;
+if ((ModelTick () == int_4) && (int_7 == TRUE))
+  obj_9 = NewObject (int_6, STR[27], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[27], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[27], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[28], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[26], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[26], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[26], GetNeutralEntrancePoint ())
+  NewObject (int_6, STR[26], GetNeutralEntrancePoint ())
+  SideAIAggressive (int_6)
+  PIPCameraTrackObject (obj_9)
+endif;
+if ((ModelTick () == int_4 + 25) && (int_7 == TRUE))
+  Message (28)
+endif;
+if ((ModelTick () == int_4 + 250) && (int_7 == TRUE))
+  PIPRelease ()
+endif;
+if ((ModelTick () < int_4 + 275) && (ObjectValid (obj_9) == TRUE))
+  RemoveShroud (GetObjectPosition (obj_9), 12)
+endif;
+if (EventObjectDestroyed (obj_2) == TRUE)
+  Message (16)
+  MissionOutcome (FALSE)
+endif;

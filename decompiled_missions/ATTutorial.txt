@@ -1,0 +1,579 @@
+// File: ATTutorial.tok
+// Size: 8371 bytes, segments: 943, vars: 33
+
+obj (v0)
+obj (v1)
+obj (v2)
+obj (v3)
+obj (v4)
+obj (v5)
+obj (v6)
+obj (v7)
+obj (v8)
+obj (v9)
+obj (v10)
+obj (v11)
+obj (v12)
+obj (v13)
+obj (v14)
+obj (v15)
+obj (v16)
+obj (v17)
+obj (v18)
+obj (v19)
+obj (v20)
+obj (v21)
+obj (v22)
+obj (v23)
+int (v24)
+int (v25)
+int (v26)
+int (v27)
+int (v28)
+int (v29)
+int (v30)
+int (v31)
+int (v32)
+int (v33)
+pos (v34)
+pos (v35)
+pos (v36)
+pos (v37)
+pos (v38)
+pos (v39)
+pos (v40)
+pos (v41)
+int (v42)
+int (v43)
+int (v44)
+int (v45)
+obj (v46)
+obj (v47)
+obj (v48)
+obj (v49)
+obj (v50)
+obj (v51)
+int (v52)
+int (v53)
+int (v54)
+int (v55)
+int (v56)
+int (v57)
+int (v58)
+int (v59)
+int (v60)
+obj (v61)
+int (v62)
+obj (v63)
+obj (v64)
+int (v65)
+int (v66)
+int (v67)
+obj (v68)
+int (v69)
+obj (v70)
+obj (v71)
+int (v72)
+int (v73)
+int (v74)
+int (v75)
+int (v76)
+int (v77)
+if (ModelTick () == 0)
+  int_28 = CreateSide ()
+  SideFriendTo (int_28, GetPlayerSide ())
+  SideFriendTo (GetPlayerSide (), int_28)
+  int_42 = CreateSide ()
+  int_43 = CreateSide ()
+  int_44 = CreateSide ()
+  int_45 = CreateSide ()
+  int_27 = CreateSide ()
+  SideAIControl (int_27)
+  SideFriendTo (int_27, GetPlayerSide ())
+  SideFriendTo (GetPlayerSide (), int_27)
+  SideEnemyTo (GetPlayerSide (), int_42)
+  SideEnemyTo (GetPlayerSide (), int_43)
+  SideEnemyTo (int_43, GetPlayerSide ())
+  SideEnemyTo (int_44, GetPlayerSide ())
+  SideEnemyTo (GetPlayerSide (), int_44)
+  SideEnemyTo (int_45, GetPlayerSide ())
+  SideEnemyTo (GetPlayerSide (), int_45)
+  pos_34 = GetScriptPoint (1)
+  pos_35 = GetScriptPoint (2)
+  pos_36 = GetScriptPoint (3)
+  pos_37 = GetScriptPoint (4)
+  pos_38 = GetScriptPoint (5)
+  pos_39 = GetScriptPoint (6)
+  pos_40 = GetScriptPoint (7)
+  pos_41 = GetScriptPoint (8)
+  NewObjectOffsetOrientation (GetPlayerSide (), STR[10], GetUnusedBasePoint (), 0, 0, 0)
+  obj_0 = NewObjectOffsetOrientation (GetPlayerSide (), STR[125], GetUnusedBasePoint (), Neg (2), 8, 0)
+  NewObjectOffsetOrientation (GetPlayerSide (), STR[125], GetUnusedBasePoint (), 2, 8, 0)
+  obj_71 = NewObjectOffsetOrientation (GetPlayerSide (), STR[0], pos_34, Neg (3), 0, 2)
+  obj_1 = NewObjectOffsetOrientation (GetPlayerSide (), STR[43], pos_34, Neg (2), Neg (8), 0)
+  obj_2 = NewObjectOffsetOrientation (GetPlayerSide (), STR[45], pos_34, 0, Neg (9), 0)
+  ObjectSetHealth (obj_0, 750)
+  obj_23 = NewObjectOffsetOrientation (int_27, STR[127], pos_35, Neg (6), Neg (15), 0)
+  obj_3 = NewObjectOffsetOrientation (int_27, STR[127], pos_35, Neg (5), Neg (15), 0)
+  obj_4 = NewObjectOffsetOrientation (int_27, STR[127], pos_35, Neg (4), Neg (15), 0)
+  obj_5 = NewObjectOffsetOrientation (int_27, STR[127], pos_35, Neg (3), Neg (15), 0)
+  obj_6 = NewObjectOffsetOrientation (int_27, STR[127], pos_35, Neg (2), Neg (15), 0)
+  obj_7 = NewObjectOffsetOrientation (int_27, STR[127], pos_35, Neg (1), Neg (15), 0)
+  obj_8 = NewObjectOffsetOrientation (int_27, STR[127], pos_35, 0, Neg (15), 0)
+  obj_9 = NewObjectOffsetOrientation (int_27, STR[127], pos_35, 1, Neg (15), 0)
+  obj_10 = NewObjectOffsetOrientation (int_27, STR[127], pos_35, 2, Neg (15), 0)
+  obj_11 = NewObjectOffsetOrientation (int_27, STR[127], pos_35, 3, Neg (15), 0)
+  obj_12 = NewObjectOffsetOrientation (int_27, STR[127], pos_35, 4, Neg (15), 0)
+  obj_13 = NewObjectOffsetOrientation (int_27, STR[127], pos_35, 5, Neg (15), 0)
+  obj_14 = NewObjectOffsetOrientation (int_27, STR[127], pos_35, 6, Neg (15), 0)
+  obj_15 = NewObjectOffsetOrientation (int_27, STR[127], pos_35, 7, Neg (15), 0)
+  obj_16 = NewObjectOffsetOrientation (int_27, STR[127], pos_35, 8, Neg (15), 0)
+  obj_17 = NewObjectOffsetOrientation (int_27, STR[127], pos_35, 9, Neg (15), 0)
+  obj_18 = NewObjectOffsetOrientation (int_27, STR[127], pos_35, 10, Neg (15), 0)
+  obj_19 = NewObjectOffsetOrientation (int_27, STR[127], pos_35, 11, Neg (15), 0)
+  obj_20 = NewObjectOffsetOrientation (int_27, STR[127], pos_35, 12, Neg (15), 0)
+  obj_21 = NewObjectOffsetOrientation (int_27, STR[127], pos_35, 13, Neg (15), 0)
+  obj_22 = NewObjectOffsetOrientation (int_27, STR[127], pos_35, 14, Neg (15), 0)
+  AddSideCash (int_27, 5000)
+  obj_51 = NewObject (int_44, STR[114], pos_41)
+  obj_50 = NewObject (int_44, STR[111], pos_41)
+  obj_48 = NewObject (int_44, STR[124], pos_41)
+  obj_49 = NewObject (int_44, STR[112], pos_41)
+  NewObjectOffsetOrientation (int_45, STR[111], pos_41, Neg (10), 5, 3)
+  NewObjectOffsetOrientation (int_45, STR[112], pos_41, 5, Neg (5), 3)
+  NewObjectOffsetOrientation (int_45, STR[111], pos_41, 2, 1, 1)
+  NewObjectOffsetOrientation (int_45, STR[112], pos_41, 3, 10, 2)
+  NewObjectOffsetOrientation (int_45, STR[111], pos_41, 2, Neg (2), 2)
+  NewObjectOffsetOrientation (int_45, STR[112], pos_41, 9, 5, 1)
+  NewObjectOffsetOrientation (int_45, STR[111], pos_41, Neg (7), Neg (5), 3)
+  NewObjectOffsetOrientation (int_45, STR[112], pos_41, 7, 4, 1)
+  NewObjectOffsetOrientation (int_45, STR[111], pos_41, Neg (8), 5, 0)
+  NewObjectOffsetOrientation (int_45, STR[112], pos_41, 9, Neg (6), 3)
+  obj_46 = NewObjectOffsetOrientation (int_44, STR[118], pos_41, 7, 10, 0)
+  ObjectSetHealth (obj_46, 300)
+  obj_46 = NewObjectOffsetOrientation (int_44, STR[118], pos_41, 6, 11, 0)
+  ObjectSetHealth (obj_46, 300)
+  obj_46 = NewObjectOffsetOrientation (int_44, STR[118], pos_41, 5, 12, 0)
+  ObjectSetHealth (obj_46, 300)
+  obj_46 = NewObjectOffsetOrientation (int_44, STR[118], pos_41, 8, 10, 0)
+  ObjectSetHealth (obj_46, 300)
+  obj_46 = NewObjectOffsetOrientation (int_44, STR[118], pos_41, 9, 10, 0)
+  ObjectSetHealth (obj_46, 300)
+  obj_46 = NewObjectOffsetOrientation (int_44, STR[118], pos_41, 10, 9, 0)
+  ObjectSetHealth (obj_46, 300)
+  NewObjectOffsetOrientation (int_45, STR[118], pos_39, 1, Neg (8), 0)
+  NewObjectOffsetOrientation (int_45, STR[118], pos_39, Neg (8), Neg (7), 0)
+  CameraTrackObject (obj_1)
+  int_52 = TRUE
+  Message (6)
+endif;
+if (ModelTick () == 1)
+  DisableUI ()
+endif;
+if (ModelTick () == 150)
+  Message (7)
+endif;
+if (ModelTick () == 600)
+  Message (8)
+endif;
+if (ModelTick () == 675)
+  CameraStopTrack ()
+endif;
+if (ModelTick () == 900)
+  Message (10)
+endif;
+if (ModelTick () == 1200)
+  CameraPanToPoint (GetUnusedBasePoint (), 50)
+  Message (11)
+endif;
+if (ModelTick () == 1500)
+  Message (13)
+  EnableUI ()
+endif;
+if (ModelTick () == 2000)
+  Message (14)
+endif;
+if (ModelTick () == 2450)
+  DisableUI ()
+  CameraPanToPoint (GetUnusedBasePoint (), 50)
+endif;
+if (ModelTick () == 2500)
+  Message (15)
+  EnableUI ()
+  int_29 = PIPRelease () + 1000
+  int_32 = SetValue (11)
+endif;
+if ((ObjectGetHealth (obj_0) == ObjectMaxHealth (obj_0)) && (int_24 == FALSE))
+  if (ObjectDestroyed (obj_0) == FALSE)
+    DisableUI ()
+    obj_61 = NewObjectOffsetOrientation (int_28, STR[32], pos_35, 0, Neg (3), 0)
+    RemoveShroud (pos_35, 20)
+    Message (17)
+    CameraPanToPoint (pos_35, 50)
+  endif;
+  int_24 = TRUE
+  int_25 = PIPRelease () + 200
+endif;
+if ((ModelTick () == int_25) && (int_24 == TRUE))
+  CameraPanToPoint (GetUnusedBasePoint (), 50)
+endif;
+if ((ModelTick () == int_25 + 50) && (int_24 == TRUE))
+  Message (18)
+  EnableUI ()
+endif;
+if ((ModelTick () == int_29) && (int_32 == 11))
+  if (ObjectGetHealth (obj_0) > 50)
+    int_32 = SetValue (14)
+  else;
+    Message (16)
+    int_29 = PIPRelease () + 1000
+  endif;
+endif;
+if ((SideObjectCount (GetPlayerSide (), STR[44]) == 1) && (int_24 == TRUE) && (int_26 == FALSE))
+  int_26 = TRUE
+  int_52 = FALSE
+  int_32 = SetValue (15)
+  if (int_60 == FALSE)
+    Message (20)
+  else;
+    Message (22)
+  endif;
+endif;
+if ((SideObjectCount (GetPlayerSide (), STR[44]) == 0) && (int_32 == 14) && (ModelTick () == int_25 + 2000))
+  Message (19)
+endif;
+if ((ObjectNearToSide (obj_61, GetPlayerSide ())) && (int_60 == FALSE))
+  int_60 = TRUE
+  ObjectSetHealth (obj_61, 0)
+  Message (24)
+endif;
+if ((SideObjectCount (GetPlayerSide (), STR[10]) == 1) && (int_52 == FALSE))
+  int_52 = TRUE
+  int_26 = FALSE
+  if (int_60 == TRUE)
+    Message (27)
+    int_59 = PIPRelease ()
+  else;
+    Message (26)
+  endif;
+endif;
+if ((SideObjectCount (GetPlayerSide (), STR[126]) == 1) && (int_55 == FALSE) && (int_32 == 15))
+  Message (30)
+  if (int_32 < 25)
+    int_32 = SetValue (25)
+  endif;
+  int_55 = TRUE
+endif;
+if ((SideObjectCount (GetPlayerSide (), STR[126]) == 0) && (int_55 == TRUE))
+  Message (67)
+  int_55 = FALSE
+  int_59 = PIPRelease () + 1000
+endif;
+if ((SideObjectCount (GetPlayerSide (), STR[126]) == 1) && (int_55 == FALSE))
+  int_55 = TRUE
+endif;
+if ((SideObjectCount (GetPlayerSide (), STR[123]) >= 1) && (int_32 <= 25))
+  Message (31)
+  int_32 = SetValue (27)
+endif;
+if ((SideObjectCount (GetPlayerSide (), STR[123]) >= 6) && (int_32 == 27))
+  Message (32)
+  int_32 = SetValue (28)
+endif;
+if ((SideObjectCount (GetPlayerSide (), STR[123]) >= 10) && (int_32 == 28))
+  Message (33)
+  int_32 = SetValue (43)
+endif;
+if ((int_55 == TRUE) && (int_32 == 43) && (int_57 == FALSE))
+  int_59 = (ModelTick () + 250)
+  int_57 = TRUE
+endif;
+if ((int_57 == TRUE) && (ModelTick () == int_59) && (int_58 == FALSE))
+  obj_63 = NewObject (int_28, STR[32], pos_36)
+  RadarAlert (pos_36)
+  Message (35)
+  int_58 = TRUE
+  DisableUI ()
+  CameraStore ()
+  CameraPanToPoint (pos_36, 50)
+  int_31 = PIPRelease () + 100
+endif;
+if ((int_57 == TRUE) && (ModelTick () == int_31))
+  CameraRestore (50)
+endif;
+if ((int_57 == TRUE) && (ModelTick () == int_31 + 50))
+  EnableUI ()
+  int_31 = 0
+endif;
+if ((ObjectNearToSide (obj_63, GetPlayerSide ()) == TRUE) && (int_62 == FALSE))
+  Message (36)
+  RemoveShroud (pos_37, 20)
+  DisableUI ()
+  CameraPanToPoint (pos_37, 50)
+  NewObject (int_43, STR[118], pos_40)
+  NewObject (int_43, STR[118], pos_40)
+  NewObject (int_43, STR[119], pos_40)
+  NewObject (int_43, STR[119], pos_40)
+  NewObject (int_43, STR[121], pos_40)
+  SideAIMove (int_43, pos_37)
+  int_65 = TRUE
+  int_62 = TRUE
+  ObjectSell (obj_3)
+  ObjectSell (obj_4)
+  ObjectSell (obj_5)
+  ObjectSell (obj_6)
+  ObjectSell (obj_7)
+  ObjectSell (obj_8)
+  ObjectSell (obj_9)
+  ObjectSell (obj_10)
+  ObjectSell (obj_11)
+  ObjectSell (obj_12)
+  ObjectSell (obj_13)
+  ObjectSell (obj_14)
+  ObjectSell (obj_15)
+  ObjectSell (obj_16)
+  ObjectSell (obj_17)
+  ObjectSell (obj_18)
+  ObjectSell (obj_19)
+  ObjectSell (obj_20)
+  ObjectSell (obj_21)
+  ObjectSell (obj_22)
+  ObjectSell (obj_23)
+  ObjectSetHealth (obj_63, 0)
+endif;
+if (int_65 == TRUE)
+  if (SideAIDone (int_43) == TRUE)
+    ForceWormStrike (GetSidePosition (int_43))
+    int_65 = FALSE
+    Message (38)
+    int_66 = TRUE
+    int_59 = PIPRelease () + 375
+  endif;
+endif;
+if (EventSideAttacksSide (GetPlayerSide (), int_43) == TRUE)
+  int_30 = TRUE
+endif;
+if ((int_66 == TRUE) && (ModelTick () == int_59))
+  if (SideUnitCount (int_43) > 0)
+    Message (39)
+    SideAIAggressive (int_43)
+    EnableUI ()
+    CameraRestore (50)
+  endif;
+endif;
+if ((int_66 == TRUE) && (SideUnitCount (int_43) == 0))
+  if (int_30 == TRUE)
+    Message (42)
+  else;
+    Message (41)
+  endif;
+  int_66 = FALSE
+  int_67 = TRUE
+  int_59 = PIPRelease () + 300
+endif;
+if ((ModelTick () == int_59) && (int_67 == TRUE))
+  Message (48)
+  int_32 = SetValue (45)
+  int_33 = PIPRelease () + 100
+  EnableUI ()
+  CameraRestore (50)
+endif;
+if ((ModelTick () == int_33) && (int_26 == TRUE) && (int_32 == 43))
+  CameraRestore (50)
+  EnableUI ()
+  int_32 = SetValue (44)
+  int_33 = PIPRelease () + 50
+endif;
+if ((SideObjectCount (GetPlayerSide (), STR[122]) >= 1) && (int_32 == 45))
+  Message (50)
+  int_32 = SetValue (47)
+  obj_68 = NewObject (int_28, STR[32], pos_38)
+  int_67 = FALSE
+  DisableUI ()
+  CameraStore ()
+  CameraPanToPoint (pos_38, 50)
+  int_33 = PIPRelease () + 100
+  int_26 = TRUE
+endif;
+if ((ModelTick () == int_33) && (int_32 == 47) && (int_67 == FALSE))
+  CameraRestore (50)
+  EnableUI ()
+endif;
+if ((ModelTick () == int_33) && (int_32 == 45))
+  if (SideObjectCount (GetPlayerSide (), STR[122]) == 0)
+    Message (49)
+    int_33 = PIPRelease () + 1000
+  endif;
+endif;
+if ((ObjectNearToSide (obj_68, GetPlayerSide ()) == TRUE) && (int_69 == FALSE))
+  int_69 = TRUE
+  ObjectSetHealth (obj_68, 0)
+  obj_70 = NewObject (int_28, STR[32], pos_39)
+  Message (51)
+  DisableUI ()
+  CameraStore ()
+  CameraPanToPoint (pos_39, 50)
+  int_33 = PIPRelease () + 200
+  int_32 = SetValue (48)
+endif;
+if ((ModelTick () == int_33) && (int_32 == 48))
+  EnableUI ()
+  int_32 = SetValue (49)
+  int_33 = PIPRelease () + 100
+endif;
+if ((SideObjectCount (GetPlayerSide (), STR[123]) >= 10) && (int_32 == 49))
+  int_32 = SetValue (51)
+  int_33 = PIPRelease () + 50
+endif;
+if ((ModelTick () == int_33) && (int_32 == 49))
+  Message (53)
+  int_33 = PIPRelease () + 1000
+endif;
+if ((ModelTick () == int_33) && (int_32 == 51))
+  Message (55)
+  int_32 = SetValue (52)
+endif;
+if ((SideUnitCount (int_45) == 0) && (int_32 == 52))
+  Message (56)
+  int_32 = SetValue (53)
+  int_33 = PIPRelease () + 50
+endif;
+if (((ObjectNearToSide (obj_70, GetPlayerSide ()) == TRUE) || (SideNearToSide (GetPlayerSide (), int_45)) && (int_72 == FALSE)))
+  ObjectSetHealth (obj_70, 0)
+endif;
+if ((ModelTick () == int_33) && (int_32 == 53))
+  Message (58)
+  RemoveShroud (pos_41, 20)
+  DisableUI ()
+  CameraStore ()
+  CameraPanToPoint (pos_41, 50)
+  int_31 = PIPRelease () + 200
+  int_32 = SetValue (56)
+  int_72 = FALSE
+endif;
+if ((ModelTick () == int_31) && (int_32 == 56))
+  Message (59)
+  CameraPanToPoint (GetEntrancePoint (GetPlayerSide ()), 50)
+  int_33 = PIPRelease () + 100
+  int_32 = SetValue (57)
+  NewObject (GetPlayerSide (), STR[20], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[20], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[20], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[20], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[20], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[20], GetEntrancePoint (GetPlayerSide ()))
+endif;
+if ((ModelTick () == int_33) && (int_32 == 57))
+  Message (60)
+  EnableUI ()
+  int_32 = SetValue (59)
+endif;
+if ((SideObjectCount (GetPlayerSide (), STR[20]) == 0) && (int_32 == 59))
+  Message (62)
+  DisableUI ()
+  CameraPanToPoint (GetEntrancePoint (GetPlayerSide ()), 50)
+  NewObject (GetPlayerSide (), STR[20], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[20], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[20], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[20], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[20], GetEntrancePoint (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), STR[20], GetEntrancePoint (GetPlayerSide ()))
+  int_33 = PIPRelease () + 50
+  int_32 = SetValue (60)
+endif;
+if ((ModelTick () == int_33) && (int_32 == 60))
+  EnableUI ()
+  int_32 = SetValue (59)
+endif;
+if (EventObjectDestroyed (obj_48) == TRUE)
+  Message (66)
+endif;
+if (EventObjectDestroyed (obj_49) == TRUE)
+  Message (63)
+endif;
+if (EventObjectDestroyed (obj_51) == TRUE)
+  Message (64)
+endif;
+if (EventObjectDestroyed (obj_50) == TRUE)
+  Message (65)
+endif;
+if ((SideBuildingCount (int_44) == 0) && (SideUnitCount (int_44) == 0) && (int_76 == FALSE))
+  int_76 = TRUE
+  Message (61)
+  int_59 = PIPRelease () + 275
+endif;
+if ((int_76 == TRUE) && (ModelTick () == int_59))
+  EndGameWin ()
+endif;
+if ((SideObjectCount (GetPlayerSide (), STR[10]) < 1) && (SideObjectCount (GetPlayerSide (), STR[44]) < 1))
+  EndGameLose ()
+endif;
+if (SideObjectCount (GetPlayerSide (), STR[125]) == TRUE)
+  EndGameLose ()
+endif;
+if (SideObjectCount (GetPlayerSide (), STR[0]) < 1)
+  EndGameLose ()
+endif;
+if (ObjectGetHealth (obj_3) < 1000)
+  ObjectSetHealth (obj_3, 1000)
+endif;
+if (ObjectGetHealth (obj_4) < 1000)
+  ObjectSetHealth (obj_4, 1000)
+endif;
+if (ObjectGetHealth (obj_5) < 1000)
+  ObjectSetHealth (obj_5, 1000)
+endif;
+if (ObjectGetHealth (obj_6) < 1000)
+  ObjectSetHealth (obj_6, 1000)
+endif;
+if (ObjectGetHealth (obj_7) < 1000)
+  ObjectSetHealth (obj_7, 1000)
+endif;
+if (ObjectGetHealth (obj_8) < 1000)
+  ObjectSetHealth (obj_8, 1000)
+endif;
+if (ObjectGetHealth (obj_9) < 1000)
+  ObjectSetHealth (obj_9, 1000)
+endif;
+if (ObjectGetHealth (obj_10) < 1000)
+  ObjectSetHealth (obj_10, 1000)
+endif;
+if (ObjectGetHealth (obj_11) < 1000)
+  ObjectSetHealth (obj_11, 1000)
+endif;
+if (ObjectGetHealth (obj_12) < 1000)
+  ObjectSetHealth (obj_12, 1000)
+endif;
+if (ObjectGetHealth (obj_13) < 1000)
+  ObjectSetHealth (obj_13, 1000)
+endif;
+if (ObjectGetHealth (obj_14) < 1000)
+  ObjectSetHealth (obj_14, 1000)
+endif;
+if (ObjectGetHealth (obj_15) < 1000)
+  ObjectSetHealth (obj_15, 1000)
+endif;
+if (ObjectGetHealth (obj_16) < 1000)
+  ObjectSetHealth (obj_16, 1000)
+endif;
+if (ObjectGetHealth (obj_17) < 1000)
+  ObjectSetHealth (obj_17, 1000)
+endif;
+if (ObjectGetHealth (obj_18) < 1000)
+  ObjectSetHealth (obj_18, 1000)
+endif;
+if (ObjectGetHealth (obj_19) < 1000)
+  ObjectSetHealth (obj_19, 1000)
+endif;
+if (ObjectGetHealth (obj_20) < 1000)
+  ObjectSetHealth (obj_20, 1000)
+endif;
+if (ObjectGetHealth (obj_21) < 1000)
+  ObjectSetHealth (obj_21, 1000)
+endif;
+if (ObjectGetHealth (obj_22) < 1000)
+  ObjectSetHealth (obj_22, 1000)
+endif;
+if (ObjectGetHealth (obj_23) < 1000)
+  ObjectSetHealth (obj_23, 1000)
+endif;

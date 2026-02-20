@@ -1,0 +1,79 @@
+// File: HKP3D5HK.tok
+// Size: 1163 bytes, segments: 140, vars: 40
+
+int (v0)
+int (v1)
+int (v2)
+int (v3)
+obj (v4)
+obj (v5)
+obj (v6)
+obj (v7)
+obj (v8)
+obj (v9)
+obj (v10)
+obj (v11)
+obj (v12)
+obj (v13)
+int (v14)
+int (v15)
+int (v16)
+int (v17)
+int (v18)
+if (ModelTick () == 0)
+  obj_6 = NewObject (GetPlayerSide (), STR[25], GetSidePosition (GetPlayerSide ()))
+  ObjectToolTip (obj_6, 47)
+  obj_7 = NewObject (GetPlayerSide (), STR[25], GetSidePosition (GetPlayerSide ()))
+  ObjectToolTip (obj_7, 47)
+  obj_8 = NewObject (GetPlayerSide (), STR[25], GetSidePosition (GetPlayerSide ()))
+  ObjectToolTip (obj_8, 47)
+  Message (9)
+  NewObject (GetPlayerSide (), STR[18], GetSidePosition (GetPlayerSide ()))
+  int_0 = 3500
+  int_1 = 4000
+  int_2 = CreateSide ()
+  SideEnemyTo (int_2, GetPlayerSide ())
+  SideEnemyTo (GetPlayerSide (), int_2)
+endif;
+if (ModelTick () == 2550)
+  Message (13)
+endif;
+if ((ModelTick () == int_1) && (int_3 < 4))
+  AirStrike (int_2, GetNeutralEntrancePoint (), GetPlayerSide (), STR[35], STR[35], STR[35], STR[35], STR[35], STR[35])
+  int_3 = int_3 + 1
+  int_18 = TRUE
+  int_14 = FALSE
+  int_0 = PIPRelease () + 4000
+endif;
+if ((ModelTick () >= int_1) && (int_14 == FALSE) && (AirStrikeDone (int_2) == TRUE))
+  SideAIExitMap (int_2)
+  int_14 = TRUE
+endif;
+if (ModelTick () == int_1)
+  obj_9 = CarryAllDelivery (GetPlayerSide (), STR[25], GetSidePosition (GetPlayerSide ()))
+  SetVeterancy (obj_9, 3)
+  ObjectToolTip (obj_9, 47)
+  obj_10 = CarryAllDelivery (GetPlayerSide (), STR[25], GetSidePosition (GetPlayerSide ()))
+  SetVeterancy (obj_10, 3)
+  ObjectToolTip (obj_10, 47)
+  obj_11 = CarryAllDelivery (GetPlayerSide (), STR[25], GetSidePosition (GetPlayerSide ()))
+  ObjectToolTip (obj_11, 47)
+  obj_12 = CarryAllDelivery (GetPlayerSide (), STR[25], GetSidePosition (GetPlayerSide ()))
+  ObjectToolTip (obj_12, 47)
+  obj_13 = CarryAllDelivery (GetPlayerSide (), STR[25], GetSidePosition (GetPlayerSide ()))
+  ObjectToolTip (obj_13, 47)
+  int_16 = TRUE
+endif;
+if ((ModelTick () == int_1 + 25) && (int_16 == TRUE))
+  Message (15)
+  PIPCameraLookAtPoint (GetSidePosition (GetPlayerSide ()))
+endif;
+if ((ModelTick () == int_1 + 50) && (int_16 == TRUE))
+  PIPCameraStartRotate (2, 1)
+endif;
+if ((ModelTick () == int_1 + 150) && (int_16 == TRUE))
+  PIPCameraStopRotate ()
+endif;
+if ((ModelTick () == int_1 + 160) && (int_16 == TRUE))
+  PIPRelease ()
+endif;
