@@ -188,6 +188,66 @@ export class PauseMenu {
     autoRow.appendChild(autoLoadBtn);
     panel.appendChild(autoRow);
 
+    // Export/Import section
+    const ioRow = document.createElement('div');
+    ioRow.style.cssText = 'display:flex;align-items:center;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid #333;';
+
+    const ioLabel = document.createElement('div');
+    ioLabel.style.cssText = 'color:#888;font-size:13px;flex:1;';
+    ioLabel.textContent = 'File Transfer';
+    ioRow.appendChild(ioLabel);
+
+    const exportBtn = document.createElement('button');
+    exportBtn.textContent = 'Export';
+    exportBtn.style.cssText = 'padding:4px 12px;background:#2a2a1a;border:1px solid #aa8;color:#ccc;cursor:pointer;font-size:12px;';
+    exportBtn.onmouseenter = () => { exportBtn.style.borderColor = '#dd8'; };
+    exportBtn.onmouseleave = () => { exportBtn.style.borderColor = '#aa8'; };
+    exportBtn.onclick = () => {
+      const data = this.deps.buildSaveData();
+      const json = JSON.stringify(data);
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `ebfd-save-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      this.deps.selectionPanel.addMessage('Save exported', '#dd8');
+    };
+    ioRow.appendChild(exportBtn);
+
+    const importBtn = document.createElement('button');
+    importBtn.textContent = 'Import';
+    importBtn.style.cssText = 'padding:4px 12px;background:#1a1a2a;border:1px solid #88a;color:#ccc;cursor:pointer;font-size:12px;';
+    importBtn.onmouseenter = () => { importBtn.style.borderColor = '#aaf'; };
+    importBtn.onmouseleave = () => { importBtn.style.borderColor = '#88a'; };
+    importBtn.onclick = () => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.json';
+      input.onchange = () => {
+        const file = input.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          try {
+            const text = reader.result as string;
+            JSON.parse(text); // Validate JSON
+            localStorage.setItem('ebfd_load_data', text);
+            localStorage.setItem('ebfd_load', '1');
+            window.location.reload();
+          } catch {
+            this.deps.selectionPanel.addMessage('Invalid save file', '#ff4444');
+          }
+        };
+        reader.readAsText(file);
+      };
+      input.click();
+    };
+    ioRow.appendChild(importBtn);
+
+    panel.appendChild(ioRow);
+
     // Back button
     this.addBackButton(panel);
     this.overlay.appendChild(panel);

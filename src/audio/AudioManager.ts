@@ -1155,12 +1155,25 @@ export class AudioManager {
     this.lastCombatEvent = Date.now();
   }
 
-  /** Call periodically from game loop to decay intensity */
+  /** Call periodically from game loop to decay intensity and adapt music */
   updateIntensity(): void {
     const elapsed = Date.now() - this.lastCombatEvent;
     if (elapsed > 3000) {
       // Decay after 3 seconds of no combat
       this.combatIntensity = Math.max(0, this.combatIntensity - 0.005);
+    }
+
+    // Combat-adaptive music: swell volume during intense battles
+    // Skip during crossfade to avoid fighting with the crossfade timer
+    if (this.musicElement && !this.muted && !this.crossfadeTimer) {
+      // Base volume + up to 40% boost at max intensity
+      const targetVol = this.musicVolume * (1 + this.combatIntensity * 0.4);
+      // Smooth transition toward target
+      const current = this.musicElement.volume;
+      const diff = targetVol - current;
+      if (Math.abs(diff) > 0.002) {
+        this.musicElement.volume = current + diff * 0.05;
+      }
     }
   }
 

@@ -291,12 +291,12 @@ async function main() {
     });
   }
 
-  // Apply skirmish/campaign credits
+  // Apply skirmish/campaign/observer credits
   const desiredCreditsByPlayer = new Map<number, number>();
-  if (house.skirmishOptions && house.gameMode === 'skirmish') {
+  if (house.skirmishOptions && (house.gameMode === 'skirmish' || house.gameMode === 'observer')) {
     const opts = house.skirmishOptions;
     if (!savedGame) {
-      desiredCreditsByPlayer.set(0, opts.startingCredits);
+      if (house.gameMode !== 'observer') desiredCreditsByPlayer.set(0, opts.startingCredits);
       for (let i = 0; i < ctx.opponents.length; i++) desiredCreditsByPlayer.set(i + 1, opts.startingCredits);
     }
     ctx.productionSystem.setMaxUnits(opts.unitCap);
@@ -307,7 +307,7 @@ async function main() {
       for (let i = 0; i < ctx.opponents.length; i++) desiredCreditsByPlayer.set(i + 1, missionRuntime.aiStartingCredits);
     }
   }
-  if (!savedGame && house.gameMode === 'skirmish') {
+  if (!savedGame && (house.gameMode === 'skirmish' || house.gameMode === 'observer')) {
     for (let i = 0; i < ctx.opponents.length; i++) {
       if (ctx.opponents[i].difficulty === 'hard') {
         const pid = i + 1;
@@ -454,6 +454,27 @@ async function main() {
     restoreFromSave(ctx, savedGame);
   } else {
     spawnFreshGame(ctx);
+  }
+
+  // --- OBSERVER MODE SETUP ---
+  if (house.gameMode === 'observer') {
+    // Disable fog of war — spectator sees everything
+    ctx.fogOfWar.setEnabled(false);
+    // Hide sidebar (no player production in observer mode)
+    const sidebarEl = document.getElementById('sidebar');
+    if (sidebarEl) sidebarEl.style.display = 'none';
+    // Hide solaris/power display
+    const solaris = document.getElementById('solaris');
+    if (solaris) solaris.style.display = 'none';
+    // Disable victory/defeat checks for player 0 (spectator)
+    ctx.victorySystem.setEnabled(false);
+    // Show observer label
+    const observerLabel = document.createElement('div');
+    observerLabel.id = 'observer-label';
+    observerLabel.style.cssText = 'position:fixed;top:8px;left:50%;transform:translateX(-50%);color:#88cc88;font-size:14px;font-family:inherit;z-index:100;pointer-events:none;text-shadow:0 1px 3px #000;letter-spacing:2px;';
+    observerLabel.textContent = 'OBSERVER MODE';
+    document.body.appendChild(observerLabel);
+    console.log('Observer mode: watching AI battle. WASD to scroll, M to mute.');
   }
 
   // --- DIALOG MANAGER ---

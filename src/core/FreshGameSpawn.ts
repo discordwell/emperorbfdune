@@ -22,49 +22,59 @@ export function spawnFreshGame(ctx: GameContext): void {
   }
   const spawnPositions = getSpawnPositions(terrain.getMapWidth(), terrain.getMapHeight(), totalPlayers, spawnRandom);
   const playerBase = spawnPositions[0];
+  const isObserver = house.gameMode === 'observer';
 
   // Update all AI targets/bases to match spawn positions
   for (let i = 0; i < aiPlayers.length; i++) {
     const aiBase = spawnPositions[i + 1];
     aiPlayers[i].setBasePosition(aiBase.x, aiBase.z);
-    aiPlayers[i].setTargetPosition(playerBase.x, playerBase.z);
+    if (isObserver) {
+      // In observer mode, AIs target each other in round-robin
+      const targetIdx = (i + 1) % aiPlayers.length;
+      const targetBase = spawnPositions[targetIdx + 1] ?? spawnPositions[1];
+      aiPlayers[i].setTargetPosition(targetBase.x, targetBase.z);
+    } else {
+      aiPlayers[i].setTargetPosition(playerBase.x, playerBase.z);
+    }
   }
 
-  // Player base
-  const px = house.prefix;
-  ctx.spawnBuilding(world, `${px}ConYard`, 0, playerBase.x, playerBase.z);
-  ctx.spawnBuilding(world, `${px}SmWindtrap`, 0, playerBase.x + 6, playerBase.z);
-  ctx.spawnBuilding(world, `${px}Barracks`, 0, playerBase.x - 6, playerBase.z);
-  ctx.spawnBuilding(world, `${px}Factory`, 0, playerBase.x, playerBase.z + 6);
-  ctx.spawnBuilding(world, `${px}Refinery`, 0, playerBase.x + 6, playerBase.z + 6);
+  // Player base (skip in observer mode — player is just a spectator)
+  if (!isObserver) {
+    const px = house.prefix;
+    ctx.spawnBuilding(world, `${px}ConYard`, 0, playerBase.x, playerBase.z);
+    ctx.spawnBuilding(world, `${px}SmWindtrap`, 0, playerBase.x + 6, playerBase.z);
+    ctx.spawnBuilding(world, `${px}Barracks`, 0, playerBase.x - 6, playerBase.z);
+    ctx.spawnBuilding(world, `${px}Factory`, 0, playerBase.x, playerBase.z + 6);
+    ctx.spawnBuilding(world, `${px}Refinery`, 0, playerBase.x + 6, playerBase.z + 6);
 
-  // Starting player units
-  const playerInfantry = [...gameRules.units.keys()].filter(n => n.startsWith(px) && gameRules.units.get(n)?.infantry);
-  const playerVehicles = [...gameRules.units.keys()].filter(n => n.startsWith(px) && !gameRules.units.get(n)?.infantry && gameRules.units.get(n)!.cost > 0);
+    // Starting player units
+    const playerInfantry = [...gameRules.units.keys()].filter(n => n.startsWith(px) && gameRules.units.get(n)?.infantry);
+    const playerVehicles = [...gameRules.units.keys()].filter(n => n.startsWith(px) && !gameRules.units.get(n)?.infantry && gameRules.units.get(n)!.cost > 0);
 
-  for (let i = 0; i < 3 && i < playerInfantry.length; i++) {
-    ctx.spawnUnit(world, playerInfantry[i], 0, playerBase.x - 5 + i * 2, playerBase.z + 10);
-  }
-  for (let i = 0; i < 4 && i < playerVehicles.length; i++) {
-    ctx.spawnUnit(world, playerVehicles[i], 0, playerBase.x + 3 + i * 2, playerBase.z + 12);
-  }
+    for (let i = 0; i < 3 && i < playerInfantry.length; i++) {
+      ctx.spawnUnit(world, playerInfantry[i], 0, playerBase.x - 5 + i * 2, playerBase.z + 10);
+    }
+    for (let i = 0; i < 4 && i < playerVehicles.length; i++) {
+      ctx.spawnUnit(world, playerVehicles[i], 0, playerBase.x + 3 + i * 2, playerBase.z + 12);
+    }
 
-  // Harvester
-  const harvTypes = [...gameRules.units.keys()].filter(n =>
-    (n.startsWith(px) || n === 'Harvester') && (n.includes('Harv') || n.includes('harvester'))
-  );
-  if (harvTypes.length > 0) {
-    ctx.spawnUnit(world, harvTypes[0], 0, playerBase.x + 10, playerBase.z + 8);
-  } else {
-    const fallbackVehicle = playerVehicles[0];
-    if (fallbackVehicle) {
-      const harvEid = ctx.spawnUnit(world, fallbackVehicle, 0, playerBase.x + 10, playerBase.z + 8);
-      if (harvEid >= 0) {
-        addComponent(world, Harvester, harvEid);
-        Harvester.maxCapacity[harvEid] = 1.0;
-        Harvester.spiceCarried[harvEid] = 0;
-        Harvester.state[harvEid] = 0;
-        Harvester.refineryEntity[harvEid] = 0;
+    // Harvester
+    const harvTypes = [...gameRules.units.keys()].filter(n =>
+      (n.startsWith(px) || n === 'Harvester') && (n.includes('Harv') || n.includes('harvester'))
+    );
+    if (harvTypes.length > 0) {
+      ctx.spawnUnit(world, harvTypes[0], 0, playerBase.x + 10, playerBase.z + 8);
+    } else {
+      const fallbackVehicle = playerVehicles[0];
+      if (fallbackVehicle) {
+        const harvEid = ctx.spawnUnit(world, fallbackVehicle, 0, playerBase.x + 10, playerBase.z + 8);
+        if (harvEid >= 0) {
+          addComponent(world, Harvester, harvEid);
+          Harvester.maxCapacity[harvEid] = 1.0;
+          Harvester.spiceCarried[harvEid] = 0;
+          Harvester.state[harvEid] = 0;
+          Harvester.refineryEntity[harvEid] = 0;
+        }
       }
     }
   }
@@ -100,7 +110,12 @@ export function spawnFreshGame(ctx: GameContext): void {
     }
   }
 
-  // Camera starts at player base
-  scene.cameraTarget.set(playerBase.x, 0, playerBase.z);
+  // Camera starts at player base (or first AI base in observer mode)
+  if (isObserver && spawnPositions.length > 1) {
+    const aiBase = spawnPositions[1];
+    scene.cameraTarget.set(aiBase.x, 0, aiBase.z);
+  } else {
+    scene.cameraTarget.set(playerBase.x, 0, playerBase.z);
+  }
   scene.updateCameraPosition();
 }

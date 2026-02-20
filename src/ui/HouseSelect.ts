@@ -25,7 +25,7 @@ export interface MapChoice {
   players?: number;
 }
 
-export type GameMode = 'skirmish' | 'campaign';
+export type GameMode = 'skirmish' | 'campaign' | 'observer';
 
 export interface SkirmishOptions {
   startingCredits: number;
@@ -419,6 +419,15 @@ export class HouseSelect {
     };
     grid.appendChild(skirmishCard);
 
+    const observerCard = this.createCard('Observer', '', 'Watch AI houses battle each other. Free camera, no fog of war.', '#88cc88', 220);
+    observerCard.onclick = () => {
+      this.audioManager.playSfx('select');
+      this.overlay.remove();
+      house.gameMode = 'observer';
+      this.showObserverSetup(house, resolve);
+    };
+    grid.appendChild(observerCard);
+
     this.overlay.appendChild(grid);
     document.body.appendChild(this.overlay);
   }
@@ -738,7 +747,7 @@ export class HouseSelect {
           house.mapChoice = map;
           this.overlay.remove();
           const maxPlayers = map.players ?? 2;
-          if (maxPlayers > 2) {
+          if (maxPlayers > 2 && house.gameMode !== 'observer') {
             this.showOpponentSelect(house, maxPlayers, resolve);
           } else {
             resolve(house);
@@ -819,6 +828,104 @@ export class HouseSelect {
         house.enemyName = prefixToName[opponents[0].prefix] ?? house.enemyName;
         this.overlay.remove();
         resolve(house);
+      };
+      grid.appendChild(card);
+    }
+
+    this.overlay.appendChild(grid);
+    document.body.appendChild(this.overlay);
+  }
+
+  private showObserverSetup(house: HouseChoice, resolve: (house: HouseChoice) => void): void {
+    this.overlay = document.createElement('div');
+    this.overlay.style.cssText = `
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: radial-gradient(ellipse at center, #1a0f00 0%, #000 80%);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      z-index: 2000;
+      font-family: 'Segoe UI', Tahoma, sans-serif;
+    `;
+
+    const headerText = document.createElement('div');
+    headerText.style.cssText = 'color:#88cc88; font-size:24px; font-weight:bold; margin-bottom:8px;';
+    headerText.textContent = 'Observer Mode';
+    this.overlay.appendChild(headerText);
+
+    const subText = document.createElement('div');
+    subText.style.cssText = 'color:#888; font-size:14px; margin-bottom:24px;';
+    subText.textContent = 'Select matchup to observe';
+    this.overlay.appendChild(subText);
+
+    const matchups = [
+      { label: 'Atreides vs Harkonnen', houses: ['AT', 'HK'], color: '#6699cc' },
+      { label: 'Atreides vs Ordos', houses: ['AT', 'OR'], color: '#6699aa' },
+      { label: 'Harkonnen vs Ordos', houses: ['HK', 'OR'], color: '#cc6666' },
+      { label: 'Free-for-All (3 Houses)', houses: ['AT', 'HK', 'OR'], color: '#cc9944' },
+    ];
+
+    const grid = document.createElement('div');
+    grid.style.cssText = 'display:flex; gap:12px; flex-wrap:wrap; justify-content:center;';
+
+    for (const matchup of matchups) {
+      const card = this.createCard(matchup.label, '', `AI-controlled ${matchup.houses.length} player battle`, matchup.color, 200);
+      card.onclick = () => {
+        this.audioManager.playSfx('select');
+        // Set up opponents — all are AI
+        const prefixToName: Record<string, string> = { AT: 'Atreides', HK: 'Harkonnen', OR: 'Ordos' };
+        house.opponents = matchup.houses.map(prefix => ({ prefix, difficulty: 'normal' as Difficulty }));
+        house.enemyPrefix = matchup.houses[0];
+        house.enemyName = prefixToName[matchup.houses[0]] ?? 'Unknown';
+        this.overlay.remove();
+        this.showObserverDifficulty(house, resolve);
+      };
+      grid.appendChild(card);
+    }
+
+    this.overlay.appendChild(grid);
+    document.body.appendChild(this.overlay);
+  }
+
+  private showObserverDifficulty(house: HouseChoice, resolve: (house: HouseChoice) => void): void {
+    this.overlay = document.createElement('div');
+    this.overlay.style.cssText = `
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: radial-gradient(ellipse at center, #1a0f00 0%, #000 80%);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      z-index: 2000;
+      font-family: 'Segoe UI', Tahoma, sans-serif;
+    `;
+
+    const headerText = document.createElement('div');
+    headerText.style.cssText = 'color:#88cc88; font-size:24px; font-weight:bold; margin-bottom:8px;';
+    headerText.textContent = 'Observer Mode';
+    this.overlay.appendChild(headerText);
+
+    const chooseText = document.createElement('div');
+    chooseText.style.cssText = 'color:#aaa; font-size:16px; margin-bottom:24px;';
+    chooseText.textContent = 'AI Difficulty';
+    this.overlay.appendChild(chooseText);
+
+    const difficulties: { id: Difficulty; label: string; desc: string; color: string }[] = [
+      { id: 'easy', label: 'Easy', desc: 'AI builds slowly. Longer matches.', color: '#44cc44' },
+      { id: 'normal', label: 'Normal', desc: 'Balanced AI opponents.', color: '#cccc44' },
+      { id: 'hard', label: 'Hard', desc: 'Aggressive AI. Fast-paced battles.', color: '#cc4444' },
+    ];
+
+    const grid = document.createElement('div');
+    grid.style.cssText = 'display:flex; gap:16px;';
+
+    for (const diff of difficulties) {
+      const card = this.createCard(diff.label, '', diff.desc, diff.color, 180);
+      card.onclick = () => {
+        this.audioManager.playSfx('select');
+        house.difficulty = diff.id;
+        if (house.opponents) {
+          for (const opp of house.opponents) opp.difficulty = diff.id;
+        }
+        this.overlay.remove();
+        this.showSkirmishOptions(house, resolve);
       };
       grid.appendChild(card);
     }

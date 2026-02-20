@@ -97,6 +97,7 @@ export class VictorySystem {
   private survivalTicks = 0; // Ticks to survive (0 = disabled)
   private objectiveLabel = '';
   private protectedBuildingToken = 'ConYard';
+  private enabled = true;
 
   constructor(audioManager: AudioManager, localPlayerId: number, onRestart?: () => void) {
     this.audioManager = audioManager;
@@ -113,6 +114,7 @@ export class VictorySystem {
   setSurvivalTicks(ticks: number): void { this.survivalTicks = ticks; }
   setObjectiveLabel(label: string): void { this.objectiveLabel = label; }
   setProtectedBuildingToken(token: string): void { this.protectedBuildingToken = token; }
+  setEnabled(enabled: boolean): void { this.enabled = enabled; }
   getTickCounter(): number { return this.tickCounter; }
   setTickCounter(ticks: number): void { this.tickCounter = ticks; }
   getObjectiveLabel(): string { return this.objectiveLabel; }
@@ -135,7 +137,7 @@ export class VictorySystem {
   }
 
   update(world: World): void {
-    if (this.outcome !== 'playing') return;
+    if (this.outcome !== 'playing' || !this.enabled) return;
 
     this.tickCounter++;
     if (this.tickCounter < this.graceperiodTicks) return;
