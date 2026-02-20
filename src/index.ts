@@ -98,6 +98,12 @@ interface SaveData {
   victoryTick?: number;
   controlGroups?: Record<number, number[]>;
   groundSplats?: Array<{ x: number; z: number; ticksLeft: number; ownerPlayerId: number; type: string }>;
+  abilityState?: {
+    deviated?: Array<{ eid: number; originalOwner: number; revertTick: number }>;
+    leech?: Array<{ leechEid: number; targetEid: number }>;
+    kobraDeployed?: number[];
+    kobraBaseRange?: Array<{ eid: number; range: number }>;
+  };
 }
 
 // ID maps
@@ -3048,6 +3054,25 @@ async function main() {
         return Object.keys(cg).length > 0 ? cg : undefined;
       })(),
       groundSplats: groundSplats.length > 0 ? groundSplats.map(s => ({ ...s })) : undefined,
+      abilityState: (() => {
+        const raw = abilitySystem.getAbilityState();
+        // Remap entity IDs to save-data indices
+        const mapEid = (eid: number) => eidToIndex.get(eid);
+        const deviated = raw.deviated
+          .filter(d => mapEid(d.eid) !== undefined)
+          .map(d => ({ eid: mapEid(d.eid)!, originalOwner: d.originalOwner, revertTick: d.revertTick }));
+        const leech = raw.leech
+          .filter(l => mapEid(l.leechEid) !== undefined && mapEid(l.targetEid) !== undefined)
+          .map(l => ({ leechEid: mapEid(l.leechEid)!, targetEid: mapEid(l.targetEid)! }));
+        const kobraDeployed = raw.kobraDeployed
+          .filter(eid => mapEid(eid) !== undefined)
+          .map(eid => mapEid(eid)!);
+        const kobraBaseRange = raw.kobraBaseRange
+          .filter(r => mapEid(r.eid) !== undefined)
+          .map(r => ({ eid: mapEid(r.eid)!, range: r.range }));
+        if (deviated.length === 0 && leech.length === 0 && kobraDeployed.length === 0) return undefined;
+        return { deviated, leech, kobraDeployed, kobraBaseRange };
+      })(),
     };
   }
 
@@ -3229,6 +3254,11 @@ async function main() {
       selectionManager.setControlGroups(restoredGroups);
     }
 
+    // Restore ability system state (deviated units, leeches, kobra deploy)
+    if (savedGame.abilityState) {
+      abilitySystem.restoreAbilityState(savedGame.abilityState, indexToEid);
+    }
+
     // Clean up any active storm listener before loading
     if (activeStormListener) {
       EventBus.off('game:tick', activeStormListener);
@@ -3393,7 +3423,7 @@ async function main() {
   const dialogManager = audioManager.getDialogManager();
   if (dialogManager) {
     dialogManager.setPlayerFaction(house.prefix);
-    dialogManager.wireEvents(0); // Human player is ID 0
+    dialogManager.wireEvents(0, (eid: number) => Owner.playerId[eid]); // Human player is ID 0
 
     // Set up harvester detection for "harvester under attack" dialog
     dialogManager.setHarvesterChecker(

@@ -440,9 +440,18 @@ export class ProductionSystem {
       item.elapsed += mult;
       if (item.elapsed >= item.totalTime) {
         const completedName = item.typeName;
+        const shouldRepeat = this.repeatUnits.get(playerId)?.has(completedName) ?? false;
         queue.shift();
         EventBus.emit('production:complete', { unitType: completedName, owner: playerId, buildingId: 0, isBuilding: false });
-        if (this.repeatUnits.get(playerId)?.has(completedName)) {
+        // Defer repeat-requeue: the just-completed unit hasn't spawned yet, so
+        // canBuild's pop cap check would be off by one. Add +1 to account for it.
+        if (shouldRepeat && this.unitCountCallback) {
+          const queuedUnits = (this.infantryQueues.get(playerId)?.length ?? 0)
+                            + (this.vehicleQueues.get(playerId)?.length ?? 0);
+          if (this.unitCountCallback(playerId) + queuedUnits + 1 < this.maxUnits) {
+            this.startProduction(playerId, completedName, false);
+          }
+        } else if (shouldRepeat) {
           this.startProduction(playerId, completedName, false);
         }
       }
@@ -456,9 +465,16 @@ export class ProductionSystem {
       item.elapsed += mult;
       if (item.elapsed >= item.totalTime) {
         const completedName = item.typeName;
+        const shouldRepeat = this.repeatUnits.get(playerId)?.has(completedName) ?? false;
         queue.shift();
         EventBus.emit('production:complete', { unitType: completedName, owner: playerId, buildingId: 0, isBuilding: false });
-        if (this.repeatUnits.get(playerId)?.has(completedName)) {
+        if (shouldRepeat && this.unitCountCallback) {
+          const queuedUnits = (this.infantryQueues.get(playerId)?.length ?? 0)
+                            + (this.vehicleQueues.get(playerId)?.length ?? 0);
+          if (this.unitCountCallback(playerId) + queuedUnits + 1 < this.maxUnits) {
+            this.startProduction(playerId, completedName, false);
+          }
+        } else if (shouldRepeat) {
           this.startProduction(playerId, completedName, false);
         }
       }

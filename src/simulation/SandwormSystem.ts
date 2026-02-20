@@ -20,6 +20,7 @@ interface Worm {
   speed: number;
   life: number; // Ticks remaining before burrowing
   huntingEid: number | null; // Entity being hunted
+  huntingOwner: number; // Owner of hunted entity at hunt start (for ID recycling detection)
   state: 'roaming' | 'hunting' | 'emerging' | 'submerging' | 'mounted';
   emergeTicks: number;
   riderEid?: number; // Entity riding this worm
@@ -174,6 +175,7 @@ export class SandwormSystem implements GameSystem {
       speed: 0.3,
       life: minLife + Math.floor(Math.random() * (maxLife - minLife)),
       huntingEid: null,
+      huntingOwner: -1,
       state: 'emerging',
       emergeTicks: 25, // 1 second emerge animation
     };
@@ -207,6 +209,7 @@ export class SandwormSystem implements GameSystem {
       const prey = this.findPrey(world, worm);
       if (prey !== null) {
         worm.huntingEid = prey;
+        worm.huntingOwner = Owner.playerId[prey];
         worm.state = 'hunting';
         worm.speed = 0.6; // Faster when hunting
       }
@@ -223,7 +226,8 @@ export class SandwormSystem implements GameSystem {
     // Check if prey is still alive and valid (guards against entity ID recycling)
     let targetX: number, targetZ: number;
     try {
-      if (!hasComponent(world, UnitType, worm.huntingEid) || Health.current[worm.huntingEid] <= 0) {
+      if (!hasComponent(world, UnitType, worm.huntingEid) || Health.current[worm.huntingEid] <= 0 ||
+          Owner.playerId[worm.huntingEid] !== worm.huntingOwner) {
         worm.huntingEid = null;
         worm.state = 'roaming';
         worm.speed = 0.3;
@@ -330,8 +334,8 @@ export class SandwormSystem implements GameSystem {
       return;
     }
 
-    // Check if rider is still alive
-    if (Health.current[worm.riderEid] <= 0) {
+    // Check if rider is still alive and is same entity (guards against entity ID recycling)
+    if (Health.current[worm.riderEid] <= 0 || Owner.playerId[worm.riderEid] !== worm.riderOwner) {
       worm.state = 'roaming';
       worm.speed = 0.3;
       worm.riderEid = undefined;

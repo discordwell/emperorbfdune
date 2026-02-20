@@ -426,7 +426,7 @@ export class DialogManager {
    * Wire up to EventBus events. Call once during initialization.
    * The playerId parameter identifies which player is the human player (for filtering).
    */
-  wireEvents(humanPlayerId: number): void {
+  wireEvents(humanPlayerId: number, ownerChecker?: (entityId: number) => number): void {
     // Production complete -> unitReady or buildingReady
     EventBus.on('production:complete', ({ owner, isBuilding }) => {
       if (owner !== humanPlayerId) return;
@@ -456,11 +456,11 @@ export class DialogManager {
     EventBus.on('unit:damaged', ({ entityId, attackerOwner, isBuilding }) => {
       // Only play for human player's units being attacked by enemies
       if (attackerOwner === humanPlayerId) return; // We're the attacker
+      // Must verify the damaged entity belongs to us (not enemy-vs-enemy combat)
+      if (ownerChecker && ownerChecker(entityId) !== humanPlayerId) return;
       if (isBuilding) {
         this.playDialog('baseUnderAttack');
       }
-      // Note: harvester detection would require checking the entity type,
-      // which we handle through a callback set externally
     });
 
     // Worm events

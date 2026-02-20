@@ -264,17 +264,19 @@ export class SuperweaponSystem {
       this.swButton.style.display = 'none';
     }
 
-    // AI fires superweapon at enemy base when ready (targets any enemy, not just player 0)
+    // AI fires superweapon at densest cluster of enemy buildings
     const aiSwBlds = buildingQuery(world);
     for (let aiPid = 1; aiPid < totalPlayers; aiPid++) {
       const aiSw = this.state.get(aiPid);
       if (aiSw?.ready) {
         let bestX = 100, bestZ = 100, bestCount = 0;
+        // Find enemy building with most other enemy buildings nearby
         for (const bid of aiSwBlds) {
           if (Owner.playerId[bid] === aiPid || Health.current[bid] <= 0) continue;
           const bx = Position.x[bid], bz = Position.z[bid];
           let count = 0;
           for (const bid2 of aiSwBlds) {
+            // Count nearby buildings NOT owned by this AI (i.e. enemy buildings)
             if (Owner.playerId[bid2] === aiPid || Health.current[bid2] <= 0) continue;
             const dx = Position.x[bid2] - bx, dz = Position.z[bid2] - bz;
             if (dx * dx + dz * dz < 225) count++;

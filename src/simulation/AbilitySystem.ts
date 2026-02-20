@@ -1376,4 +1376,73 @@ export class AbilitySystem {
       EventBus.emit('unit:died', { entityId: pEid, killerEntity: -1 });
     }
   }
+
+  // =========================================================================
+  // SAVE/LOAD
+  // =========================================================================
+
+  /** Serialize ability state that needs to persist across save/load. */
+  getAbilityState(): {
+    deviated: Array<{ eid: number; originalOwner: number; revertTick: number }>;
+    leech: Array<{ leechEid: number; targetEid: number }>;
+    kobraDeployed: number[];
+    kobraBaseRange: Array<{ eid: number; range: number }>;
+  } {
+    return {
+      deviated: [...this.deviatedUnits].map(([eid, info]) => ({
+        eid, originalOwner: info.originalOwner, revertTick: info.revertTick,
+      })),
+      leech: [...this.leechTargets].map(([leechEid, targetEid]) => ({ leechEid, targetEid })),
+      kobraDeployed: [...this.kobraDeployed],
+      kobraBaseRange: [...this.kobraBaseRange].map(([eid, range]) => ({ eid, range })),
+    };
+  }
+
+  /** Restore ability state from saved data, remapping old entity IDs to new ones. */
+  restoreAbilityState(
+    data: {
+      deviated?: Array<{ eid: number; originalOwner: number; revertTick: number }>;
+      leech?: Array<{ leechEid: number; targetEid: number }>;
+      kobraDeployed?: number[];
+      kobraBaseRange?: Array<{ eid: number; range: number }>;
+    },
+    eidMap: Map<number, number>, // old save-index -> new entity ID
+  ): void {
+    if (data.deviated) {
+      for (const d of data.deviated) {
+        const newEid = eidMap.get(d.eid);
+        if (newEid !== undefined && Health.current[newEid] > 0) {
+          this.deviatedUnits.set(newEid, { originalOwner: d.originalOwner, revertTick: d.revertTick });
+        }
+      }
+    }
+    if (data.leech) {
+      for (const l of data.leech) {
+        const newLeech = eidMap.get(l.leechEid);
+        const newTarget = eidMap.get(l.targetEid);
+        if (newLeech !== undefined && newTarget !== undefined &&
+            Health.current[newLeech] > 0 && Health.current[newTarget] > 0) {
+          this.leechTargets.set(newLeech, newTarget);
+          this.deps.combatSystem.setSuppressed(newLeech, true);
+        }
+      }
+    }
+    if (data.kobraDeployed && data.kobraBaseRange) {
+      const rangeMap = new Map(data.kobraBaseRange.map(r => [r.eid, r.range]));
+      for (const oldEid of data.kobraDeployed) {
+        const newEid = eidMap.get(oldEid);
+        if (newEid !== undefined && Health.current[newEid] > 0) {
+          this.kobraDeployed.add(newEid);
+          const baseRange = rangeMap.get(oldEid);
+          if (baseRange !== undefined) {
+            this.kobraBaseRange.set(newEid, baseRange);
+            // Re-apply doubled range
+            Combat.attackRange[newEid] = baseRange * 2;
+          }
+          // Re-immobilize
+          MoveTarget.active[newEid] = 0;
+        }
+      }
+    }
+  }
 }

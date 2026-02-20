@@ -376,9 +376,9 @@ export class SelectionManager {
         if (group && group.length > 0) {
           const world = (window as any).game?.getWorld();
           if (world) {
-            // Filter out dead entities
+            // Filter out dead entities and recycled IDs (wrong owner)
             const alive = group.filter(eid => {
-              try { return hasComponent(world, Health, eid) && Health.current[eid] > 0; } catch { return false; }
+              try { return hasComponent(world, Health, eid) && Health.current[eid] > 0 && Owner.playerId[eid] === this.localPlayerId; } catch { return false; }
             });
             this.controlGroups.set(groupNum, alive);
             if (alive.length > 0) {

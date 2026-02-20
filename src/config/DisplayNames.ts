@@ -45,6 +45,9 @@ const FACTION_PREFIX = /^(AT|HK|OR|GU|IX|FR|IM|TL)/;
 
 /** Get a human-friendly display name for an internal unit/building name */
 export function getDisplayName(internalName: string): string {
+  // Check full name first (e.g., 'FremenWarrior', 'ImpSardaukar')
+  if (DISPLAY_NAMES[internalName]) return DISPLAY_NAMES[internalName];
+  // Strip faction prefix and check again (e.g., 'ATSonicTank' -> 'SonicTank')
   const stripped = internalName.replace(FACTION_PREFIX, '');
   return DISPLAY_NAMES[stripped] ?? stripped.replace(/([a-z])([A-Z])/g, '$1 $2');
 }
