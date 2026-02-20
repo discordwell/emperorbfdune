@@ -267,7 +267,7 @@ export class VictorySystem {
       campaignBtn.onmouseenter = () => campaignBtn.style.background = '#f0c04055';
       campaignBtn.onmouseleave = () => campaignBtn.style.background = '#f0c04022';
       campaignBtn.onclick = () => {
-        if (this.overlay) this.overlay.remove();
+        if (this.overlay) { this.overlay.remove(); this.overlay = null; }
         this.onCampaignContinue!();
       };
       btnRow.appendChild(campaignBtn);
@@ -285,6 +285,7 @@ export class VictorySystem {
     btn.onmouseenter = () => btn.style.background = `${color}55`;
     btn.onmouseleave = () => btn.style.background = `${color}22`;
     btn.onclick = () => {
+      if (this.overlay) { this.overlay.remove(); this.overlay = null; }
       if (this.onRestart) {
         this.onRestart();
       } else {

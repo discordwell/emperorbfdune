@@ -92,7 +92,8 @@ export class IconRenderer {
     this.renderer.render(this.scene, this.camera);
     const dataUrl = this.renderer.domElement.toDataURL('image/png');
 
-    // Cleanup
+    // Cleanup: remove clone from scene. Materials and geometries are shared
+    // with the original cached model, so we must NOT dispose them here.
     this.scene.remove(clone);
 
     return dataUrl;

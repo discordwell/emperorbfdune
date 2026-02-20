@@ -23,6 +23,7 @@ export class DamageNumbers {
   private enabled = true;
   // Throttle: aggregate damage per tile per frame
   private pendingDamage = new Map<string, { x: number; z: number; damage: number; owner: number }>();
+  private hitHandler: (data: { x: number; z: number; damage: number; targetOwner: number }) => void;
 
   constructor(sceneManager: SceneManager) {
     this.sceneManager = sceneManager;
@@ -31,7 +32,7 @@ export class DamageNumbers {
     this.container.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:12;overflow:hidden;';
     document.body.appendChild(this.container);
 
-    EventBus.on('combat:hit', ({ x, z, damage, targetOwner }) => {
+    this.hitHandler = ({ x, z, damage, targetOwner }) => {
       if (!this.enabled) return;
       // Aggregate by approximate tile to avoid spam
       const key = `${Math.round(x / 3)},${Math.round(z / 3)}`;
@@ -41,7 +42,8 @@ export class DamageNumbers {
       } else {
         this.pendingDamage.set(key, { x, z, damage, owner: targetOwner });
       }
-    });
+    };
+    EventBus.on('combat:hit', this.hitHandler);
   }
 
   setFogOfWar(fog: FogOfWar): void {
@@ -134,6 +136,9 @@ export class DamageNumbers {
   }
 
   dispose(): void {
+    EventBus.off('combat:hit', this.hitHandler);
+    this.numbers.length = 0;
+    this.pendingDamage.clear();
     this.container.remove();
   }
 }

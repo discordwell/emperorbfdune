@@ -91,6 +91,12 @@ export class SampleBank {
     source.connect(gain);
     gain.connect(this.masterGain);
 
+    // Disconnect nodes after playback to prevent audio graph leak
+    source.onended = () => {
+      source.disconnect();
+      gain.disconnect();
+    };
+
     source.start(0);
   }
 

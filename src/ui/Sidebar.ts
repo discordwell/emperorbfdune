@@ -488,8 +488,10 @@ export class Sidebar {
       item.onclick = (e: MouseEvent) => {
         // Ctrl+click: toggle repeat mode (units only)
         if ((e.ctrlKey || e.metaKey) && !isBuilding) {
-          this.production.toggleRepeat(this.playerId, name);
-          this.onBuild(name, isBuilding); // Queue at least one
+          const nowOn = this.production.toggleRepeat(this.playerId, name);
+          if (nowOn) {
+            this.onBuild(name, isBuilding); // Queue first one when enabling repeat
+          }
           this.render(); // Refresh to show repeat indicator
           return;
         }
