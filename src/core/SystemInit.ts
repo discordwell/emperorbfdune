@@ -26,6 +26,7 @@ import { DamageNumbers } from '../rendering/DamageNumbers';
 import { SandwormSystem } from '../simulation/SandwormSystem';
 import { AbilitySystem } from '../simulation/AbilitySystem';
 import { SuperweaponSystem } from '../simulation/SuperweaponSystem';
+import { WallSystem } from '../simulation/WallSystem';
 import { AIPlayer } from '../ai/AIPlayer';
 import { AudioManager } from '../audio/AudioManager';
 import { BuildingPlacement } from '../input/BuildingPlacement';
@@ -218,6 +219,9 @@ export function initializeSystems(config: SystemInitConfig): GameContext {
 
   const sandwormSystem = new SandwormSystem(terrain, effectsManager);
   sandwormSystem.setRules(gameRules, unitTypeNames);
+
+  const wallSystem = new WallSystem(gameRules);
+  wallSystem.setBuildingTypeNames(buildingTypeNames);
 
   // AI setup
   const opponents: OpponentConfig[] = house.opponents ?? [{ prefix: house.enemyPrefix, difficulty: house.difficulty ?? 'normal' }];
@@ -439,7 +443,7 @@ export function initializeSystems(config: SystemInitConfig): GameContext {
     selectionManager, commandManager, pathfinder, movement,
     combatSystem, harvestSystem, productionSystem,
     minimapRenderer, fogOfWar, effectsManager, damageNumbers,
-    sandwormSystem, abilitySystem, superweaponSystem,
+    sandwormSystem, abilitySystem, superweaponSystem, wallSystem,
     audioManager, buildingPlacement, victorySystem, gameStats,
     selectionPanel, sidebar, iconRenderer, aiPlayers,
 

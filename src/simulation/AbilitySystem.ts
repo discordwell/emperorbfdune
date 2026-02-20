@@ -434,11 +434,17 @@ export class AbilitySystem {
       // Visual opacity transition
       const obj = unitRenderer.getEntityObject(eid);
       if (obj) {
+        const isFriendly = Owner.playerId[eid] === 0;
         // Determine target opacity
         let targetAlpha: number;
         if (timer.active) {
-          // Stealthed: player's own units at 0.4, enemy units invisible
-          targetAlpha = Owner.playerId[eid] === 0 ? 0.4 : 0.0;
+          if (isFriendly) {
+            // Shimmer: oscillate opacity for friendly stealthed units
+            targetAlpha = 0.3 + 0.15 * Math.sin(tickCount * 0.15 + eid * 1.7);
+          } else {
+            // Enemy stealthed: fully invisible
+            targetAlpha = 0.0;
+          }
         } else {
           targetAlpha = 1.0;
         }
@@ -455,15 +461,23 @@ export class AbilitySystem {
         // Smoothly transition toward target
         let newAlpha: number;
         if (timer.active) {
-          // Gradual fade when becoming stealthed
-          newAlpha = Math.max(targetAlpha, currentAlpha - FADE_RATE);
+          // Gradual fade in both directions for smooth shimmer
+          if (Math.abs(currentAlpha - targetAlpha) > FADE_RATE) {
+            newAlpha = currentAlpha + Math.sign(targetAlpha - currentAlpha) * FADE_RATE;
+          } else {
+            newAlpha = targetAlpha;
+          }
         } else {
-          // Instant reveal when breaking stealth
+          // Decloak: spawn flash once when breaking stealth
+          if (currentAlpha < 0.5 && isFriendly) {
+            this.deps.effectsManager.spawnExplosion(Position.x[eid], Position.y[eid] + 1, Position.z[eid], 'small');
+          }
           newAlpha = targetAlpha;
         }
 
-        // Apply opacity
-        if (Math.abs(newAlpha - currentAlpha) > 0.001) {
+        // Apply opacity (clamp to valid range)
+        newAlpha = Math.min(1.0, Math.max(0, newAlpha));
+        if (Math.abs(newAlpha - currentAlpha) > 0.001 || (timer.active && isFriendly)) {
           const isTransparent = newAlpha < 0.99;
           obj.traverse(child => {
             const mat = (child as any).material;

@@ -97,6 +97,7 @@ export class EffectsManager {
   // Sandstorm overlay
   private sandstormParticles: THREE.Mesh[] = [];
   private sandstormActive = false;
+  private preSandstormFog = { density: 0.003, color: 0xc09050 };
   // Dust trails from moving units
   private dustPuffs: { mesh: THREE.Mesh; life: number; vy: number }[] = [];
   private dustGeo: THREE.SphereGeometry | null = null;
@@ -1318,6 +1319,14 @@ export class EffectsManager {
     if (this.sandstormActive) return;
     this.sandstormActive = true;
 
+    // Save and increase fog density for sandstorm atmosphere
+    const fog = this.sceneManager.scene.fog as THREE.FogExp2 | null;
+    if (fog) {
+      this.preSandstormFog = { density: fog.density, color: fog.color.getHex() };
+      fog.density = 0.012;
+      fog.color.setHex(0xa08040);
+    }
+
     // Create swirling sand particles across the viewport
     for (let i = 0; i < 60; i++) {
       const mat = new THREE.MeshBasicMaterial({
@@ -1350,6 +1359,13 @@ export class EffectsManager {
       (mesh.material as THREE.Material).dispose();
     }
     this.sandstormParticles = [];
+
+    // Restore pre-sandstorm fog
+    const fog = this.sceneManager.scene.fog as THREE.FogExp2 | null;
+    if (fog) {
+      fog.density = this.preSandstormFog.density;
+      fog.color.setHex(this.preSandstormFog.color);
+    }
   }
 
   isSandstormActive(): boolean {

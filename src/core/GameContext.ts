@@ -19,6 +19,7 @@ import type { DamageNumbers } from '../rendering/DamageNumbers';
 import type { SandwormSystem } from '../simulation/SandwormSystem';
 import type { AbilitySystem } from '../simulation/AbilitySystem';
 import type { SuperweaponSystem } from '../simulation/SuperweaponSystem';
+import type { WallSystem } from '../simulation/WallSystem';
 import type { AIPlayer } from '../ai/AIPlayer';
 import type { AudioManager } from '../audio/AudioManager';
 import type { BuildingPlacement } from '../input/BuildingPlacement';
@@ -127,6 +128,7 @@ export interface GameContext {
   sandwormSystem: SandwormSystem;
   abilitySystem: AbilitySystem;
   superweaponSystem: SuperweaponSystem;
+  wallSystem: WallSystem;
   audioManager: AudioManager;
   buildingPlacement: BuildingPlacement;
   victorySystem: VictorySystem;
@@ -140,7 +142,7 @@ export interface GameContext {
   aircraftAmmo: Map<number, number>;
   rearmingAircraft: Set<number>;
   descendingUnits: Map<number, { startTick: number; duration: number }>;
-  dyingTilts: Map<number, { obj: THREE.Object3D; tiltDir: number; startTick: number; startY: number }>;
+  dyingTilts: Map<number, { obj: THREE.Object3D; tiltDir: number; startTick: number; startY: number; isBuilding?: boolean }>;
   processedDeaths: Set<number>;
   deferredActions: Array<{ tick: number; action: () => void }>;
   repairingBuildings: Set<number>;

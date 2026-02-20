@@ -41,6 +41,7 @@ export class HarvestSystem implements GameSystem {
 
   // Income rate tracking
   private lastSolarisSnapshot = 0;
+  private displayedSolaris = 0;
   // Tracked harvester entity IDs
   private knownHarvesters = new Set<number>();
   // Harvesters that recently took damage - flee to refinery (eid -> expiry tick)
@@ -228,21 +229,33 @@ export class HarvestSystem implements GameSystem {
       this.spiceDirty = false;
     }
 
-    // Update UI with flash animation
+    // Update UI with smooth count-up/count-down ticker
     const p0Credits = this.solaris.get(0) ?? 0;
     const el = document.getElementById('solaris-count');
     if (el) {
-      const prev = parseInt(el.textContent ?? '0', 10);
       const current = Math.floor(p0Credits);
-      el.textContent = String(current);
-      if (current > prev) {
-        el.classList.remove('flash-red');
-        el.classList.add('flash-green');
-        setTimeout(() => el.classList.remove('flash-green'), 400);
-      } else if (current < prev) {
+      // Snap on first update to avoid counting up from 0
+      if (this.displayedSolaris === 0 && current > 0 && this.tickCounter <= 1) {
+        this.displayedSolaris = current;
+      }
+      const displayed = this.displayedSolaris;
+      if (displayed !== current) {
+        // Animate toward target: move ~10% of difference per tick, minimum 1
+        const diff = current - displayed;
+        const step = Math.sign(diff) * Math.max(1, Math.floor(Math.abs(diff) * 0.15));
+        const next = Math.abs(step) >= Math.abs(diff) ? current : displayed + step;
+        this.displayedSolaris = next;
+        el.textContent = String(next);
+        if (diff > 0) {
+          el.classList.remove('flash-red');
+          if (!el.classList.contains('flash-green')) el.classList.add('flash-green');
+        } else {
+          el.classList.remove('flash-green');
+          if (!el.classList.contains('flash-red')) el.classList.add('flash-red');
+        }
+      } else {
         el.classList.remove('flash-green');
-        el.classList.add('flash-red');
-        setTimeout(() => el.classList.remove('flash-red'), 400);
+        el.classList.remove('flash-red');
       }
     }
 

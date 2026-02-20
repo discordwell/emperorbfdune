@@ -31,7 +31,8 @@ export function registerTickHandler(ctx: GameContext): void {
 
   // UI elements
   const powerEl = document.getElementById('power-status');
-  const powerBarFill = document.getElementById('power-bar-fill');
+  const powerBarGen = document.getElementById('power-bar-gen');
+  const powerBarUse = document.getElementById('power-bar-use');
   const unitCountEl = document.getElementById('unit-count');
   const unitBreakdownEl = document.getElementById('unit-breakdown');
   const commandModeEl = document.getElementById('command-mode');
@@ -106,13 +107,24 @@ export function registerTickHandler(ctx: GameContext): void {
     // Process death tilt animations
     for (const [eid, tilt] of dyingTilts) {
       const frame = currentTick - tilt.startTick + 1;
-      if (!tilt.obj.parent || frame > 8) {
+      const maxFrames = tilt.isBuilding ? 12 : 8;
+      if (!tilt.obj.parent || frame > maxFrames) {
         dyingTilts.delete(eid);
         continue;
       }
-      tilt.obj.rotation.x = Math.sin(tilt.tiltDir) * frame * 0.1;
-      tilt.obj.rotation.z = Math.cos(tilt.tiltDir) * frame * 0.1;
-      tilt.obj.position.y = tilt.startY - frame * 0.05;
+      if (tilt.isBuilding) {
+        // Buildings: shrink vertically and sink into ground
+        const t = frame / maxFrames;
+        tilt.obj.scale.y = Math.max(0.05, 1 - t * 0.8);
+        tilt.obj.position.y = tilt.startY - t * 1.5;
+        // Slight tilt for visual interest
+        tilt.obj.rotation.x = Math.sin(tilt.tiltDir) * t * 0.15;
+        tilt.obj.rotation.z = Math.cos(tilt.tiltDir) * t * 0.15;
+      } else {
+        tilt.obj.rotation.x = Math.sin(tilt.tiltDir) * frame * 0.1;
+        tilt.obj.rotation.z = Math.cos(tilt.tiltDir) * frame * 0.1;
+        tilt.obj.position.y = tilt.startY - frame * 0.05;
+      }
     }
 
     productionSystem.update();
@@ -232,6 +244,7 @@ export function registerTickHandler(ctx: GameContext): void {
 
     buildingPlacement.updateOccupiedTiles(world);
     pathfinder.updateBlockedTiles(buildingPlacement.getOccupiedTiles());
+    if (currentTick % 10 === 0) ctx.wallSystem.updateWallTiles(world);
     selectionPanel.setWorld(world);
     if (currentTick % 10 === 0) selectionPanel.refresh();
 
@@ -296,11 +309,9 @@ export function registerTickHandler(ctx: GameContext): void {
         powerEl.textContent = `${powerGen}/${powerUsed}`;
         const sufficient = powerGen >= powerUsed;
         powerEl.style.color = sufficient ? '#4f4' : '#f44';
-        if (powerBarFill) {
-          const ratio = powerUsed > 0 ? Math.min(1, powerGen / powerUsed) : 1;
-          powerBarFill.style.width = `${ratio * 100}%`;
-          powerBarFill.style.background = sufficient ? '#4f4' : ratio > 0.5 ? '#ff8800' : '#f44';
-        }
+        const total = (powerGen + powerUsed) || 1;
+        if (powerBarGen) powerBarGen.style.width = `${(powerGen / total) * 100}%`;
+        if (powerBarUse) powerBarUse.style.width = `${(powerUsed / total) * 100}%`;
       }
       if (unitCountEl) unitCountEl.textContent = `${unitCount}`;
       if (unitBreakdownEl) {

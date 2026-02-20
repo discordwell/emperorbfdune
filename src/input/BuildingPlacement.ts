@@ -23,6 +23,13 @@ export class BuildingPlacement {
   private concreteMode = false; // Special mode for placing concrete slabs
   private onConcrete: ((tx: number, tz: number) => boolean) | null = null;
 
+  // Wall drag-to-build mode
+  private wallMode = false;
+  private wallDragging = false;
+  private wallDragStart = { tx: -1, tz: -1 };
+  private wallPreviewGroup: THREE.Group | null = null;
+  private onWallLine: ((tiles: { tx: number; tz: number }[]) => void) | null = null;
+
   // Ghost preview
   private ghostMesh: THREE.Mesh | null = null;
   private gridHelper: THREE.Group | null = null;
@@ -127,7 +134,10 @@ export class BuildingPlacement {
     this.active = false;
     this.typeName = '';
     this.concreteMode = false;
+    this.wallMode = false;
+    this.wallDragging = false;
     this.onConcrete = null;
+    this.onWallLine = null;
 
     // Emit cancel event so cost can be refunded
     if (cancelledType) {
@@ -141,6 +151,7 @@ export class BuildingPlacement {
       this.ghostMesh = null;
     }
     this.disposeGridHelper();
+    this.disposeWallPreview();
 
     document.body.style.cursor = 'default';
   }
@@ -233,7 +244,7 @@ export class BuildingPlacement {
   }
 
   private onMouseMove = (e: MouseEvent): void => {
-    if (!this.active || !this.ghostMesh || !this.gridHelper) return;
+    if (!this.active || !this.ghostMesh) return;
 
     const worldPos = this.sceneManager.screenToWorld(e.clientX, e.clientY);
     if (!worldPos) return;
@@ -246,15 +257,28 @@ export class BuildingPlacement {
 
     this.ghostMesh.position.x = snapped.x;
     this.ghostMesh.position.z = snapped.z;
-    this.gridHelper.position.x = snapped.x;
-    this.gridHelper.position.z = snapped.z;
+    if (this.gridHelper) {
+      this.gridHelper.position.x = snapped.x;
+      this.gridHelper.position.z = snapped.z;
+    }
+
+    // Wall mode: update drag preview
+    if (this.wallMode) {
+      this.isValidPlacement = this.isWallTileValid(tile.tx, tile.tz);
+      const ghostColor = this.isValidPlacement ? this.validColor : this.invalidColor;
+      (this.ghostMesh.material as THREE.MeshBasicMaterial).color.copy(ghostColor);
+      if (this.wallDragging) {
+        this.updateWallPreview();
+      }
+      return;
+    }
 
     this.isValidPlacement = this.concreteMode
       ? this.checkConcreteValidity(tile.tx, tile.tz)
       : this.checkValidity(tile.tx, tile.tz);
 
     // Per-tile validity coloring for detailed feedback
-    if (!this.concreteMode) {
+    if (!this.concreteMode && this.gridHelper) {
       const { w, h } = this.buildingSize;
       const startX = -Math.floor((w - 1) / 2);
       const startZ = -Math.floor((h - 1) / 2);
@@ -271,7 +295,7 @@ export class BuildingPlacement {
           }
         }
       }
-    } else {
+    } else if (this.gridHelper) {
       const color = this.isValidPlacement ? this.validColor : this.invalidColor;
       this.gridHelper.children.forEach(child => {
         if (child instanceof THREE.Mesh) {
@@ -287,6 +311,61 @@ export class BuildingPlacement {
 
   private onMouseDown = (e: MouseEvent): void => {
     if (!this.active) return;
+
+    // Wall mode: start or end drag
+    if (this.wallMode && e.button === 0) {
+      if (!this.wallDragging) {
+        // Start drag from current tile
+        this.wallDragging = true;
+        this.wallDragStart = { ...this.currentTile };
+        this.updateWallPreview();
+      } else {
+        // End drag: place all valid wall tiles in the line
+        const tiles = BuildingPlacement.getWallLineTiles(
+          this.wallDragStart.tx, this.wallDragStart.tz,
+          this.currentTile.tx, this.currentTile.tz
+        );
+        const validTiles = tiles.filter(t => this.isWallTileValid(t.tx, t.tz));
+        if (validTiles.length > 0 && this.onWallLine) {
+          this.onWallLine(validTiles);
+          this.audioManager.playSfx('build');
+        } else {
+          this.audioManager.playSfx('error');
+        }
+        // Reset drag but stay in wall mode
+        this.wallDragging = false;
+        this.updateWallPreview();
+      }
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+
+    if (this.wallMode && e.button === 2) {
+      if (this.wallDragging) {
+        // Cancel current drag
+        this.wallDragging = false;
+        this.updateWallPreview();
+      } else {
+        // Exit wall mode
+        this.active = false;
+        this.wallMode = false;
+        this.onWallLine = null;
+        this.typeName = '';
+        if (this.ghostMesh) {
+          this.sceneManager.scene.remove(this.ghostMesh);
+          this.ghostMesh.geometry.dispose();
+          (this.ghostMesh.material as THREE.Material).dispose();
+          this.ghostMesh = null;
+        }
+        this.disposeGridHelper();
+        this.disposeWallPreview();
+        document.body.style.cursor = 'default';
+      }
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
 
     if (e.button === 0 && this.isValidPlacement) {
       if (this.concreteMode && this.onConcrete) {
@@ -388,14 +467,144 @@ export class BuildingPlacement {
     return t === TerrainType.Sand || t === TerrainType.Dunes;
   }
 
+  /** Start wall drag-to-build mode. Click and drag to place a line of wall segments. */
+  startWallPlacement(
+    typeName: string,
+    terrainTypes: string[],
+    onWallLine: (tiles: { tx: number; tz: number }[]) => void,
+  ): void {
+    this.cancel();
+    this.wallMode = true;
+    this.wallDragging = false;
+    this.onWallLine = onWallLine;
+    this.active = true;
+    this.typeName = typeName;
+    this.buildingSize = { w: 1, h: 1 };
+
+    // Map terrain requirements
+    this.allowedTerrain.clear();
+    for (const t of terrainTypes) {
+      const lower = t.trim().toLowerCase();
+      if (lower === 'rock') { this.allowedTerrain.add(TerrainType.Rock); this.allowedTerrain.add(TerrainType.InfantryRock); }
+      else if (lower === 'sand') { this.allowedTerrain.add(TerrainType.Sand); this.allowedTerrain.add(TerrainType.Dunes); }
+    }
+    this.allowedTerrain.add(TerrainType.ConcreteSlab);
+
+    // Single-tile ghost for cursor position
+    const geo = new THREE.BoxGeometry(TILE_SIZE, TILE_SIZE * 0.5, TILE_SIZE);
+    const mat = new THREE.MeshBasicMaterial({
+      color: this.validColor,
+      transparent: true,
+      opacity: 0.4,
+      side: THREE.DoubleSide,
+    });
+    this.ghostMesh = new THREE.Mesh(geo, mat);
+    this.ghostMesh.position.y = TILE_SIZE * 0.25;
+    this.sceneManager.scene.add(this.ghostMesh);
+
+    this.gridHelper = new THREE.Group();
+    this.sceneManager.scene.add(this.gridHelper);
+
+    // Preview group for the drag line
+    this.wallPreviewGroup = new THREE.Group();
+    this.sceneManager.scene.add(this.wallPreviewGroup);
+
+    document.body.style.cursor = 'crosshair';
+  }
+
+  /** Bresenham line algorithm for wall tile line (shared with WallSystem) */
+  static getWallLineTiles(startTx: number, startTz: number, endTx: number, endTz: number): { tx: number; tz: number }[] {
+    const tiles: { tx: number; tz: number }[] = [];
+    let dx = Math.abs(endTx - startTx);
+    let dz = Math.abs(endTz - startTz);
+    const sx = startTx < endTx ? 1 : -1;
+    const sz = startTz < endTz ? 1 : -1;
+    let err = dx - dz;
+    let tx = startTx;
+    let tz = startTz;
+    while (true) {
+      tiles.push({ tx, tz });
+      if (tx === endTx && tz === endTz) break;
+      const e2 = 2 * err;
+      if (e2 > -dz) { err -= dz; tx += sx; }
+      if (e2 < dx) { err += dx; tz += sz; }
+    }
+    return tiles;
+  }
+
+  private updateWallPreview(): void {
+    if (!this.wallPreviewGroup) return;
+
+    // Clear previous preview
+    for (const child of [...this.wallPreviewGroup.children]) {
+      if (child instanceof THREE.Mesh) {
+        child.geometry.dispose();
+        (child.material as THREE.Material).dispose();
+      }
+      this.wallPreviewGroup.remove(child);
+    }
+
+    if (!this.wallDragging) return;
+
+    const tiles = BuildingPlacement.getWallLineTiles(
+      this.wallDragStart.tx, this.wallDragStart.tz,
+      this.currentTile.tx, this.currentTile.tz
+    );
+
+    for (const t of tiles) {
+      const isValid = this.isWallTileValid(t.tx, t.tz);
+      const geo = new THREE.BoxGeometry(TILE_SIZE * 0.9, TILE_SIZE * 0.4, TILE_SIZE * 0.9);
+      const mat = new THREE.MeshBasicMaterial({
+        color: isValid ? this.validColor : this.invalidColor,
+        transparent: true,
+        opacity: 0.35,
+        side: THREE.DoubleSide,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      const worldPos = tileToWorld(t.tx, t.tz);
+      mesh.position.set(worldPos.x, TILE_SIZE * 0.2, worldPos.z);
+      this.wallPreviewGroup.add(mesh);
+    }
+  }
+
+  private isWallTileValid(tx: number, tz: number): boolean {
+    if (tx < 2 || tx >= this.terrain.getMapWidth() - 2 || tz < 2 || tz >= this.terrain.getMapHeight() - 2) return false;
+    const terrain = this.terrain.getTerrainType(tx, tz);
+    if (!this.allowedTerrain.has(terrain)) return false;
+    if (this.occupiedTiles.has(`${tx},${tz}`)) return false;
+    // Proximity check
+    const maxDist = GameConstants.MAX_BUILDING_PLACEMENT_TILE_DIST;
+    for (const key of this.ownedTiles) {
+      const [bx, bz] = key.split(',').map(Number);
+      if (Math.abs(bx - tx) + Math.abs(bz - tz) <= maxDist + 3) return true;
+    }
+    return false;
+  }
+
+  private disposeWallPreview(): void {
+    if (this.wallPreviewGroup) {
+      for (const child of [...this.wallPreviewGroup.children]) {
+        if (child instanceof THREE.Mesh) {
+          child.geometry.dispose();
+          (child.material as THREE.Material).dispose();
+        }
+      }
+      this.sceneManager.scene.remove(this.wallPreviewGroup);
+      this.wallPreviewGroup = null;
+    }
+  }
+
   private onKeyDown = (e: KeyboardEvent): void => {
     if (!this.active) return;
     if (e.key === 'Escape') {
-      if (this.concreteMode) {
-        // Exit concrete mode without refund event (matches right-click behavior)
+      if (this.concreteMode || this.wallMode) {
+        // Exit special mode without refund event
         this.active = false;
         this.concreteMode = false;
+        this.wallMode = false;
+        this.wallDragging = false;
         this.onConcrete = null;
+        this.onWallLine = null;
         this.typeName = '';
         if (this.ghostMesh) {
           this.sceneManager.scene.remove(this.ghostMesh);
@@ -404,6 +613,7 @@ export class BuildingPlacement {
           this.ghostMesh = null;
         }
         this.disposeGridHelper();
+        this.disposeWallPreview();
         document.body.style.cursor = 'default';
       } else {
         this.cancel();

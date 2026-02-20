@@ -24,6 +24,7 @@ export interface BuildingDef {
   deployTiles: { x: number; y: number; angle: number }[];
 
   // Flags
+  wall: boolean; // Single-tile wall segment (drag-to-build, auto-connect)
   refinery: boolean;
   canBeEngineered: boolean;
   disableWithLowPower: boolean;
@@ -73,6 +74,7 @@ export function createDefaultBuildingDef(name: string): BuildingDef {
     stormDamage: 0,
     occupy: [],
     deployTiles: [],
+    wall: false,
     refinery: false,
     canBeEngineered: true,
     disableWithLowPower: false,

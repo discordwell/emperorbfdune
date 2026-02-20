@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { GameContext } from './GameContext';
 import { GameConstants } from '../utils/Constants';
+import { tileToWorld } from '../utils/MathUtils';
 import { EventBus } from './EventBus';
 import {
   hasComponent, removeEntity,
@@ -90,11 +91,11 @@ export function registerEventHandlers(ctx: GameContext): void {
       movement.invalidateAllPaths();
     }
 
-    // Death animation
+    // Death animation (units tilt, buildings collapse with shrink effect)
     const hasDeathClip = unitRenderer.playDeathAnim(entityId);
     const obj = unitRenderer.getEntityObject(entityId);
-    if (obj && !isBuilding && !hasDeathClip) {
-      dyingTilts.set(entityId, { obj, tiltDir: Math.random() * Math.PI * 2, startTick: game.getTickCount(), startY: obj.position.y });
+    if (obj && !hasDeathClip) {
+      dyingTilts.set(entityId, { obj, tiltDir: Math.random() * Math.PI * 2, startTick: game.getTickCount(), startY: obj.position.y, isBuilding });
     }
 
     // Clean up building from production prerequisites
@@ -401,14 +402,46 @@ export function registerEventHandlers(ctx: GameContext): void {
     if (isBuildingType) {
       if (owner === 0) {
         const placeDef = gameRules.buildings.get(unitType);
-        const buildingFootprints = new Map<string, { w: number; h: number }>();
-        for (const [name, def] of gameRules.buildings) {
-          const h = def.occupy.length || 3;
-          const w = def.occupy[0]?.length || 3;
-          buildingFootprints.set(name, { w, h });
+        if (placeDef?.wall) {
+          // Wall: use drag-to-build mode, spawning each tile individually
+          // First tile is covered by production cost; subsequent tiles charge per-tile
+          const wallCostPerTile = placeDef.cost;
+          let firstTileFree = true;
+          buildingPlacement.startWallPlacement(unitType, placeDef.terrain, (tiles) => {
+            const w2 = game.getWorld();
+            let placed = 0;
+            for (const t of tiles) {
+              if (!firstTileFree && harvestSystem.getSolaris(0) < wallCostPerTile) {
+                if (placed === 0) selectionPanel.addMessage('Insufficient funds', '#ff4444');
+                break;
+              }
+              const worldPos = tileToWorld(t.tx, t.tz);
+              const eid = ctx.spawnBuilding(w2, unitType, 0, worldPos.x, worldPos.z);
+              if (eid >= 0) {
+                if (firstTileFree) {
+                  firstTileFree = false;
+                } else {
+                  harvestSystem.addSolaris(0, -wallCostPerTile);
+                }
+                EventBus.emit('building:placed', { entityId: eid, buildingType: unitType, owner: 0 });
+                unitRenderer.startConstruction(eid, Math.max(15, Math.floor((placeDef.buildTime ?? 60) * 0.3)));
+                placed++;
+                // Update occupied tiles so subsequent tiles in this line don't overlap
+                buildingPlacement.updateOccupiedTiles(w2);
+              }
+            }
+            if (placed > 0) movement.invalidateAllPaths();
+          });
+        } else {
+          const buildingFootprints = new Map<string, { w: number; h: number }>();
+          for (const [name, def] of gameRules.buildings) {
+            const h = def.occupy.length || 3;
+            const w = def.occupy[0]?.length || 3;
+            buildingFootprints.set(name, { w, h });
+          }
+          const fp = buildingFootprints.get(unitType) ?? { w: 3, h: 3 };
+          buildingPlacement.startPlacement(unitType, fp.w, fp.h, placeDef?.terrain);
         }
-        const fp = buildingFootprints.get(unitType) ?? { w: 3, h: 3 };
-        buildingPlacement.startPlacement(unitType, fp.w, fp.h, placeDef?.terrain);
       } else {
         const bDef = gameRules.buildings.get(unitType);
         const ownerAi = aiPlayers[owner - 1];

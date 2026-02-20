@@ -46,6 +46,7 @@ export class UnitRenderer {
   private entityObjects = new Map<number, THREE.Group>();
   // Selection circles
   private selectionCircles = new Map<number, THREE.Mesh>();
+  private shadowCircles = new Map<number, THREE.Mesh>();
   // Health bars
   private healthBars = new Map<number, THREE.Sprite>();
   // Shield bars (cyan, above health bar)
@@ -505,6 +506,22 @@ export class UnitRenderer {
     group.add(circle);
     this.selectionCircles.set(eid, circle);
 
+    // Ground shadow circle (dark ellipse under unit)
+    const shadowR = isBuilding ? 2.5 : 0.7;
+    const shadowGeo = new THREE.CircleGeometry(shadowR, 16);
+    shadowGeo.rotateX(-Math.PI / 2);
+    const shadowMat = new THREE.MeshBasicMaterial({
+      color: 0x000000,
+      transparent: true,
+      opacity: 0.25,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const shadow = new THREE.Mesh(shadowGeo, shadowMat);
+    shadow.position.y = 0.02;
+    group.add(shadow);
+    this.shadowCircles.set(eid, shadow);
+
     // Apply pending model if setEntityModel was called before visual existed
     const pending = this.pendingModels.get(eid);
     if (pending) {
@@ -555,11 +572,12 @@ export class UnitRenderer {
     }
 
     // Remove placeholder children and dispose their geometry/material
-    // Preserve the selection circle — it must not be disposed
+    // Preserve the selection circle and shadow — they must not be disposed
     const circle = this.selectionCircles.get(eid);
+    const shadow = this.shadowCircles.get(eid);
     const childrenToRemove = [...existing.children];
     for (const child of childrenToRemove) {
-      if (child === circle) continue; // Skip selection circle — re-used below
+      if (child === circle || child === shadow) continue;
       existing.remove(child);
       if (child instanceof THREE.Mesh) {
         child.geometry?.dispose();
@@ -921,6 +939,8 @@ export class UnitRenderer {
       if (shieldBubble) { obj.remove(shieldBubble); shieldBubble.geometry.dispose(); (shieldBubble.material as THREE.Material).dispose(); }
       const rank = this.rankSprites.get(eid);
       if (rank) { obj.remove(rank); (rank.material as THREE.Material).dispose(); }
+      const shadowC = this.shadowCircles.get(eid);
+      if (shadowC) { obj.remove(shadowC); shadowC.geometry.dispose(); (shadowC.material as THREE.Material).dispose(); }
 
       // Start death fade animation instead of instant removal
       obj.traverse(child => {
@@ -933,6 +953,7 @@ export class UnitRenderer {
       this.entityObjects.delete(eid);
     }
     this.selectionCircles.delete(eid);
+    this.shadowCircles.delete(eid);
     this.healthBars.delete(eid);
     this.shieldBars.delete(eid);
     this.shieldBubbles.delete(eid);

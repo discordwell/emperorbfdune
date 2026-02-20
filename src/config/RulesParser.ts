@@ -319,6 +319,7 @@ function parseBuildingDef(name: string, section: Section): BuildingDef {
         if (last) last.angle = parseNum(value);
         break;
       }
+      case 'Wall': def.wall = parseBool(value); break;
       case 'Refinery': def.refinery = parseBool(value); break;
       case 'CanBeEngineered': def.canBeEngineered = parseBool(value); break;
       case 'DisableWithLowPower': def.disableWithLowPower = parseBool(value); break;
