@@ -1339,8 +1339,9 @@ async function main() {
   EventBus.on('bloom:eruption', ({ x, z }) => {
     effectsManager.spawnExplosion(x, 0.5, z, 'large');
     scene.shake(0.3);
-    selectionPanel.addMessage('Spice bloom detected!', '#ff8800');
+    selectionPanel.addMessage('Spice bloom erupted! New spice field detected.', '#ff8800');
     audioManager.playSfx('worm'); // Rumble sound
+    minimapRenderer.flashPing(x, z, '#ff8800'); // Orange ping on minimap
     terrain.updateSpiceVisuals(); // Immediate visual update for bloom
     // Remove bloom marker
     const key = `${Math.floor(x)},${Math.floor(z)}`;
@@ -1351,21 +1352,7 @@ async function main() {
       (marker.mesh.material as THREE.Material).dispose();
       bloomMarkers.delete(key);
     }
-    // Bloom eruption damages nearby units (SpicePuff damage within bloom radius)
-    const dmgRadius = GameConstants.SPICE_BLOOM_DAMAGE_RADIUS;
-    const r2 = dmgRadius * dmgRadius;
-    const allUnits = unitQuery(world);
-    for (const eid of allUnits) {
-      if (Health.current[eid] <= 0) continue;
-      const dx = Position.x[eid] - x;
-      const dz = Position.z[eid] - z;
-      if (dx * dx + dz * dz <= r2) {
-        Health.current[eid] = Math.max(0, Health.current[eid] - GameConstants.SPICE_BLOOM_DAMAGE);
-        if (Health.current[eid] <= 0) {
-          EventBus.emit('unit:died', { entityId: eid, killerEntity: -1 });
-        }
-      }
-    }
+    // AoE damage now handled inside HarvestSystem.executeBloom() with distance falloff
   });
 
   // Cash fallback notification
@@ -2154,6 +2141,33 @@ async function main() {
       }
       for (let i = 0; i < totalPlayers; i++) {
         harvestSystem.setCarryallAvailable(i, hasHanger[i]);
+      }
+
+      // Building degradation: structures on sand (no concrete) slowly take damage
+      if (game.getTickCount() % 250 === 0) {
+        for (const eid of buildings) {
+          if (Health.current[eid] <= 0) continue;
+          // Skip wind traps and walls (small/cheap structures)
+          const typeId = BuildingType.id[eid];
+          const bName = buildingTypeNames[typeId] ?? '';
+          if (bName.includes('Wall') || bName.includes('Windtrap') || bName.includes('SmWindtrap')) continue;
+          const bTile = worldToTile(Position.x[eid], Position.z[eid]);
+          let hasConcrete = false;
+          for (let dtz = -1; dtz <= 1; dtz++) {
+            for (let dtx = -1; dtx <= 1; dtx++) {
+              if (terrain.getTerrainType(bTile.tx + dtx, bTile.tz + dtz) === TerrainType.ConcreteSlab) {
+                hasConcrete = true;
+                break;
+              }
+            }
+            if (hasConcrete) break;
+          }
+          if (!hasConcrete) {
+            // 1% of max HP per 10 seconds — very slow but adds up
+            const dmg = Math.max(1, Math.floor(Health.max[eid] * 0.01));
+            Health.current[eid] = Math.max(1, Health.current[eid] - dmg); // Never kills, just degrades to 1 HP
+          }
+        }
       }
 
       // Building damage visual states: smoke and fire based on HP + repair sparkles

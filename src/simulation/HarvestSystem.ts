@@ -2,7 +2,7 @@ import type { GameSystem } from '../core/Game';
 import type { World } from '../core/ECS';
 import {
   Position, Harvester, MoveTarget, Owner, Health, BuildingType,
-  harvestQuery, buildingQuery,
+  harvestQuery, buildingQuery, unitQuery,
 } from '../core/ECS';
 import type { TerrainRenderer } from '../rendering/TerrainRenderer';
 import { TerrainType } from '../rendering/TerrainRenderer';
@@ -307,6 +307,31 @@ export class HarvestSystem implements GameSystem {
     this.spiceDirty = true;
 
     const wx = tileToWorld(tx, tz);
+
+    // AoE damage to units/buildings near the eruption (faithful to original)
+    if (this.world) {
+      const bloomDamage = 200;
+      const worldRadius = radius * 2; // Convert tile radius to world units
+      const r2 = worldRadius * worldRadius;
+      const allEntities = [...unitQuery(this.world), ...buildingQuery(this.world)];
+      for (const eid of allEntities) {
+        if (Health.current[eid] <= 0) continue;
+        const dx = Position.x[eid] - wx.x;
+        const dz = Position.z[eid] - wx.z;
+        const dist2 = dx * dx + dz * dz;
+        if (dist2 < r2) {
+          const dist = Math.sqrt(dist2);
+          const dmg = Math.floor(bloomDamage * (1 - dist / worldRadius));
+          if (dmg > 0) {
+            Health.current[eid] = Math.max(0, Health.current[eid] - dmg);
+            if (Health.current[eid] <= 0) {
+              EventBus.emit('unit:died', { entityId: eid, killerEntity: -1 });
+            }
+          }
+        }
+      }
+    }
+
     EventBus.emit('bloom:eruption', { x: wx.x, z: wx.z, radius });
   }
 
