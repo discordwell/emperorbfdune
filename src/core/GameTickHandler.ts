@@ -666,8 +666,8 @@ export function registerTickHandler(ctx: GameContext): void {
       ctx.replayRecorder.endTick(currentTick);
     }
 
-    // Autosave
-    if (currentTick > 0 && currentTick % 3000 === 0 && victorySystem.getOutcome() === 'playing') {
+    // Autosave (skip in observer mode — saves don't restore observer UI state)
+    if (currentTick > 0 && currentTick % 3000 === 0 && victorySystem.getOutcome() === 'playing' && ctx.house.gameMode !== 'observer') {
       const autoSaveData = ctx.buildSaveData();
       localStorage.setItem('ebfd_autosave', JSON.stringify(autoSaveData));
       localStorage.setItem('ebfd_autosave_time', new Date().toLocaleString());

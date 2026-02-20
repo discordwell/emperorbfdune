@@ -21,18 +21,21 @@ export function spawnFreshGame(ctx: GameContext): void {
   } else if (house.mapChoice) {
     spawnRandom = createSeededRng(`${house.mapChoice.seed}|${house.prefix}|${house.enemyPrefix}|${totalPlayers}`);
   }
-  const spawnPositions = getSpawnPositions(terrain.getMapWidth(), terrain.getMapHeight(), totalPlayers, spawnRandom);
-  const playerBase = spawnPositions[0];
   const isObserver = house.gameMode === 'observer';
+  // In observer mode, don't waste a spawn slot on the phantom player 0
+  const spawnCount = isObserver ? aiPlayers.length : totalPlayers;
+  const spawnPositions = getSpawnPositions(terrain.getMapWidth(), terrain.getMapHeight(), spawnCount, spawnRandom);
+  const playerBase = spawnPositions[0];
+  const aiOffset = isObserver ? 0 : 1; // AI positions start at index 0 in observer, 1 otherwise
 
   // Update all AI targets/bases to match spawn positions
   for (let i = 0; i < aiPlayers.length; i++) {
-    const aiBase = spawnPositions[i + 1];
+    const aiBase = spawnPositions[i + aiOffset];
     aiPlayers[i].setBasePosition(aiBase.x, aiBase.z);
     if (isObserver) {
       // In observer mode, AIs target each other in round-robin
       const targetIdx = (i + 1) % aiPlayers.length;
-      const targetBase = spawnPositions[targetIdx + 1] ?? spawnPositions[1];
+      const targetBase = spawnPositions[targetIdx + aiOffset];
       aiPlayers[i].setTargetPosition(targetBase.x, targetBase.z);
     } else {
       aiPlayers[i].setTargetPosition(playerBase.x, playerBase.z);
@@ -82,7 +85,7 @@ export function spawnFreshGame(ctx: GameContext): void {
 
   // AI bases
   for (let i = 0; i < opponents.length; i++) {
-    const aiBase = spawnPositions[i + 1];
+    const aiBase = spawnPositions[i + aiOffset];
     const ex = opponents[i].prefix;
     const owner = i + 1;
 
@@ -112,8 +115,8 @@ export function spawnFreshGame(ctx: GameContext): void {
   }
 
   // Camera starts at player base (or first AI base in observer mode)
-  if (isObserver && spawnPositions.length > 1) {
-    const aiBase = spawnPositions[1];
+  if (isObserver && spawnPositions.length > 0) {
+    const aiBase = spawnPositions[0];
     scene.cameraTarget.set(aiBase.x, 0, aiBase.z);
   } else {
     scene.cameraTarget.set(playerBase.x, 0, playerBase.z);
