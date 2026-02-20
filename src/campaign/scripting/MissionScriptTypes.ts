@@ -93,6 +93,20 @@ export interface MissionScript {
 
 // ── Serialized State ──────────────────────────────────────────────
 
+/**
+ * Common interface for both JSON declarative runner and .tok bytecode interpreter.
+ * GameContext uses this type for missionScriptRunner.
+ */
+export interface MissionScriptRunnerInterface {
+  init(...args: any[]): void;
+  tick(ctx: any, currentTick: number): void;
+  isActive(): boolean;
+  getScriptId(): string | null;
+  serialize(eidToIndex: Map<number, number>): MissionScriptState;
+  restore(state: MissionScriptState, indexToEid: Map<number, number>): void;
+  dispose(): void;
+}
+
 /** Saved script runtime state for save/load. */
 export interface MissionScriptState {
   firedRuleIds: string[];
@@ -101,4 +115,13 @@ export interface MissionScriptState {
   disabledRules: string[];
   repeatCounts: Record<string, number>;
   pendingDelayed?: Array<{ ruleId: string; executeTick: number }>;
+  /** Tok bytecode interpreter state (used when script is a .tok file). */
+  tokState?: {
+    intVars: number[];
+    objVars: number[];
+    posVars: Array<{ x: number; z: number }>;
+    nextSideId: number;
+    relationships: Array<{ a: number; b: number; rel: string }>;
+    eventFlags: Record<string, boolean>;
+  };
 }

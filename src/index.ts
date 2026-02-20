@@ -517,19 +517,31 @@ async function main() {
   ctx.harvestSystem.setBuildingContext(world, typeRegistry.buildingTypeNames);
 
   // --- MISSION SCRIPT INITIALIZATION ---
-  // Must happen before restore so script state can be restored alongside entities
+  // Must happen before restore so script state can be restored alongside entities.
+  // Try .tok bytecode interpreter first, then fall back to JSON declarative scripts.
   const scriptId = ctx.activeMissionConfig?.scriptId ?? savedGame?.scriptId;
   if (scriptId) {
-    const { MissionScriptRunner } = await import('./campaign/scripting/MissionScriptRunner');
-    const { loadMissionScript } = await import('./campaign/scripting/MissionScriptLoader');
-    const script = await loadMissionScript(scriptId);
-    if (script) {
-      const runner = new MissionScriptRunner();
-      ctx.missionScriptRunner = runner;
-      // skipGameSetup=true for saved games: only loads structure, avoids
-      // setting credits/victory/spawns that would conflict with restore
-      runner.init(ctx, script, !!savedGame);
-      console.log(`[MissionScript] Loaded script: ${script.id} (${script.name})`);
+    const { loadTokScript, loadMissionScript } = await import('./campaign/scripting/MissionScriptLoader');
+
+    // Try .tok interpreter first
+    const tokBuffer = await loadTokScript(scriptId);
+    if (tokBuffer) {
+      const { TokInterpreter } = await import('./campaign/scripting/tok/TokInterpreter');
+      const interpreter = new TokInterpreter();
+      interpreter.init(ctx, tokBuffer, scriptId);
+      ctx.missionScriptRunner = interpreter;
+    } else {
+      // Fall back to JSON declarative script
+      const { MissionScriptRunner } = await import('./campaign/scripting/MissionScriptRunner');
+      const script = await loadMissionScript(scriptId);
+      if (script) {
+        const runner = new MissionScriptRunner();
+        ctx.missionScriptRunner = runner;
+        // skipGameSetup=true for saved games: only loads structure, avoids
+        // setting credits/victory/spawns that would conflict with restore
+        runner.init(ctx, script, !!savedGame);
+        console.log(`[MissionScript] Loaded script: ${script.id} (${script.name})`);
+      }
     }
   }
 

@@ -36,7 +36,7 @@ import type { MissionRuntimeSettings } from '../campaign/MissionRuntime';
 import type { TypeRegistry } from './TypeRegistry';
 import type { SimulationHashTracker } from './SimulationHash';
 import type { ReplayRecorder, ReplayPlayer } from './ReplaySystem';
-import type { MissionScriptRunner } from '../campaign/scripting/MissionScriptRunner';
+import type { MissionScriptRunnerInterface } from '../campaign/scripting/MissionScriptTypes';
 
 // Save/Load types
 export interface SavedEntity {
@@ -147,7 +147,7 @@ export interface GameContext {
   aiPlayers: AIPlayer[];
 
   // Mission scripting
-  missionScriptRunner: MissionScriptRunner | null;
+  missionScriptRunner: MissionScriptRunnerInterface | null;
 
   // Shared mutable state
   aircraftAmmo: Map<number, number>;
