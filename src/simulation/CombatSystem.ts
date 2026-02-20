@@ -296,11 +296,9 @@ export class CombatSystem implements GameSystem {
       const tz = Position.z[targetEid];
       this.guardPositions.set(escorter, { x: tx, z: tz });
 
-      // If not in combat and too far from target, follow
-      if (hasComponent(world, MoveTarget, escorter) &&
-          hasComponent(world, AttackTarget, escorter) &&
-          AttackTarget.active[escorter] === 0 &&
-          MoveTarget.active[escorter] === 0) {
+      // If not in combat and too far from target, follow (override current move)
+      const inCombat = hasComponent(world, AttackTarget, escorter) && AttackTarget.active[escorter] === 1;
+      if (!inCombat && hasComponent(world, MoveTarget, escorter)) {
         const dx = Position.x[escorter] - tx;
         const dz = Position.z[escorter] - tz;
         if (dx * dx + dz * dz > 25) { // Follow if > 5 units away
@@ -503,7 +501,7 @@ export class CombatSystem implements GameSystem {
       let rof = Combat.rof[eid];
       if (hasComponent(world, BuildingType, eid)) {
         const mult = this.powerMultipliers.get(Owner.playerId[eid]) ?? 1.0;
-        if (mult < 1.0) rof = Math.ceil(rof / mult); // Lower mult = slower fire
+        if (mult < 1.0) rof = Math.ceil(rof / Math.max(0.1, mult)); // Lower mult = slower fire, clamped to prevent Infinity
       }
       Combat.fireTimer[eid] = rof;
     }
@@ -576,35 +574,6 @@ export class CombatSystem implements GameSystem {
 
     Health.current[targetEid] -= damage;
 
-    // Apply hit slowdown if attacker's weapon causes it
-    const attackerTypeName = this.unitTypeMap.get(attackerEid);
-    if (attackerTypeName) {
-      const attackerDef = this.rules.units.get(attackerTypeName);
-      if (attackerDef && attackerDef.hitSlowDownAmount > 0 && attackerDef.hitSlowDownDuration > 0) {
-        const existing = this.hitSlowdowns.get(targetEid);
-        if (!existing || attackerDef.hitSlowDownAmount >= existing.amount) {
-          // Stronger or equal hit: apply new slowdown
-          this.hitSlowdowns.set(targetEid, {
-            ticksLeft: attackerDef.hitSlowDownDuration,
-            amount: attackerDef.hitSlowDownAmount,
-          });
-        } else {
-          // Weaker hit: just refresh timer if it would last longer
-          existing.ticksLeft = Math.max(existing.ticksLeft, attackerDef.hitSlowDownDuration);
-        }
-      }
-    }
-
-    // Infantry suppression: 1/5 chance when hit, lasts 200 ticks (stops firing + slows)
-    const targetTypeName = this.unitTypeMap.get(targetEid);
-    if (targetTypeName && !this.suppressionTimers.has(targetEid)) {
-      const targetDef = this.rules.units.get(targetTypeName);
-      if (targetDef && targetDef.canBeSuppressed && Math.random() < 0.2) { // 1/5 chance
-        this.suppressionTimers.set(targetEid, 200);
-        this.infantrySuppressed.add(targetEid);
-      }
-    }
-
     // Track last attacker for threat-based target priority
     this.lastAttacker.set(targetEid, attackerEid);
 
@@ -634,13 +603,41 @@ export class CombatSystem implements GameSystem {
       Health.current[targetEid] = 0;
 
       // Grant XP to killer based on killed unit's Score value
-      const targetTypeName = this.unitTypeMap.get(targetEid);
-      const targetDef = targetTypeName ? this.rules.units.get(targetTypeName) : null;
-      const targetBldgDef = targetTypeName ? this.rules.buildings.get(targetTypeName) : null;
-      const scoreValue = targetDef?.score ?? targetBldgDef?.score ?? 1;
+      const killedTypeName = this.unitTypeMap.get(targetEid);
+      const killedDef = killedTypeName ? this.rules.units.get(killedTypeName) : null;
+      const killedBldgDef = killedTypeName ? this.rules.buildings.get(killedTypeName) : null;
+      const scoreValue = killedDef?.score ?? killedBldgDef?.score ?? 1;
       this.addXp(attackerEid, scoreValue);
 
       EventBus.emit('unit:died', { entityId: targetEid, killerEntity: attackerEid });
+      return; // Dead — skip slowdown/suppression to prevent stale state on ID recycling
+    }
+
+    // Apply hit slowdown if attacker's weapon causes it (only to surviving targets)
+    const attackerTypeName = this.unitTypeMap.get(attackerEid);
+    if (attackerTypeName) {
+      const attackerDef = this.rules.units.get(attackerTypeName);
+      if (attackerDef && attackerDef.hitSlowDownAmount > 0 && attackerDef.hitSlowDownDuration > 0) {
+        const existing = this.hitSlowdowns.get(targetEid);
+        if (!existing || attackerDef.hitSlowDownAmount >= existing.amount) {
+          this.hitSlowdowns.set(targetEid, {
+            ticksLeft: attackerDef.hitSlowDownDuration,
+            amount: attackerDef.hitSlowDownAmount,
+          });
+        } else {
+          existing.ticksLeft = Math.max(existing.ticksLeft, attackerDef.hitSlowDownDuration);
+        }
+      }
+    }
+
+    // Infantry suppression: 1/5 chance when hit, lasts 200 ticks (stops firing + slows)
+    const targetTypeName = this.unitTypeMap.get(targetEid);
+    if (targetTypeName && !this.suppressionTimers.has(targetEid)) {
+      const targetDef = this.rules.units.get(targetTypeName);
+      if (targetDef && targetDef.canBeSuppressed && Math.random() < 0.2) {
+        this.suppressionTimers.set(targetEid, 200);
+        this.infantrySuppressed.add(targetEid);
+      }
     }
   }
 
@@ -675,9 +672,10 @@ export class CombatSystem implements GameSystem {
 
       const dist = Math.sqrt(distSq);
 
-      // Check friendly fire
+      // Check friendly fire (entities without Owner component are neutral — skip them)
+      if (!hasComponent(world, Owner, eid)) continue;
       const entityOwner = Owner.playerId[eid];
-      const isFriendly = hasComponent(world, Owner, eid) && entityOwner === attackerOwner;
+      const isFriendly = entityOwner === attackerOwner;
 
       if (isFriendly && !bullet.damageFriendly) continue;
 

@@ -1151,10 +1151,20 @@ export class AIPlayer implements GameSystem {
     };
   }
 
-  /** Update the AI base position to the center of mass of all placed buildings */
+  /** Update the AI base position, anchored to the Construction Yard.
+   *  Falls back to center of mass only if no ConYard exists. */
   private updateBaseCenterOfMass(): void {
     if (this.placedBuildings.length === 0) return;
 
+    // Anchor to ConYard if one exists — prevents base drift from expansion buildings
+    const conYard = this.placedBuildings.find(b => b.name.includes('ConYard'));
+    if (conYard) {
+      this.baseX = conYard.x;
+      this.baseZ = conYard.z;
+      return;
+    }
+
+    // Fallback: center of mass when ConYard is destroyed
     let sumX = 0;
     let sumZ = 0;
     for (const b of this.placedBuildings) {
@@ -1775,8 +1785,8 @@ export class AIPlayer implements GameSystem {
       }
     }
 
-    // Dynamic attack group size based on difficulty
-    const attackThreshold = Math.max(3, Math.floor((this.attackGroupSize * this.difficulty) / this.aggressionBias));
+    // Dynamic attack threshold: higher difficulty = attack sooner with fewer units
+    const attackThreshold = Math.max(3, Math.floor(this.attackGroupSize / (this.difficulty * this.aggressionBias)));
     const effectiveAttackCooldown = Math.max(150, Math.floor(this.attackCooldown / this.aggressionBias));
     const canAttack = this.tickCounter - this.lastAttackTick > effectiveAttackCooldown;
 
@@ -1878,6 +1888,7 @@ export class AIPlayer implements GameSystem {
       const rallyDirZ = toTargetZ / tDist;
 
       for (const eid of idleUnits) {
+        if (this.defenders.has(eid)) continue; // Don't rally defenders away from base
         const rallyX = this.baseX + rallyDirX * 15 + randomFloat(-8, 8);
         const rallyZ = this.baseZ + rallyDirZ * 15 + randomFloat(-8, 8);
         MoveTarget.x[eid] = rallyX;

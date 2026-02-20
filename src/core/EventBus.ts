@@ -59,7 +59,12 @@ class EventBusImpl {
   }
 
   emit<K extends EventName>(event: K, data: EventMap[K]): void {
-    this.listeners.get(event)?.forEach(cb => cb(data));
+    const set = this.listeners.get(event);
+    if (!set) return;
+    // Snapshot to prevent mutation during iteration from affecting this emit cycle
+    for (const cb of [...set]) {
+      try { cb(data); } catch (e) { console.error(`EventBus error in '${event}':`, e); }
+    }
   }
 
   clear(): void {
