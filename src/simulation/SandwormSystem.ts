@@ -220,10 +220,10 @@ export class SandwormSystem implements GameSystem {
       return;
     }
 
-    // Check if prey is still alive and get position
+    // Check if prey is still alive and valid (guards against entity ID recycling)
     let targetX: number, targetZ: number;
     try {
-      if (Health.current[worm.huntingEid] <= 0) {
+      if (!hasComponent(world, UnitType, worm.huntingEid) || Health.current[worm.huntingEid] <= 0) {
         worm.huntingEid = null;
         worm.state = 'roaming';
         worm.speed = 0.3;

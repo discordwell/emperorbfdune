@@ -689,8 +689,8 @@ export class UnitRenderer {
     }
 
     if (desiredState !== anim.currentState) {
-      // If currently firing, wait for the clip to finish before transitioning
-      if (anim.currentState === 'fire' && anim.currentAction?.isRunning()) {
+      // If currently firing, wait for clip to finish — unless moving (move interrupts fire)
+      if (anim.currentState === 'fire' && anim.currentAction?.isRunning() && desiredState !== 'move') {
         return;
       }
       this.playAnimClip(eid, desiredState);
@@ -1063,5 +1063,19 @@ export class UnitRenderer {
   /** Get all entities currently under construction (for visual effects). */
   getConstructingEntities(): Map<number, { progress: number }> {
     return this.constructing;
+  }
+
+  /** Clean up all dying fade-out objects (call on scene teardown/game restart) */
+  clearDyingObjects(): void {
+    for (const [obj] of this.dying) {
+      obj.traverse(child => {
+        if (child instanceof THREE.Mesh && child.material) {
+          if (Array.isArray(child.material)) child.material.forEach(m => m.dispose());
+          else (child.material as THREE.Material).dispose();
+        }
+      });
+      this.sceneManager.scene.remove(obj);
+    }
+    this.dying.clear();
   }
 }

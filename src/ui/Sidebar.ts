@@ -107,6 +107,7 @@ export class Sidebar {
     // Add Starport tab if player has offers
     const starportOffers = this.production.getStarportOffers(this.factionPrefix, this.playerId);
     if (starportOffers.length > 0) tabs.push('Starport');
+    else if (this.currentTab === 'Starport') this.currentTab = 'Buildings'; // Reset if Starport offers expired
 
     // Count queued items per category for badges
     const queueCounts: Record<string, number> = {
