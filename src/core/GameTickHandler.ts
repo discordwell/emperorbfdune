@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { GameContext } from './GameContext';
+import { simRng } from '../utils/DeterministicRNG';
 import { GameConstants } from '../utils/Constants';
 import { worldToTile } from '../utils/MathUtils';
 import { TerrainType } from '../rendering/TerrainRenderer';
@@ -157,8 +158,8 @@ export function registerTickHandler(ctx: GameContext): void {
     if (currentTick % 4 === 0) {
       for (const [eid] of unitRenderer.getConstructingEntities()) {
         if (!hasComponent(world, Position, eid)) continue;
-        const cx = Position.x[eid] + (Math.random() - 0.5) * 4;
-        const cz = Position.z[eid] + (Math.random() - 0.5) * 4;
+        const cx = Position.x[eid] + (simRng.random() - 0.5) * 4;
+        const cz = Position.z[eid] + (simRng.random() - 0.5) * 4;
         effectsManager.spawnDustPuff(cx, cz);
       }
     }
@@ -463,8 +464,8 @@ export function registerTickHandler(ctx: GameContext): void {
         if (Health.current[eid] <= 0) continue;
         const ratio = Health.max[eid] > 0 ? Health.current[eid] / Health.max[eid] : 1;
         if (repairingBuildings.has(eid) && currentTick % 8 === 0) {
-          const bx = Position.x[eid] + (Math.random() - 0.5) * 3;
-          const bz = Position.z[eid] + (Math.random() - 0.5) * 3;
+          const bx = Position.x[eid] + (simRng.random() - 0.5) * 3;
+          const bz = Position.z[eid] + (simRng.random() - 0.5) * 3;
           effectsManager.spawnRepairSparkle(bx, 1 + Math.random() * 2, bz);
         }
         effectsManager.updateBuildingDamage(
@@ -513,9 +514,9 @@ export function registerTickHandler(ctx: GameContext): void {
     // Crate drops
     if (currentTick % 1000 === 500 && activeCrates.size < 3) {
       const crateTypes = ['credits', 'veterancy', 'heal'];
-      const type = crateTypes[Math.floor(Math.random() * crateTypes.length)];
-      const cx = 20 + Math.random() * (terrain.getMapWidth() * 2 - 40);
-      const cz = 20 + Math.random() * (terrain.getMapHeight() * 2 - 40);
+      const type = crateTypes[Math.floor(simRng.random() * crateTypes.length)];
+      const cx = 20 + simRng.random() * (terrain.getMapWidth() * 2 - 40);
+      const cz = 20 + simRng.random() * (terrain.getMapHeight() * 2 - 40);
       const crateId = ctx.nextCrateId++;
       activeCrates.set(crateId, { x: cx, z: cz, type });
       effectsManager.spawnCrate(crateId, cx, cz, type);
@@ -566,10 +567,10 @@ export function registerTickHandler(ctx: GameContext): void {
         effectsManager.startSandstorm();
         selectionPanel.addMessage('Sandstorm approaching!', '#ff8844');
         const stormDuration = GameConstants.STORM_MIN_LIFE +
-          Math.floor(Math.random() * (GameConstants.STORM_MAX_LIFE - GameConstants.STORM_MIN_LIFE));
+          Math.floor(simRng.random() * (GameConstants.STORM_MAX_LIFE - GameConstants.STORM_MIN_LIFE));
         const stormEnd = currentTick + stormDuration;
         ctx.stormWaitTimer = GameConstants.STORM_MIN_WAIT +
-          Math.floor(Math.random() * GameConstants.STORM_MAX_WAIT);
+          Math.floor(simRng.random() * GameConstants.STORM_MAX_WAIT);
         const stormDamage = () => {
           if (game.getTickCount() >= stormEnd) {
             effectsManager.stopSandstorm();
@@ -588,7 +589,7 @@ export function registerTickHandler(ctx: GameContext): void {
             const stormTile = worldToTile(Position.x[eid], Position.z[eid]);
             const terrType = terrain.getTerrainType(stormTile.tx, stormTile.tz);
             if (terrType === TerrainType.Sand || terrType === TerrainType.Dunes) {
-              if (Math.floor(Math.random() * GameConstants.STORM_KILL_CHANCE) === 0) {
+              if (Math.floor(simRng.random() * GameConstants.STORM_KILL_CHANCE) === 0) {
                 Health.current[eid] = 0;
                 EventBus.emit('unit:died', { entityId: eid, killerEntity: -1 });
               }

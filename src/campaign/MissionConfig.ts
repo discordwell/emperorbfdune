@@ -5,6 +5,7 @@
  * parameters from phase type, difficulty, and territory context.
  */
 
+import { simRng } from '../utils/DeterministicRNG';
 import type { HousePrefix, FactionPrefix } from './CampaignData';
 import { calculateDifficulty, getCampaignString, JUMP_POINTS, HOMEWORLDS, SPECIAL_MISSIONS } from './CampaignData';
 import type { PhaseType } from './CampaignPhaseManager';
@@ -61,7 +62,7 @@ export function generateMissionConfig(params: {
   const {
     playerHouse, phase, phaseType, territoryId, territoryName,
     enemyHouse, isAttack, territoryDiff, subHousePresent,
-    aiPersonality = Math.floor(Math.random() * 5),
+    aiPersonality = Math.floor(simRng.random() * 5),
   } = params;
 
   // Victory condition based on phase type

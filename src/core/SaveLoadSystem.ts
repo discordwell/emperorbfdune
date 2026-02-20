@@ -1,3 +1,4 @@
+import { simRng } from '../utils/DeterministicRNG';
 import type { GameContext, SaveData } from './GameContext';
 import { GameConstants } from '../utils/Constants';
 import { EventBus } from './EventBus';
@@ -141,6 +142,7 @@ export function buildSaveData(ctx: GameContext): SaveData {
       if (deviated.length === 0 && leech.length === 0 && kobraDeployed.length === 0) return undefined;
       return { deviated, leech, kobraDeployed, kobraBaseRange };
     })(),
+    rngState: simRng.getState(),
   };
 }
 
@@ -160,6 +162,12 @@ export function restoreFromSave(ctx: GameContext, savedGame: SaveData): void {
   const { unitTypeNames, buildingTypeNames } = ctx.typeRegistry;
 
   ctx.game.setTickCount(savedGame.tick);
+
+  // Restore deterministic RNG state
+  if (savedGame.rngState) {
+    simRng.setState(savedGame.rngState);
+  }
+
   for (let i = 0; i < savedGame.solaris.length; i++) {
     ctx.harvestSystem.addSolaris(i, savedGame.solaris[i] - ctx.harvestSystem.getSolaris(i));
   }
@@ -310,7 +318,7 @@ export function restoreFromSave(ctx: GameContext, savedGame: SaveData): void {
     ctx.activeStormListener = null;
     ctx.effectsManager.stopSandstorm();
   }
-  ctx.stormWaitTimer = GameConstants.STORM_MIN_WAIT + Math.floor(Math.random() * GameConstants.STORM_MAX_WAIT);
+  ctx.stormWaitTimer = GameConstants.STORM_MIN_WAIT + Math.floor(simRng.random() * GameConstants.STORM_MAX_WAIT);
 
   // Restore ground splats
   ctx.effectsManager.clearAllGroundSplats();

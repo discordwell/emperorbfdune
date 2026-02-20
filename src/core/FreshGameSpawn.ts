@@ -1,5 +1,6 @@
 import type { GameContext } from './GameContext';
 import { createSeededRng, getSpawnPositions } from '../utils/GameHelpers';
+import { simRng } from '../utils/DeterministicRNG';
 import {
   addComponent,
   Harvester,
@@ -14,7 +15,7 @@ export function spawnFreshGame(ctx: GameContext): void {
   const world = game.getWorld();
 
   // Distribute spawn positions for all players
-  let spawnRandom = Math.random;
+  let spawnRandom = () => simRng.random();
   if (activeMapId) {
     spawnRandom = createSeededRng(`${activeMapId}|${house.prefix}|${house.enemyPrefix}|${totalPlayers}`);
   } else if (house.mapChoice) {

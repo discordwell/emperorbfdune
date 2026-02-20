@@ -3,6 +3,7 @@
  * Extracted from index.ts to reduce main file complexity.
  */
 
+import { simRng } from '../utils/DeterministicRNG';
 import { EventBus } from '../core/EventBus';
 import {
   Position, Health, Owner, BuildingType,
@@ -144,15 +145,15 @@ export class SuperweaponSystem {
     } else if (config.style === 'airstrike') {
       for (let i = -3; i <= 3; i++) {
         const delay = (i + 3) * 120;
-        const ox = targetX + i * 2 + (Math.random() - 0.5) * 2;
-        const oz = targetZ + (Math.random() - 0.5) * 3;
+        const ox = targetX + i * 2 + (simRng.random() - 0.5) * 2;
+        const oz = targetZ + (simRng.random() - 0.5) * 3;
         setTimeout(() => effectsManager.spawnExplosion(ox, 0, oz, 'medium'), delay);
       }
     } else if (config.style === 'lightning') {
       for (let i = 0; i < 8; i++) {
         const delay = i * 80;
         const angle = (i / 8) * Math.PI * 2;
-        const dist = 2 + Math.random() * (config.radius * 0.5);
+        const dist = 2 + simRng.random() * (config.radius * 0.5);
         const ox = targetX + Math.cos(angle) * dist;
         const oz = targetZ + Math.sin(angle) * dist;
         setTimeout(() => effectsManager.spawnExplosion(ox, 0, oz, 'small'), delay);
@@ -284,8 +285,8 @@ export class SuperweaponSystem {
           if (count > bestCount) { bestCount = count; bestX = bx; bestZ = bz; }
         }
         if (bestCount > 0) {
-          bestX += (Math.random() - 0.5) * 6;
-          bestZ += (Math.random() - 0.5) * 6;
+          bestX += (simRng.random() - 0.5) * 6;
+          bestZ += (simRng.random() - 0.5) * 6;
           this.fire(aiPid, bestX, bestZ);
         }
       }

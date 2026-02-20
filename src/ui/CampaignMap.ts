@@ -1,3 +1,4 @@
+import { simRng } from '../utils/DeterministicRNG';
 import * as THREE from 'three';
 import type { AudioManager } from '../audio/AudioManager';
 import type { Difficulty } from './HouseSelect';
@@ -245,7 +246,7 @@ export class CampaignMap {
       }
 
       if (candidates.length > 0) {
-        const pick = candidates[Math.floor(Math.random() * candidates.length)];
+        const pick = candidates[Math.floor(simRng.random() * candidates.length)];
         const t = this.state.territories.find(t => t.id === pick);
         if (t) {
           t.ownerHouse = prefix;

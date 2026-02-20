@@ -83,6 +83,7 @@ export interface SaveData {
     kobraDeployed?: number[];
     kobraBaseRange?: Array<{ eid: number; range: number }>;
   };
+  rngState?: [number, number, number, number];
 }
 
 export interface GroundSplat {

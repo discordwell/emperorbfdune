@@ -1,3 +1,5 @@
+import { simRng } from './DeterministicRNG';
+
 export const TILE_SIZE = 2; // World units per tile
 
 export function tileToWorld(tileX: number, tileZ: number): { x: number; z: number } {
@@ -40,9 +42,9 @@ export function clamp(v: number, min: number, max: number): number {
 }
 
 export function randomInt(min: number, max: number): number {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
+  return Math.floor(simRng.random() * (max - min + 1)) + min;
 }
 
 export function randomFloat(min: number, max: number): number {
-  return Math.random() * (max - min) + min;
+  return simRng.random() * (max - min) + min;
 }

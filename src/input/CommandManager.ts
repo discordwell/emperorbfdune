@@ -1,3 +1,4 @@
+import { simRng } from '../utils/DeterministicRNG';
 import type { World } from '../core/ECS';
 import { MoveTarget, Position, AttackTarget, Combat, Owner, Health, BuildingType, Harvester, hasComponent } from '../core/ECS';
 import type { SceneManager } from '../rendering/SceneManager';
@@ -518,7 +519,7 @@ export class CommandManager {
       const len = Math.sqrt(dx * dx + dz * dz);
       if (len < 0.5) {
         // Units at center: give random direction
-        const angle = Math.random() * Math.PI * 2;
+        const angle = simRng.random() * Math.PI * 2;
         dx = Math.cos(angle);
         dz = Math.sin(angle);
       } else {
@@ -556,8 +557,8 @@ export class CommandManager {
       // Set initial guard position to target's current position
       this.combatSystem?.setGuardPosition(eid, Position.x[targetEid], Position.z[targetEid]);
       // Start moving toward the target
-      MoveTarget.x[eid] = Position.x[targetEid] + (Math.random() - 0.5) * 3;
-      MoveTarget.z[eid] = Position.z[targetEid] + (Math.random() - 0.5) * 3;
+      MoveTarget.x[eid] = Position.x[targetEid] + (simRng.random() - 0.5) * 3;
+      MoveTarget.z[eid] = Position.z[targetEid] + (simRng.random() - 0.5) * 3;
       MoveTarget.active[eid] = 1;
       AttackTarget.active[eid] = 0;
     }

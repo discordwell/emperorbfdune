@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { GameContext } from './GameContext';
+import { simRng } from '../utils/DeterministicRNG';
 import { GameConstants } from '../utils/Constants';
 import { tileToWorld } from '../utils/MathUtils';
 import { EventBus } from './EventBus';
@@ -119,8 +120,8 @@ export function registerEventHandlers(ctx: GameContext): void {
         if (infantryType && gameRules.units.has(infantryType)) {
           const count = Math.min(bDef.numInfantryWhenGone, 5);
           for (let i = 0; i < count; i++) {
-            const sx = x + (Math.random() - 0.5) * 4;
-            const sz = z + (Math.random() - 0.5) * 4;
+            const sx = x + (simRng.random() - 0.5) * 4;
+            const sz = z + (simRng.random() - 0.5) * 4;
             ctx.spawnUnit(world, infantryType, deadOwner, sx, sz);
           }
           EventBus.emit('building:survivors', { x, z, count, owner: deadOwner });
@@ -190,7 +191,7 @@ export function registerEventHandlers(ctx: GameContext): void {
     bloomMarkers.set(`${Math.floor(x)},${Math.floor(z)}`, { mesh, ticks: 0 });
   });
   EventBus.on('bloom:tremor', ({ x, z, intensity }) => {
-    effectsManager.spawnExplosion(x + (Math.random() - 0.5) * 4, 0, z + (Math.random() - 0.5) * 4, 'small');
+    effectsManager.spawnExplosion(x + (simRng.random() - 0.5) * 4, 0, z + (simRng.random() - 0.5) * 4, 'small');
     const key = `${Math.floor(x)},${Math.floor(z)}`;
     const marker = bloomMarkers.get(key);
     if (marker) {
@@ -518,8 +519,8 @@ export function registerEventHandlers(ctx: GameContext): void {
           baseZ = aiBase.z;
         }
       }
-      const x = baseX + (Math.random() - 0.5) * 10;
-      const z = baseZ + (Math.random() - 0.5) * 10;
+      const x = baseX + (simRng.random() - 0.5) * 10;
+      const z = baseZ + (simRng.random() - 0.5) * 10;
       const eid = ctx.spawnUnit(world, unitType, owner, x, z);
 
       // Starport arrival: descent animation
@@ -571,8 +572,8 @@ export function registerEventHandlers(ctx: GameContext): void {
         if (gameRules.buildings.has(conYardName)) {
           const ownerAi = aiPlayers[owner - 1];
           const aiBase = ownerAi ? ownerAi.getBasePosition() : { x: 200, z: 200 };
-          const deployX = aiBase.x + (Math.random() - 0.5) * 10;
-          const deployZ = aiBase.z + (Math.random() - 0.5) * 10;
+          const deployX = aiBase.x + (simRng.random() - 0.5) * 10;
+          const deployZ = aiBase.z + (simRng.random() - 0.5) * 10;
           Health.current[eid] = 0;
           EventBus.emit('unit:died', { entityId: eid, killerEntity: -1 });
           ctx.spawnBuilding(world, conYardName, owner, deployX, deployZ);

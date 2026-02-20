@@ -1,3 +1,4 @@
+import { simRng } from '../utils/DeterministicRNG';
 import type { GameRules } from '../config/RulesParser';
 import type { UnitDef } from '../config/UnitDefs';
 import type { BuildingDef } from '../config/BuildingDefs';
@@ -545,7 +546,7 @@ export class ProductionSystem {
     for (const [name, def] of this.rules.units) {
       if (!def.starportable) continue;
       // Price fluctuates between 50% and 150% of base cost
-      const variance = 0.5 + Math.random();
+      const variance = 0.5 + simRng.random();
       this.starportPrices.set(name, Math.floor(def.cost * variance));
     }
   }

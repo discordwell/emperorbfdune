@@ -22,6 +22,7 @@ import { registerTickHandler } from './core/GameTickHandler';
 import { registerInputHandlers } from './input/GameInputHandlers';
 import { setupGameUI } from './ui/GameUI';
 import { spawnFreshGame } from './core/FreshGameSpawn';
+import { simRng } from './utils/DeterministicRNG';
 import { restoreFromSave } from './core/SaveLoadSystem';
 import { hasComponent, Harvester, Owner } from './core/ECS';
 
@@ -221,6 +222,17 @@ async function main() {
 
   // --- INITIALIZE ALL SYSTEMS ---
   updateLoading(30, 'Initializing game systems...');
+
+  // Seed deterministic RNG before system init so storm timer etc. use correct seed
+  // Hash map ID string into a numeric seed (simple DJB2 hash)
+  let mapIdSeed = activeMapId ? 5381 : 0;
+  if (activeMapId) {
+    for (let i = 0; i < activeMapId.length; i++) {
+      mapIdSeed = ((mapIdSeed << 5) + mapIdSeed + activeMapId.charCodeAt(i)) | 0;
+    }
+  }
+  const rngSeed = house.mapChoice?.seed ?? (mapIdSeed || Date.now());
+  simRng.reseed(rngSeed);
 
   const ctx = initializeSystems({
     gameRules, artMap, typeRegistry, house, audioManager,

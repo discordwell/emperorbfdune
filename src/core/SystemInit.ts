@@ -17,6 +17,7 @@ import { CommandManager } from '../input/CommandManager';
 import { MovementSystem } from '../simulation/MovementSystem';
 import { PathfindingSystem } from '../simulation/PathfindingSystem';
 import { AsyncPathfinder } from '../simulation/AsyncPathfinder';
+import { simRng } from '../utils/DeterministicRNG';
 import { CombatSystem } from '../simulation/CombatSystem';
 import { HarvestSystem } from '../simulation/HarvestSystem';
 import { ProductionSystem } from '../simulation/ProductionSystem';
@@ -454,7 +455,7 @@ export function initializeSystems(config: SystemInitConfig): GameContext {
     processedDeaths, deferredActions, repairingBuildings,
     groundSplats, bloomMarkers, activeCrates,
     nextCrateId: 0,
-    stormWaitTimer: GameConstants.STORM_MIN_WAIT + Math.floor(Math.random() * GameConstants.STORM_MAX_WAIT),
+    stormWaitTimer: GameConstants.STORM_MIN_WAIT + Math.floor(simRng.random() * GameConstants.STORM_MAX_WAIT),
     activeStormListener: null,
 
     spawnUnit: entityFactory.spawnUnit,

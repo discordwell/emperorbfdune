@@ -1,3 +1,4 @@
+import { simRng } from '../utils/DeterministicRNG';
 import type { GameSystem } from '../core/Game';
 import type { World } from '../core/ECS';
 import {
@@ -302,8 +303,8 @@ export class CombatSystem implements GameSystem {
         const dx = Position.x[escorter] - tx;
         const dz = Position.z[escorter] - tz;
         if (dx * dx + dz * dz > 25) { // Follow if > 5 units away
-          MoveTarget.x[escorter] = tx + (Math.random() - 0.5) * 3;
-          MoveTarget.z[escorter] = tz + (Math.random() - 0.5) * 3;
+          MoveTarget.x[escorter] = tx + (simRng.random() - 0.5) * 3;
+          MoveTarget.z[escorter] = tz + (simRng.random() - 0.5) * 3;
           MoveTarget.active[escorter] = 1;
         }
       }
@@ -634,7 +635,7 @@ export class CombatSystem implements GameSystem {
     const targetTypeName = this.unitTypeMap.get(targetEid);
     if (targetTypeName && !this.suppressionTimers.has(targetEid)) {
       const targetDef = this.rules.units.get(targetTypeName);
-      if (targetDef && targetDef.canBeSuppressed && Math.random() < 0.2) {
+      if (targetDef && targetDef.canBeSuppressed && simRng.random() < 0.2) {
         this.suppressionTimers.set(targetEid, 200);
         this.infantrySuppressed.add(targetEid);
       }

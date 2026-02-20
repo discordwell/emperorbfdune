@@ -11,6 +11,7 @@ import type { CommandManager } from '../input/CommandManager';
 import type { SelectionManager } from '../input/SelectionManager';
 import type { SelectionPanel } from '../ui/SelectionPanel';
 import { EventBus } from '../core/EventBus';
+import { simRng } from '../utils/DeterministicRNG';
 import {
   Position, Health, Combat, Owner, UnitType, AttackTarget, MoveTarget,
   BuildingType, Veterancy, Shield,
@@ -965,7 +966,7 @@ export class AbilitySystem {
           Health.current[eid] = Math.min(Health.max[eid],
             Health.current[eid] + Health.max[eid] * 0.01);
           // Subtle regen sparkle (only human player's units, 50% chance for subtlety)
-          if (pid === 0 && Math.random() < 0.5) {
+          if (pid === 0 && simRng.random() < 0.5) {
             this.deps.effectsManager.spawnRepairSparkle(
               Position.x[eid] + (Math.random() - 0.5),
               0.3 + Math.random() * 0.8,
@@ -1154,8 +1155,8 @@ export class AbilitySystem {
           // Create holographic copy
           const copyTypeName = unitTypeNames[UnitType.id[bestOther]];
           if (copyTypeName) {
-            const hx = Position.x[eid] + (Math.random() - 0.5) * 4;
-            const hz = Position.z[eid] + (Math.random() - 0.5) * 4;
+            const hx = Position.x[eid] + (simRng.random() - 0.5) * 4;
+            const hz = Position.z[eid] + (simRng.random() - 0.5) * 4;
             const holoEid = spawnUnit(world, copyTypeName, 0, hx, hz);
             if (holoEid >= 0) {
               // Hologram: 1 HP, no damage, lasts 6000 ticks (~4 minutes)

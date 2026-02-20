@@ -1,3 +1,4 @@
+import { simRng } from '../utils/DeterministicRNG';
 import type { GameSystem } from '../core/Game';
 import type { World } from '../core/ECS';
 import {
@@ -647,7 +648,7 @@ export class AIPlayer implements GameSystem {
     // Map mostly explored - patrol between known enemy positions
     if (this.knownEnemyPositions.size > 0) {
       const entries = Array.from(this.knownEnemyPositions.values());
-      const target = entries[Math.floor(Math.random() * entries.length)];
+      const target = entries[Math.floor(simRng.random() * entries.length)];
       MoveTarget.x[eid] = target.x + randomFloat(-15, 15);
       MoveTarget.z[eid] = target.z + randomFloat(-15, 15);
       MoveTarget.active[eid] = 1;
@@ -1080,27 +1081,27 @@ export class AIPlayer implements GameSystem {
       idealZ = baseZ + dirZ * 8 + perpZ * offset;
     } else if (def.powerGenerated > 0) {
       // Windtraps: behind base, away from player
-      idealX = baseX + awayX * 8 + (Math.random() - 0.5) * 6;
-      idealZ = baseZ + awayZ * 8 + (Math.random() - 0.5) * 6;
+      idealX = baseX + awayX * 8 + (simRng.random() - 0.5) * 6;
+      idealZ = baseZ + awayZ * 8 + (simRng.random() - 0.5) * 6;
     } else if (def.refinery) {
       // Refineries: to the side of base (perpendicular to player direction)
       const perpX = -dirZ;
       const perpZ = dirX;
-      const side = Math.random() > 0.5 ? 1 : -1;
-      idealX = baseX + perpX * 10 * side + (Math.random() - 0.5) * 4;
-      idealZ = baseZ + perpZ * 10 * side + (Math.random() - 0.5) * 4;
+      const side = simRng.random() > 0.5 ? 1 : -1;
+      idealX = baseX + perpX * 10 * side + (simRng.random() - 0.5) * 4;
+      idealZ = baseZ + perpZ * 10 * side + (simRng.random() - 0.5) * 4;
     } else if (def.aiDefence || def.turretAttach) {
       // Turrets/defense: toward player, in front of base
-      idealX = baseX + dirX * 10 + (Math.random() - 0.5) * 8;
-      idealZ = baseZ + dirZ * 10 + (Math.random() - 0.5) * 8;
+      idealX = baseX + dirX * 10 + (simRng.random() - 0.5) * 8;
+      idealZ = baseZ + dirZ * 10 + (simRng.random() - 0.5) * 8;
     } else if (typeName.includes('Barracks') || typeName.includes('Factory') || typeName.includes('Hanger')) {
       // Production buildings: near center with slight random offset
-      idealX = baseX + (Math.random() - 0.5) * 8;
-      idealZ = baseZ + (Math.random() - 0.5) * 8;
+      idealX = baseX + (simRng.random() - 0.5) * 8;
+      idealZ = baseZ + (simRng.random() - 0.5) * 8;
     } else {
       // Other buildings (Palace, Research, etc.): near base
-      idealX = baseX + (Math.random() - 0.5) * 10;
-      idealZ = baseZ + (Math.random() - 0.5) * 10;
+      idealX = baseX + (simRng.random() - 0.5) * 10;
+      idealZ = baseZ + (simRng.random() - 0.5) * 10;
     }
 
     // Validate and adjust position
@@ -1434,7 +1435,7 @@ export class AIPlayer implements GameSystem {
 
       // Priority 5: Turrets periodically (cap at 6)
       const periodicTurretCap = Math.max(4, Math.floor(6 * this.defenseBias));
-      if (turretCount < periodicTurretCap && solaris > 800 && Math.random() < 0.25) {
+      if (turretCount < periodicTurretCap && solaris > 800 && simRng.random() < 0.25) {
         const turretTypes = [`${px}GunTurret`, `${px}RocketTurret`, `${px}Turret`];
         for (const turret of turretTypes) {
           if (this.production.canBuild(this.playerId, turret, true)) {
@@ -1451,7 +1452,7 @@ export class AIPlayer implements GameSystem {
         const name = this.buildingTypeNames[BuildingType.id[eid]] ?? '';
         if (name.includes('Wall')) wallCount++;
       }
-      if (wallCount < 8 && turretCount >= 2 && solaris > 200 && Math.random() < 0.3) {
+      if (wallCount < 8 && turretCount >= 2 && solaris > 200 && simRng.random() < 0.3) {
         const wallName = `${px}Wall`;
         if (this.production.canBuild(this.playerId, wallName, true)) {
           this.production.startProduction(this.playerId, wallName, true);
@@ -1517,14 +1518,14 @@ export class AIPlayer implements GameSystem {
 
     // Choose pool: role-filtered if available (70% chance), otherwise original logic
     let pool: string[];
-    if (roleFilteredPool.length > 0 && Math.random() < 0.7) {
+    if (roleFilteredPool.length > 0 && simRng.random() < 0.7) {
       pool = roleFilteredPool;
     } else {
       // Fallback to original infantry/vehicle preference
       if (solaris > 800 && this.vehiclePool.length > 0) {
-        pool = Math.random() < 0.3 ? this.infantryPool : this.vehiclePool;
+        pool = simRng.random() < 0.3 ? this.infantryPool : this.vehiclePool;
       } else {
-        pool = Math.random() < 0.6 ? this.infantryPool : this.vehiclePool;
+        pool = simRng.random() < 0.6 ? this.infantryPool : this.vehiclePool;
       }
     }
     if (pool.length === 0) pool = this.unitPool;
@@ -1536,12 +1537,12 @@ export class AIPlayer implements GameSystem {
       // Fall back to any buildable unit
       const anyBuildable = this.unitPool.filter(name => this.production!.canBuild(this.playerId, name, false));
       if (anyBuildable.length === 0) return;
-      const typeName = anyBuildable[Math.floor(Math.random() * anyBuildable.length)];
+      const typeName = anyBuildable[Math.floor(simRng.random() * anyBuildable.length)];
       this.production.startProduction(this.playerId, typeName, false);
       return;
     }
 
-    const typeName = buildable[Math.floor(Math.random() * buildable.length)];
+    const typeName = buildable[Math.floor(simRng.random() * buildable.length)];
     this.production.startProduction(this.playerId, typeName, false);
   }
 
@@ -1556,7 +1557,7 @@ export class AIPlayer implements GameSystem {
     );
     if (buildable.length === 0) return;
 
-    const typeName = buildable[Math.floor(Math.random() * buildable.length)];
+    const typeName = buildable[Math.floor(simRng.random() * buildable.length)];
     this.production.startProduction(this.playerId, typeName, false);
   }
 
@@ -1605,7 +1606,7 @@ export class AIPlayer implements GameSystem {
     this.cleanupSpecialEntities();
     if (this.specialEntities.size >= 3) return;
 
-    const typeName = buildable[Math.floor(Math.random() * buildable.length)];
+    const typeName = buildable[Math.floor(simRng.random() * buildable.length)];
     this.production.startProduction(this.playerId, typeName, false);
   }
 
@@ -1699,7 +1700,7 @@ export class AIPlayer implements GameSystem {
   private spawnWave(world: World): void {
     if (this.unitPool.length === 0) return;
     for (let i = 0; i < this.waveSize; i++) {
-      const typeName = this.unitPool[Math.floor(Math.random() * this.unitPool.length)];
+      const typeName = this.unitPool[Math.floor(simRng.random() * this.unitPool.length)];
       const x = this.baseX + randomFloat(-10, 10);
       const z = this.baseZ + randomFloat(-10, 10);
 
@@ -1829,7 +1830,7 @@ export class AIPlayer implements GameSystem {
         const group2 = mainUnits.slice(groupSize);
 
         const angle1 = Math.atan2(target.z - this.baseZ, target.x - this.baseX);
-        const flankAngle = (Math.random() * 0.5 + 0.4) * (Math.random() < 0.5 ? 1 : -1);
+        const flankAngle = (simRng.random() * 0.5 + 0.4) * (simRng.random() < 0.5 ? 1 : -1);
         const angle2 = angle1 + flankAngle;
 
         for (const eid of group1) {
@@ -2069,8 +2070,8 @@ export class AIPlayer implements GameSystem {
       // Only recall units that aren't already near base
       const dist = distance2D(Position.x[eid], Position.z[eid], this.baseX, this.baseZ);
       if (dist > 50) {
-        MoveTarget.x[eid] = this.baseX + (Math.random() - 0.5) * 15;
-        MoveTarget.z[eid] = this.baseZ + (Math.random() - 0.5) * 15;
+        MoveTarget.x[eid] = this.baseX + (simRng.random() - 0.5) * 15;
+        MoveTarget.z[eid] = this.baseZ + (simRng.random() - 0.5) * 15;
         MoveTarget.active[eid] = 1;
         if (hasComponent(world, AttackTarget, eid)) {
           AttackTarget.active[eid] = 0;

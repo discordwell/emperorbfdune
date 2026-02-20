@@ -5,6 +5,8 @@
  * All territory IDs are 1-indexed, matching game data and mesh names.
  */
 
+import { simRng } from '../utils/DeterministicRNG';
+
 // ── Types ──────────────────────────────────────────────────────────
 
 export type HousePrefix = 'AT' | 'HK' | 'OR';
@@ -277,7 +279,7 @@ export function calculateDifficulty(territoryDiff: number, phase: number): numbe
     Math.min(3, phase)
   ) ?? 0;
   const [rMin, rMax] = DIFFICULTY_CONFIG.randomRange;
-  const rand = Math.floor(Math.random() * (rMax - rMin + 1)) + rMin;
+  const rand = Math.floor(simRng.random() * (rMax - rMin + 1)) + rMin;
   return rr + phaseBonus + rand;
 }
 

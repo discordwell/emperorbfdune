@@ -1,3 +1,4 @@
+import { simRng } from '../utils/DeterministicRNG';
 import type { GameSystem } from '../core/Game';
 import type { World } from '../core/ECS';
 import {
@@ -64,7 +65,7 @@ export class SandwormSystem implements GameSystem {
     // Try to spawn new worm
     if (this.worms.length < this.maxWorms && this.tickCounter % 100 === 0) {
       // spawnChance is per-tick rate; scale by check interval (100 ticks)
-      if (Math.random() * this.spawnChance < 100) {
+      if (simRng.random() * this.spawnChance < 100) {
         this.spawnWorm();
       }
     }
@@ -173,7 +174,7 @@ export class SandwormSystem implements GameSystem {
       targetX: Math.max(10, Math.min(worldW - 10, x + randomFloat(-50, 50))),
       targetZ: Math.max(10, Math.min(worldH - 10, z + randomFloat(-50, 50))),
       speed: 0.3,
-      life: minLife + Math.floor(Math.random() * (maxLife - minLife)),
+      life: minLife + Math.floor(simRng.random() * (maxLife - minLife)),
       huntingEid: null,
       huntingOwner: -1,
       state: 'emerging',

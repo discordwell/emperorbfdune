@@ -1,3 +1,4 @@
+import { simRng } from '../utils/DeterministicRNG';
 import type { GameSystem } from '../core/Game';
 import type { World } from '../core/ECS';
 import {
@@ -201,7 +202,7 @@ export class HarvestSystem implements GameSystem {
         this.activeMound = null;
         // Set regrow cooldown (200-2000 ticks from rules.txt)
         this.regrowCooldown = GameConstants.SPICE_MOUND_REGROW_MIN +
-          Math.floor(Math.random() * (GameConstants.SPICE_MOUND_REGROW_MAX - GameConstants.SPICE_MOUND_REGROW_MIN));
+          Math.floor(simRng.random() * (GameConstants.SPICE_MOUND_REGROW_MAX - GameConstants.SPICE_MOUND_REGROW_MIN));
       }
     } else if (this.regrowCooldown > 0) {
       this.regrowCooldown--;
@@ -285,15 +286,15 @@ export class HarvestSystem implements GameSystem {
     // Find a valid sand tile away from edges
     for (let attempt = 0; attempt < 50; attempt++) {
       const margin = Math.min(10, Math.floor(Math.min(mw, mh) * 0.1));
-      const tx = margin + Math.floor(Math.random() * Math.max(1, mw - margin * 2));
-      const tz = margin + Math.floor(Math.random() * Math.max(1, mh - margin * 2));
+      const tx = margin + Math.floor(simRng.random() * Math.max(1, mw - margin * 2));
+      const tz = margin + Math.floor(simRng.random() * Math.max(1, mh - margin * 2));
       const type = this.terrain.getTerrainType(tx, tz);
       // Mound can appear on sand or existing spice
       if (type === TerrainType.Sand || type === TerrainType.Dunes ||
           type === TerrainType.SpiceLow || type === TerrainType.SpiceHigh) {
         // Duration: Size + random(Cost) from rules.txt = 1000 + random(500) ticks
         const duration = GameConstants.SPICE_MOUND_MIN_DURATION +
-          Math.floor(Math.random() * GameConstants.SPICE_MOUND_RANDOM_DURATION);
+          Math.floor(simRng.random() * GameConstants.SPICE_MOUND_RANDOM_DURATION);
         this.activeMound = { tx, tz, ticksLeft: duration, totalLife: duration };
         const wx = tileToWorld(tx, tz);
         EventBus.emit('bloom:warning', { x: wx.x, z: wx.z });
@@ -374,11 +375,11 @@ export class HarvestSystem implements GameSystem {
         const spice = this.terrain.getSpice(tx, tz);
         if (spice <= 0.2) continue; // Only spread from established tiles
 
-        if (Math.random() > chance) continue;
+        if (simRng.random() > chance) continue;
 
         // Pick a random adjacent tile (4-directional)
         const dirs = [[0, -1], [0, 1], [-1, 0], [1, 0]];
-        const [ddx, ddz] = dirs[Math.floor(Math.random() * 4)];
+        const [ddx, ddz] = dirs[Math.floor(simRng.random() * 4)];
         const ntx = tx + ddx;
         const ntz = tz + ddz;
 
@@ -388,7 +389,7 @@ export class HarvestSystem implements GameSystem {
         if (nType !== TerrainType.Sand && nType !== TerrainType.Dunes) continue;
 
         // New spice starts thin
-        newSpice.push({ tx: ntx, tz: ntz, amount: 0.1 + Math.random() * 0.15 });
+        newSpice.push({ tx: ntx, tz: ntz, amount: 0.1 + simRng.random() * 0.15 });
       }
     }
 
@@ -459,12 +460,12 @@ export class HarvestSystem implements GameSystem {
     if (this.noSpiceDeliveryInterval === 0) {
       // Randomize next delivery interval
       this.noSpiceDeliveryInterval = GameConstants.CASH_NO_SPICE_FREQ_MIN +
-        Math.floor(Math.random() * (GameConstants.CASH_NO_SPICE_FREQ_MAX - GameConstants.CASH_NO_SPICE_FREQ_MIN));
+        Math.floor(simRng.random() * (GameConstants.CASH_NO_SPICE_FREQ_MAX - GameConstants.CASH_NO_SPICE_FREQ_MIN));
     }
 
     if (this.noSpiceTimer >= this.noSpiceDeliveryInterval) {
       const amount = GameConstants.CASH_NO_SPICE_AMOUNT_MIN +
-        Math.floor(Math.random() * (GameConstants.CASH_NO_SPICE_AMOUNT_MAX - GameConstants.CASH_NO_SPICE_AMOUNT_MIN));
+        Math.floor(simRng.random() * (GameConstants.CASH_NO_SPICE_AMOUNT_MAX - GameConstants.CASH_NO_SPICE_AMOUNT_MIN));
       // Deliver to all players
       for (let i = 0; i < this.playerCount; i++) {
         this.addSolaris(i, amount);
