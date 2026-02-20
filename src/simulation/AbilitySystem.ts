@@ -1,4 +1,5 @@
 import type { GameRules } from '../config/RulesParser';
+import { GameConstants } from '../utils/Constants';
 import type { CombatSystem } from './CombatSystem';
 import type { SandwormSystem } from './SandwormSystem';
 import type { ProductionSystem } from './ProductionSystem';
@@ -1266,9 +1267,9 @@ export class AbilitySystem {
           // Store original owner for revert, or refresh timer if already deviated
           const existing = this.deviatedUnits.get(targetEntity);
           if (existing) {
-            existing.revertTick = this.deps.getTickCount() + 400;
+            existing.revertTick = this.deps.getTickCount() + GameConstants.DEVIATE_DURATION;
           } else {
-            this.deviatedUnits.set(targetEntity, { originalOwner, revertTick: this.deps.getTickCount() + 400 });
+            this.deviatedUnits.set(targetEntity, { originalOwner, revertTick: this.deps.getTickCount() + GameConstants.DEVIATE_DURATION });
           }
           Owner.playerId[targetEntity] = attackerOwner;
           if (attackerOwner === 0) selectionPanel.addMessage('Unit deviated!', '#cc44ff');

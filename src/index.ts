@@ -1150,12 +1150,12 @@ async function main() {
         continue;
       }
 
-      // Repair 1% per tick (~2.5% per second), costs proportional
-      const repairAmount = Math.min(maxHp * 0.01, maxHp - hp);
+      // Repair at flat rate from rules.txt (RepairRate HP per cycle)
+      const repairAmount = Math.min(GameConstants.REPAIR_RATE, maxHp - hp);
       const typeId = BuildingType.id[eid];
       const typeName = buildingTypeNames[typeId];
       const def = typeName ? gameRules.buildings.get(typeName) : null;
-      const cost = def ? Math.max(1, Math.floor(def.cost * 0.005)) : 5;
+      const cost = def ? Math.max(1, Math.floor(def.cost * (repairAmount / maxHp))) : 5;
 
       if (harvestSystem.spendSolaris(0, cost)) {
         Health.current[eid] += repairAmount;
@@ -2360,7 +2360,7 @@ async function main() {
     // Spice bloom visuals are now handled via HarvestSystem events (bloom:warning/tremor/eruption)
 
     // --- AIRCRAFT REARMING ---
-    if (game.getTickCount() % 10 === 5 && rearmingAircraft.size > 0) {
+    if (game.getTickCount() % GameConstants.REARM_RATE === 5 && rearmingAircraft.size > 0) {
       for (const eid of rearmingAircraft) {
         if (Health.current[eid] <= 0) { rearmingAircraft.delete(eid); aircraftAmmo.delete(eid); continue; }
         // Check if near any landing pad

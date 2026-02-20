@@ -2,7 +2,7 @@ import type { GameSystem } from '../core/Game';
 import type { World } from '../core/ECS';
 import {
   Position, Health, Combat, Owner, AttackTarget, MoveTarget, Rotation, Speed,
-  Armour, BuildingType, Veterancy, TurretRotation, Shield,
+  Armour, BuildingType, Veterancy, TurretRotation, Shield, ViewRange,
   combatQuery, healthQuery, hasComponent,
 } from '../core/ECS';
 import type { GameRules } from '../config/RulesParser';
@@ -426,7 +426,7 @@ export class CombatSystem implements GameSystem {
           const aTile = worldToTile(Position.x[eid], Position.z[eid]);
           const tt = this.terrain.getTerrainType(aTile.tx, aTile.tz);
           if (tt === TerrainType.InfantryRock && aDef.infantry) {
-            range += 4; // +2 tiles (InfRockRangeBonus from rules.txt)
+            range += 6; // +3 tiles: InfRockRangeBonus(2) + HeightRangeBonus(1) = 6 world units
           } else if (tt === TerrainType.Rock || tt === TerrainType.InfantryRock) {
             range += 2; // +1 tile (HeightRangeBonus from rules.txt)
           }
@@ -804,7 +804,13 @@ export class CombatSystem implements GameSystem {
       const vetLevel = this.getVetLevel(eid);
       if (vetLevel && vetLevel.extraRange > 0) baseRange += vetLevel.extraRange;
     }
-    let viewRange = baseRange * 2; // Auto-acquire at 2x attack range
+    // Use unit's actual view range for auto-acquire (from rules.txt ViewRange)
+    // Fall back to 2x weapon range for units without ViewRange component
+    // Veterancy range bonus applies to view range too (veteran scouts see further)
+    const vetRangeBonus = baseRange - Combat.attackRange[eid];
+    let viewRange = hasComponent(world, ViewRange, eid) && ViewRange.range[eid] > 0
+      ? ViewRange.range[eid] + vetRangeBonus
+      : baseRange * 2;
     // Sandstorm reduces visibility: halve auto-acquire range for ground units
     // Buildings are fortified and unaffected by sandstorm visibility
     if (this.sandstormActiveFn && this.sandstormActiveFn() && !hasComponent(world, BuildingType, eid)) {
