@@ -172,7 +172,10 @@ export class CampaignPhaseManager {
     } else if (this.state.currentPhase === 3) {
       this.state.battlesWithoutCapture++;
       const rule = PHASE_RULES[3];
-      if (rule.warning && this.state.battlesWithoutCapture >= rule.warning && !this.state.isWarned) {
+      if (rule.lose && this.state.battlesWithoutCapture >= rule.lose) {
+        this.state.isLost = true;
+        result.lost = true;
+      } else if (rule.warning && this.state.battlesWithoutCapture >= rule.warning && !this.state.isWarned) {
         this.state.isWarned = true;
         result.warning = true;
       }

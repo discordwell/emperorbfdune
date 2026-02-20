@@ -704,15 +704,19 @@ export class AbilitySystem {
         Position.z[eid] = Position.z[parasiteTarget];
         Position.y[eid] = 1.5; // Sit on top of vehicle
         if (Health.current[parasiteTarget] <= 0) {
+          // handleUnitDeath (via EventBus) already spawns a new leech and cleans up,
+          // so only do manual cleanup if handleUnitDeath didn't process this leech
           EventBus.emit('unit:died', { entityId: parasiteTarget, killerEntity: eid });
-          // Spawn new Leech
-          spawnUnit(this.deps.getWorld(), typeName, leechOwner,
-            Position.x[parasiteTarget] + 2, Position.z[parasiteTarget] + 2);
-          this.leechTargets.delete(eid);
-          combatSystem.setSuppressed(eid, false);
-          Position.y[eid] = 0.1;
-          if (leechOwner === 0) selectionPanel.addMessage('Leech replicated!', '#88ff44');
-          else if (Owner.playerId[parasiteTarget] === 0) selectionPanel.addMessage('Vehicle destroyed by Leech!', '#ff4444');
+          if (this.leechTargets.has(eid)) {
+            // handleUnitDeath didn't process this leech — do it manually
+            spawnUnit(this.deps.getWorld(), typeName, leechOwner,
+              Position.x[parasiteTarget] + 2, Position.z[parasiteTarget] + 2);
+            this.leechTargets.delete(eid);
+            combatSystem.setSuppressed(eid, false);
+            Position.y[eid] = 0.1;
+            if (leechOwner === 0) selectionPanel.addMessage('Leech replicated!', '#88ff44');
+            else if (Owner.playerId[parasiteTarget] === 0) selectionPanel.addMessage('Vehicle destroyed by Leech!', '#ff4444');
+          }
         }
         continue;
       }
@@ -935,10 +939,15 @@ export class AbilitySystem {
       if (!prefix) continue;
 
       // ORDOS: self-regeneration (units slowly heal 1% HP per 2 seconds)
+      // Skip units with canSelfRepair — those are already healed in updatePassiveRepair()
       if (prefix === 'OR') {
         for (const eid of allUnits) {
           if (Owner.playerId[eid] !== pid) continue;
           if (Health.current[eid] <= 0 || Health.current[eid] >= Health.max[eid]) continue;
+          const uTypeId = UnitType.id[eid];
+          const uTypeName = this.deps.unitTypeNames[uTypeId];
+          const uDef = uTypeName ? this.deps.rules.units.get(uTypeName) : null;
+          if (uDef?.canSelfRepair) continue;
           Health.current[eid] = Math.min(Health.max[eid],
             Health.current[eid] + Health.max[eid] * 0.01);
           // Subtle regen sparkle (only human player's units, 50% chance for subtlety)

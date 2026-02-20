@@ -61,6 +61,7 @@ export class AudioManager {
   private windLfoGain: GainNode | null = null;
   private windFilter: BiquadFilterNode | null = null;
   private windActive = false;
+  private windEverStarted = false; // True once game calls startAmbientWind()
 
   constructor() {
     this.setupEventListeners();
@@ -271,6 +272,12 @@ export class AudioManager {
     newElement.volume = 0;
     newElement.loop = loop;
     if (!loop) newElement.addEventListener('ended', this.onTrackEnded);
+
+    // Pause any previously fading element to prevent audio leak
+    if (this.fadingOutElement) {
+      this.fadingOutElement.pause();
+      this.fadingOutElement = null;
+    }
 
     // Start fade out of old element
     const oldElement = this.musicElement;
@@ -1062,6 +1069,7 @@ export class AudioManager {
 
   /** Start a continuous desert wind ambient loop (synthesized). */
   startAmbientWind(): void {
+    this.windEverStarted = true;
     if (this.windActive || this.muted) return;
     try {
       const ctx = this.getContext();
@@ -1168,7 +1176,8 @@ export class AudioManager {
       this.musicElement.volume = this.muted ? 0 : this.musicVolume;
     }
     if (this.fadingOutElement) {
-      this.fadingOutElement.volume = this.muted ? 0 : this.musicVolume;
+      // Only silence when muting; let crossfade interval manage volume when unmuting
+      if (this.muted) this.fadingOutElement.volume = 0;
     }
     if (this.sampleBank) {
       this.sampleBank.setVolume(this.muted ? 0 : this.sfxVolume);
@@ -1176,10 +1185,10 @@ export class AudioManager {
     if (this.dialogManager) {
       this.dialogManager.setMuted(this.muted);
     }
-    // Handle ambient wind
+    // Handle ambient wind — only restart if wind was ever started by the game
     if (this.muted && this.windActive) {
       this.stopAmbientWind();
-    } else if (!this.muted && !this.windActive) {
+    } else if (!this.muted && !this.windActive && this.windEverStarted) {
       this.startAmbientWind();
     }
   }
