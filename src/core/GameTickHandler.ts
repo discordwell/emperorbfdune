@@ -5,6 +5,7 @@ import { GameConstants } from '../utils/Constants';
 import { worldToTile } from '../utils/MathUtils';
 import { TerrainType } from '../rendering/TerrainRenderer';
 import { EventBus } from './EventBus';
+import { computeSimulationHash } from './SimulationHash';
 import {
   hasComponent,
   Position, Health, Owner, UnitType,
@@ -649,6 +650,20 @@ export function registerTickHandler(ctx: GameContext): void {
       const credits = [];
       for (let i = 0; i < totalPlayers; i++) credits.push(harvestSystem.getSolaris(i));
       ctx.gameStats.sample(currentTick, credits, unitCounts);
+    }
+
+    // Simulation hash & replay recording (every 25 ticks = 1 second)
+    if (currentTick % 25 === 0) {
+      const creditSnapshot: number[] = [];
+      for (let i = 0; i < totalPlayers; i++) creditSnapshot.push(harvestSystem.getSolaris(i));
+      const hash = computeSimulationHash(world, creditSnapshot);
+      ctx.hashTracker.record(currentTick, hash);
+      if (ctx.replayRecorder.isRecording()) {
+        ctx.replayRecorder.addHashCheckpoint(currentTick, hash);
+      }
+    }
+    if (ctx.replayRecorder.isRecording()) {
+      ctx.replayRecorder.endTick(currentTick);
     }
 
     // Autosave

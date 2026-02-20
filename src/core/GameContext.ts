@@ -34,6 +34,8 @@ import type { HouseChoice, OpponentConfig } from '../ui/HouseSelect';
 import type { MissionConfigData } from '../campaign/MissionConfig';
 import type { MissionRuntimeSettings } from '../campaign/MissionRuntime';
 import type { TypeRegistry } from './TypeRegistry';
+import type { SimulationHashTracker } from './SimulationHash';
+import type { ReplayRecorder, ReplayPlayer } from './ReplaySystem';
 
 // Save/Load types
 export interface SavedEntity {
@@ -169,6 +171,11 @@ export interface GameContext {
   // Save/Load
   buildSaveData: () => SaveData;
   saveGame: () => void;
+
+  // Determinism & Replay
+  hashTracker: SimulationHashTracker;
+  replayRecorder: ReplayRecorder;
+  replayPlayer: ReplayPlayer;
 
   // UI callbacks
   pushGameEvent: (x: number, z: number, type: string) => void;

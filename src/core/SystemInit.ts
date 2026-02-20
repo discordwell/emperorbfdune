@@ -41,6 +41,8 @@ import { GameConstants } from '../utils/Constants';
 import { worldToTile } from '../utils/MathUtils';
 import { createEntityFactory } from './EntityFactory';
 import { buildSaveData as buildSaveDataFn, saveGame as saveGameFn } from './SaveLoadSystem';
+import { SimulationHashTracker } from './SimulationHash';
+import { ReplayRecorder, ReplayPlayer } from './ReplaySystem';
 import {
   hasComponent,
   Position, Health, Owner, UnitType,
@@ -471,6 +473,10 @@ export function initializeSystems(config: SystemInitConfig): GameContext {
 
     buildSaveData: () => buildSaveDataFn(ctx),
     saveGame: () => saveGameFn(ctx),
+
+    hashTracker: new SimulationHashTracker(256),
+    replayRecorder: new ReplayRecorder(),
+    replayPlayer: new ReplayPlayer(),
 
     // These will be wired up by registerInputHandlers
     pushGameEvent: () => {},
