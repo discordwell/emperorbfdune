@@ -4,7 +4,7 @@ import type { ModelManager, LoadedModel } from './ModelManager';
 import type { ArtEntry } from '../config/ArtIniParser';
 import {
   Position, Rotation, Renderable, Health, Selectable, Owner,
-  BuildingType, UnitType, MoveTarget, Veterancy, Combat, TurretRotation, AttackTarget, hasComponent,
+  BuildingType, UnitType, MoveTarget, Veterancy, Combat, TurretRotation, AttackTarget, Shield, hasComponent,
   renderQuery, renderEnter, renderExit,
   type World,
 } from '../core/ECS';
@@ -48,6 +48,10 @@ export class UnitRenderer {
   private selectionCircles = new Map<number, THREE.Mesh>();
   // Health bars
   private healthBars = new Map<number, THREE.Sprite>();
+  // Shield bars (cyan, above health bar)
+  private shieldBars = new Map<number, THREE.Sprite>();
+  // Shield bubble meshes
+  private shieldBubbles = new Map<number, THREE.Mesh>();
   // Veterancy rank sprites
   private rankSprites = new Map<number, THREE.Sprite>();
 
@@ -469,6 +473,9 @@ export class UnitRenderer {
       // Update health bar
       this.updateHealthBar(eid);
 
+      // Update shield bar and bubble
+      this.updateShieldVisuals(eid);
+
       // Update rearm progress bar
       this.updateRearmBar(eid);
 
@@ -730,6 +737,68 @@ export class UnitRenderer {
     return sprite;
   }
 
+  private updateShieldVisuals(eid: number): void {
+    if (!hasComponent(this.currentWorld!, Shield, eid)) {
+      // No shield component — hide if previously shown
+      const bar = this.shieldBars.get(eid);
+      if (bar) bar.visible = false;
+      const bubble = this.shieldBubbles.get(eid);
+      if (bubble) bubble.visible = false;
+      return;
+    }
+
+    const shieldMax = Shield.max[eid];
+    if (shieldMax <= 0) return;
+    const shieldRatio = Shield.current[eid] / shieldMax;
+
+    // Shield bar (cyan, positioned above health bar)
+    const isSelected = Selectable.selected[eid] === 1;
+    if (shieldRatio <= 0 && !isSelected) {
+      const bar = this.shieldBars.get(eid);
+      if (bar) bar.visible = false;
+    } else {
+      let bar = this.shieldBars.get(eid);
+      if (!bar) {
+        const mat = new THREE.SpriteMaterial({ color: 0x00ddff });
+        bar = new THREE.Sprite(mat);
+        bar.scale.set(1.5, 0.1, 1);
+        const obj = this.entityObjects.get(eid);
+        if (obj) {
+          obj.add(bar);
+          bar.position.y = 2.2;
+        }
+        this.shieldBars.set(eid, bar);
+      }
+      bar.visible = true;
+      bar.scale.set(Math.max(0, shieldRatio) * 1.5, 0.1, 1);
+    }
+
+    // Shield bubble (translucent sphere)
+    if (shieldRatio > 0) {
+      let bubble = this.shieldBubbles.get(eid);
+      if (!bubble) {
+        const geo = new THREE.SphereGeometry(1.2, 12, 8);
+        const mat = new THREE.MeshBasicMaterial({
+          color: 0x00ddff,
+          transparent: true,
+          opacity: 0.12,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+        });
+        bubble = new THREE.Mesh(geo, mat);
+        bubble.position.y = 0.6;
+        const obj = this.entityObjects.get(eid);
+        if (obj) obj.add(bubble);
+        this.shieldBubbles.set(eid, bubble);
+      }
+      bubble.visible = true;
+      (bubble.material as THREE.MeshBasicMaterial).opacity = 0.06 + shieldRatio * 0.1;
+    } else {
+      const bubble = this.shieldBubbles.get(eid);
+      if (bubble) bubble.visible = false;
+    }
+  }
+
   private updateRearmBar(eid: number): void {
     if (!this.rearmProgressFn) return;
     const progress = this.rearmProgressFn(eid);
@@ -846,6 +915,10 @@ export class UnitRenderer {
       if (bar) { obj.remove(bar); (bar.material as THREE.Material).dispose(); }
       const rearmBar = this.rearmBars.get(eid);
       if (rearmBar) { obj.remove(rearmBar); (rearmBar.material as THREE.Material).dispose(); }
+      const shieldBar = this.shieldBars.get(eid);
+      if (shieldBar) { obj.remove(shieldBar); (shieldBar.material as THREE.Material).dispose(); }
+      const shieldBubble = this.shieldBubbles.get(eid);
+      if (shieldBubble) { obj.remove(shieldBubble); shieldBubble.geometry.dispose(); (shieldBubble.material as THREE.Material).dispose(); }
       const rank = this.rankSprites.get(eid);
       if (rank) { obj.remove(rank); (rank.material as THREE.Material).dispose(); }
 
@@ -861,6 +934,8 @@ export class UnitRenderer {
     }
     this.selectionCircles.delete(eid);
     this.healthBars.delete(eid);
+    this.shieldBars.delete(eid);
+    this.shieldBubbles.delete(eid);
     this.rearmBars.delete(eid);
     this.rankSprites.delete(eid);
     this.pendingModels.delete(eid);

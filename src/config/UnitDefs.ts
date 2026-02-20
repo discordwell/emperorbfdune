@@ -71,6 +71,11 @@ export interface UnitDef {
   // Veterancy
   veterancy: VeterancyLevel[];
 
+  // Shields (Ordos)
+  shieldHealth: number;
+  canSelfRepair: boolean; // unit-level self-repair (always active, no veterancy needed)
+  canSelfRepairShield: boolean; // shield regeneration
+
   // Damage effects
   stormDamage: number;
   hitSlowDownAmount: number;
@@ -146,6 +151,9 @@ export function createDefaultUnitDef(name: string): UnitDef {
     aiThreat: 0,
     veterancy: [],
     soundFile: -1,
+    shieldHealth: 0,
+    canSelfRepair: false,
+    canSelfRepairShield: false,
     stormDamage: 0,
     hitSlowDownAmount: 0,
     hitSlowDownDuration: 0,

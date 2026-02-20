@@ -101,6 +101,10 @@ export class HarvestSystem implements GameSystem {
     }
   }
 
+  setPlayerCount(count: number): void {
+    this.playerCount = count;
+  }
+
   getSolaris(playerId: number): number {
     return this.solaris.get(playerId) ?? 0;
   }

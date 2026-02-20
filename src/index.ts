@@ -42,11 +42,12 @@ import { PauseMenu } from './ui/PauseMenu';
 import { SuperweaponSystem } from './simulation/SuperweaponSystem';
 import { getDisplayName } from './config/DisplayNames';
 import { generateMissionConfig, type MissionConfigData } from './campaign/MissionConfig';
+import { deriveMissionRuntimeSettings, type MissionRuntimeSettings } from './campaign/MissionRuntime';
 import {
   addEntity, addComponent, removeEntity, hasComponent,
   Position, Velocity, Rotation, Health, Owner, UnitType, Selectable,
   MoveTarget, AttackTarget, Combat, Armour, Speed, ViewRange, Renderable,
-  Harvester, BuildingType, PowerSource, Veterancy, TurretRotation,
+  Harvester, BuildingType, PowerSource, Veterancy, TurretRotation, Shield,
   unitQuery, buildingQuery,
   type World,
 } from './core/ECS';
@@ -69,6 +70,7 @@ interface SavedEntity {
   stance?: number; // 0=aggressive, 1=defensive (default, not saved), 2=hold
   guardPos?: { x: number; z: number }; // guard position
   attackMoveDest?: { x: number; z: number }; // attack-move destination
+  shield?: { current: number; max: number }; // Ordos shield state
 }
 
 interface SaveData {
@@ -78,6 +80,15 @@ interface SaveData {
   enemyPrefix: string;
   houseName: string;
   enemyName: string;
+  gameMode?: GameMode;
+  difficulty?: Difficulty;
+  mapChoice?: MapChoice;
+  skirmishOptions?: SkirmishOptions;
+  opponents?: OpponentConfig[];
+  campaignTerritoryId?: number;
+  subhouse?: SubhouseChoice;
+  mapId?: string;
+  missionConfig?: MissionConfigData;
   solaris: number[];
   entities: SavedEntity[];
   spice: number[][]; // [row][col]
@@ -95,8 +106,26 @@ const buildingTypeIdMap = new Map<string, number>();
 const buildingTypeNames: string[] = [];
 const armourIdMap = new Map<string, number>();
 
+function createSeededRng(seedText: string): () => number {
+  let hash = 2166136261;
+  for (let i = 0; i < seedText.length; i++) {
+    hash ^= seedText.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  let state = (hash >>> 0) || 1;
+  return () => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    return state / 0x100000000;
+  };
+}
+
 /** Distribute N spawn positions evenly around an ellipse inscribed in the map */
-function getSpawnPositions(mapW: number, mapH: number, count: number): { x: number; z: number }[] {
+function getSpawnPositions(
+  mapW: number,
+  mapH: number,
+  count: number,
+  randomFn: () => number = Math.random,
+): { x: number; z: number }[] {
   const TILE_SZ = 2; // TILE_SIZE from MathUtils
   const centerX = (mapW / 2) * TILE_SZ;
   const centerZ = (mapH / 2) * TILE_SZ;
@@ -117,12 +146,12 @@ function getSpawnPositions(mapW: number, mapH: number, count: number): { x: numb
       { x: minPos, z: maxZ },     // Bottom-left
       { x: maxX, z: maxZ },       // Bottom-right
     ];
-    const playerIdx = Math.floor(Math.random() * 4);
+    const playerIdx = Math.floor(randomFn() * 4);
     const enemyIdx = 3 - playerIdx; // Opposite corner
     positions.push(corners[playerIdx], corners[enemyIdx]);
   } else {
     // N players: evenly spaced around ellipse, starting from random angle
-    const startAngle = Math.random() * Math.PI * 2;
+    const startAngle = randomFn() * Math.PI * 2;
     for (let i = 0; i < count; i++) {
       const angle = startAngle + (i * Math.PI * 2) / count;
       let x = centerX + Math.cos(angle) * radiusX;
@@ -199,6 +228,10 @@ async function main() {
   localStorage.removeItem('ebfd_load');
   localStorage.removeItem('ebfd_load_data');
 
+  let activeMissionConfig: MissionConfigData | null = savedGame?.missionConfig ?? null;
+  let activeMapId: string | null = savedGame?.mapId ?? null;
+  let missionRuntime: MissionRuntimeSettings | null = null;
+
   // Create WebGLRenderer early so it can be shared between 3D menus and game
   const gameCanvas = document.getElementById('game-canvas') as HTMLCanvasElement;
   let sharedRenderer: THREE.WebGLRenderer | null = null;
@@ -218,6 +251,14 @@ async function main() {
   // House selection screen (skip if loading)
   let house: HouseChoice;
   if (savedGame) {
+    const restoredMapChoice: MapChoice | undefined = savedGame.mapChoice ?? (savedGame.mapId ? {
+      id: savedGame.mapId,
+      name: savedGame.mapId,
+      seed: 0,
+      description: 'Restored save map',
+      mapId: savedGame.mapId,
+    } : undefined);
+
     house = {
       id: savedGame.housePrefix.toLowerCase(),
       name: savedGame.houseName,
@@ -226,9 +267,19 @@ async function main() {
       description: '',
       enemyPrefix: savedGame.enemyPrefix,
       enemyName: savedGame.enemyName,
-      difficulty: 'normal' as Difficulty,
-      gameMode: 'skirmish' as GameMode,
+      difficulty: savedGame.difficulty ?? ('normal' as Difficulty),
+      gameMode: savedGame.gameMode ?? ('skirmish' as GameMode),
+      mapChoice: restoredMapChoice,
+      skirmishOptions: savedGame.skirmishOptions,
+      opponents: savedGame.opponents,
+      campaignTerritoryId: savedGame.campaignTerritoryId,
+      subhouse: savedGame.subhouse,
     };
+
+    if (house.gameMode === 'campaign') {
+      await loadCampaignStrings();
+    }
+
     // Hide loading screen elements from house select
     const loadScreen = document.getElementById('loading-screen');
     if (loadScreen) loadScreen.style.display = 'flex';
@@ -273,6 +324,7 @@ async function main() {
               territoryDiff: playerCount - enemyCount,
               subHousePresent: null,
             });
+            activeMissionConfig = missionConfig;
             // Override enemy for this mission based on territory owner
             house.enemyPrefix = enemyHouse;
             const enemyNames: Record<string, string> = { AT: 'Atreides', HK: 'Harkonnen', OR: 'Ordos' };
@@ -280,6 +332,7 @@ async function main() {
           }
         } catch { /* use defaults */ }
       }
+      activeMissionConfig = missionConfig ?? null;
 
       // Build territory data from campaign state or fall back
       const campaignState = savedCampaign ? JSON.parse(savedCampaign) : null;
@@ -471,33 +524,42 @@ async function main() {
   if (house.gameMode === 'campaign' && house.campaignTerritoryId !== undefined) {
     const campaign = new CampaignMap(audioManager, house.prefix, house.name, house.enemyPrefix, house.enemyName);
     const phaseManager = campaign.getPhaseManager();
-    const subHouseSystem = campaign.getSubHouseSystem();
 
-    // Apply victory condition from phase state machine
+    // Build mission config if it wasn't already created during briefing/load
     const phaseType = phaseManager.getPhaseType();
     const phase = phaseManager.getCurrentPhase();
-    const victoryObjectives: Record<string, { condition: string; label: string }> = {
-      heighliner: { condition: 'survival', label: 'Survive the Heighliner mission' },
-      homeDefense: { condition: 'survival', label: 'Defend your homeworld' },
-      homeAttack: { condition: 'annihilate', label: 'Destroy all enemy structures' },
-      civilWar: { condition: 'annihilate', label: 'Win the civil war' },
-      final: { condition: 'annihilate', label: 'Defeat the Emperor Worm' },
-    };
-
-    const specialObj = victoryObjectives[phaseType];
-    if (specialObj) {
-      victorySystem.setVictoryCondition(specialObj.condition as 'conyard' | 'annihilate' | 'survival');
-      victorySystem.setObjectiveLabel(specialObj.label);
-      if (specialObj.condition === 'survival') {
-        victorySystem.setSurvivalTicks(25 * 60 * 8); // 8 minutes
+    if (!activeMissionConfig) {
+      const cState = campaign.getState();
+      const territory = cState.territories.find(t => t.id === house.campaignTerritoryId);
+      if (territory) {
+        const playerCount = cState.territories.filter(t => t.owner === 'player').length;
+        const enemyCount = cState.territories.filter(t => t.owner === 'enemy' || t.owner === 'enemy2').length;
+        const enemyHouse = territory.ownerHouse !== 'neutral' && territory.ownerHouse !== cState.housePrefix
+          ? territory.ownerHouse as HousePrefix : cState.enemyPrefix as HousePrefix;
+        activeMissionConfig = generateMissionConfig({
+          playerHouse: cState.housePrefix as HousePrefix,
+          phase,
+          phaseType,
+          territoryId: house.campaignTerritoryId,
+          territoryName: territory.name,
+          enemyHouse,
+          isAttack: territory.owner !== 'player',
+          territoryDiff: playerCount - enemyCount,
+          subHousePresent: null,
+        });
       }
-    } else {
-      // Standard missions: conyard for early phases, annihilate for Phase 3+
-      const vc = phase >= 3 ? 'annihilate' : 'conyard';
-      victorySystem.setVictoryCondition(vc);
-      victorySystem.setObjectiveLabel(
-        vc === 'annihilate' ? 'Destroy all enemy structures' : 'Destroy the enemy Construction Yard'
-      );
+    }
+
+    missionRuntime = deriveMissionRuntimeSettings({
+      missionConfig: activeMissionConfig,
+      phaseType,
+      phase,
+    });
+    if (missionRuntime) {
+      victorySystem.setVictoryCondition(missionRuntime.victoryCondition);
+      victorySystem.setObjectiveLabel(missionRuntime.objectiveLabel);
+      victorySystem.setSurvivalTicks(missionRuntime.timedObjectiveTicks);
+      victorySystem.setProtectedBuildingToken('ConYard');
     }
 
     // Tech level override for production
@@ -593,10 +655,14 @@ async function main() {
   const aiPlayers: AIPlayer[] = [];
   for (let i = 0; i < opponents.length; i++) {
     const playerId = i + 1;
+    const aiDifficulty = missionRuntime?.aiDifficulty ?? opponents[i].difficulty;
     // Positions will be set after terrain loads (in FRESH GAME section)
     const ai = new AIPlayer(gameRules, combatSystem, playerId, 200, 200, 60, 60);
     ai.setUnitPool(opponents[i].prefix);
-    ai.setDifficulty(opponents[i].difficulty);
+    ai.setDifficulty(aiDifficulty);
+    if (missionRuntime?.aiPersonality !== null && missionRuntime?.aiPersonality !== undefined) {
+      ai.setPersonality((missionRuntime.aiPersonality + i) % 5);
+    }
     ai.setSubhousePrefix(availableSubhouses[i % availableSubhouses.length]);
     ai.setProductionSystem(productionSystem, harvestSystem);
     ai.setBuildingTypeNames(buildingTypeNames);
@@ -608,30 +674,50 @@ async function main() {
     // Register faction and difficulty for additional AI players (player 1 already registered above)
     if (playerId > 1) {
       combatSystem.setPlayerFaction(playerId, opponents[i].prefix);
-      productionSystem.setDifficulty(playerId, opponents[i].difficulty, true);
+      productionSystem.setDifficulty(playerId, aiDifficulty, true);
     }
-    console.log(`AI ${playerId}: ${opponents[i].prefix}, sub-house: ${availableSubhouses[i % availableSubhouses.length]}, difficulty: ${opponents[i].difficulty}`);
+    console.log(`AI ${playerId}: ${opponents[i].prefix}, sub-house: ${availableSubhouses[i % availableSubhouses.length]}, difficulty: ${aiDifficulty}`);
+  }
+  if (opponents.length > 0) {
+    const ai1Difficulty = missionRuntime?.aiDifficulty ?? opponents[0].difficulty;
+    productionSystem.setDifficulty(1, ai1Difficulty, true);
   }
 
+  const desiredCreditsByPlayer = new Map<number, number>();
+
   // Apply skirmish options
-  if (house.skirmishOptions) {
+  if (house.skirmishOptions && house.gameMode === 'skirmish') {
     const opts = house.skirmishOptions;
-    // Override starting credits (default is 5000 set in HarvestSystem.init)
-    const extraCredits = opts.startingCredits - 5000;
-    if (extraCredits !== 0) {
-      harvestSystem.addSolaris(0, extraCredits);
+    if (!savedGame) {
+      desiredCreditsByPlayer.set(0, opts.startingCredits);
       for (let i = 0; i < opponents.length; i++) {
-        harvestSystem.addSolaris(i + 1, extraCredits);
+        desiredCreditsByPlayer.set(i + 1, opts.startingCredits);
       }
     }
     // Apply unit cap
     productionSystem.setMaxUnits(opts.unitCap);
   }
 
+  // Campaign mission runtime: credits from mission scripts and dynamic AI reserves
+  if (!savedGame && missionRuntime) {
+    if (missionRuntime.playerStartingCredits !== null) {
+      desiredCreditsByPlayer.set(0, missionRuntime.playerStartingCredits);
+    }
+    if (missionRuntime.aiStartingCredits !== null) {
+      for (let i = 0; i < opponents.length; i++) {
+        desiredCreditsByPlayer.set(i + 1, missionRuntime.aiStartingCredits);
+      }
+    }
+  }
+
   // Hard difficulty: AI gets resource bonus
-  for (let i = 0; i < opponents.length; i++) {
-    if (opponents[i].difficulty === 'hard') {
-      harvestSystem.addSolaris(i + 1, 3000);
+  if (!savedGame && house.gameMode === 'skirmish') {
+    for (let i = 0; i < opponents.length; i++) {
+      if (opponents[i].difficulty === 'hard') {
+        const pid = i + 1;
+        const baseCredits = desiredCreditsByPlayer.get(pid) ?? 5000;
+        desiredCreditsByPlayer.set(pid, baseCredits + 3000);
+      }
     }
   }
 
@@ -648,13 +734,26 @@ async function main() {
   updateLoading(30, 'Initializing game systems...');
   game.init();
   // Initialize solaris for additional AI players (game.init calls harvestSystem.init with default=2 players)
+  harvestSystem.setPlayerCount(totalPlayers);
   for (let i = 2; i < totalPlayers; i++) {
     harvestSystem.addSolaris(i, 5000);
+  }
+  // Apply configured starting credits AFTER init so HarvestSystem.init doesn't overwrite them.
+  if (!savedGame && desiredCreditsByPlayer.size > 0) {
+    for (const [playerId, targetCredits] of desiredCreditsByPlayer) {
+      const current = harvestSystem.getSolaris(playerId);
+      if (current !== targetCredits) {
+        harvestSystem.addSolaris(playerId, targetCredits - current);
+      }
+    }
   }
   updateLoading(40, 'Loading terrain...');
   // Determine which map to load
   let realMapId: string | undefined;
-  if (house.mapChoice?.mapId) {
+  if (savedGame?.mapId) {
+    // Save/load always restores the exact map that was active when saved
+    realMapId = savedGame.mapId;
+  } else if (house.mapChoice?.mapId) {
     // Skirmish: real map selected from manifest
     realMapId = house.mapChoice.mapId;
   } else if (house.gameMode === 'campaign') {
@@ -674,6 +773,7 @@ async function main() {
       realMapId = getCampaignMapId(house.campaignTerritoryId, house.prefix) ?? undefined;
     }
   }
+  activeMapId = realMapId ?? null;
 
   let mapLoaded = false;
   if (realMapId) {
@@ -690,6 +790,7 @@ async function main() {
       terrain.setMapSeed(house.mapChoice.seed);
     }
     await terrain.generate();
+    activeMapId = null;
   }
 
   // Update systems with actual map dimensions after terrain is ready
@@ -829,6 +930,13 @@ async function main() {
     addComponent(world, Veterancy, eid);
     Veterancy.xp[eid] = 0;
     Veterancy.rank[eid] = 0;
+
+    // Ordos shield system
+    if (def.shieldHealth > 0) {
+      addComponent(world, Shield, eid);
+      Shield.current[eid] = def.shieldHealth;
+      Shield.max[eid] = def.shieldHealth;
+    }
 
     combatSystem.registerUnit(eid, typeName);
 
@@ -1720,8 +1828,8 @@ async function main() {
     const objectiveTextNode = document.createElement('span');
     objectiveTextNode.textContent = `Objective: ${victorySystem.getObjectiveLabel()}`;
     objectiveEl.appendChild(objectiveTextNode);
-    // Add progress bar for survival missions
-    if (victorySystem.getObjectiveLabel().includes('Survive')) {
+    // Add progress bar for timed objectives (survival/protect)
+    if (victorySystem.hasTimedObjective()) {
       const barContainer = document.createElement('div');
       barContainer.style.cssText = `margin-top:3px;height:4px;background:#222;border-radius:2px;overflow:hidden;`;
       objectiveBarFillEl = document.createElement('div');
@@ -1917,15 +2025,17 @@ async function main() {
     // Sync audio listener position to camera for positional audio
     const camPos = scene.getCameraTarget();
     audioManager.updateListenerPosition(camPos.x, camPos.z);
-    // Update survival objective timer display + progress bar
-    if (objectiveEl && victorySystem.getObjectiveLabel().includes('Survive')) {
+    // Update timed objective timer display + progress bar
+    if (objectiveEl && victorySystem.hasTimedObjective()) {
       const progress = victorySystem.getSurvivalProgress();
       if (progress > 0 && progress < 1) {
-        const remaining = Math.ceil((1 - progress) * 8 * 60); // 8 minute survival
+        const remaining = victorySystem.getTimedObjectiveRemainingSeconds();
         const mins = Math.floor(remaining / 60);
         const secs = remaining % 60;
         const textSpan = objectiveEl.querySelector('span');
-        if (textSpan) textSpan.textContent = `Objective: Survive (${mins}:${secs.toString().padStart(2, '0')} remaining)`;
+        if (textSpan) {
+          textSpan.textContent = `Objective: ${victorySystem.getObjectiveLabel()} (${mins}:${secs.toString().padStart(2, '0')} remaining)`;
+        }
         objectiveEl.style.borderColor = progress > 0.7 ? '#4f4' : progress > 0.4 ? '#ff8' : '#f44';
         if (objectiveBarFillEl) objectiveBarFillEl.style.width = `${Math.round(progress * 100)}%`;
       }
@@ -2772,9 +2882,14 @@ async function main() {
       // Save guard position
       const gp = combatSystem.getGuardPosition(eid);
       if (gp) se.guardPos = { x: gp.x, z: gp.z };
-      // Save attack-move destination
-      if (combatSystem.isAttackMove(eid) && MoveTarget.active[eid] === 1) {
-        se.attackMoveDest = { x: MoveTarget.x[eid], z: MoveTarget.z[eid] };
+      // Save attack-move destination (use stored destination, not current MoveTarget which may be a chase position)
+      if (combatSystem.isAttackMove(eid)) {
+        const amd = combatSystem.getAttackMoveDestination(eid);
+        if (amd) se.attackMoveDest = { x: amd.x, z: amd.z };
+      }
+      // Save shield state
+      if (hasComponent(world, Shield, eid)) {
+        se.shield = { current: Shield.current[eid], max: Shield.max[eid] };
       }
       entities.push(se);
     }
@@ -2812,6 +2927,15 @@ async function main() {
       enemyPrefix: house.enemyPrefix,
       houseName: house.name,
       enemyName: house.enemyName,
+      gameMode: house.gameMode,
+      difficulty: house.difficulty,
+      mapChoice: house.mapChoice,
+      skirmishOptions: house.skirmishOptions,
+      opponents: house.opponents,
+      campaignTerritoryId: house.campaignTerritoryId,
+      subhouse: house.subhouse,
+      mapId: activeMapId ?? undefined,
+      missionConfig: activeMissionConfig ?? undefined,
       solaris: Array.from({ length: totalPlayers }, (_, i) => harvestSystem.getSolaris(i)),
       entities,
       spice,
@@ -2950,8 +3074,14 @@ async function main() {
           // Restore stance and guard position
           if (se.stance !== undefined) combatSystem.setStance(eid, se.stance);
           if (se.guardPos) combatSystem.setGuardPosition(eid, se.guardPos.x, se.guardPos.z);
-          // Restore attack-move state
-          if (se.attackMoveDest) combatSystem.setAttackMove([eid]);
+          // Restore attack-move state with original destination
+          if (se.attackMoveDest) combatSystem.restoreAttackMove(eid, se.attackMoveDest);
+          // Restore shield state
+          if (se.shield) {
+            addComponent(world, Shield, eid);
+            Shield.current[eid] = se.shield.current;
+            Shield.max[eid] = se.shield.max;
+          }
         }
       }
     }
@@ -3036,7 +3166,13 @@ async function main() {
   } else {
     // --- FRESH GAME ---
     // Distribute spawn positions for all players
-    const spawnPositions = getSpawnPositions(terrain.getMapWidth(), terrain.getMapHeight(), totalPlayers);
+    let spawnRandom = Math.random;
+    if (activeMapId) {
+      spawnRandom = createSeededRng(`${activeMapId}|${house.prefix}|${house.enemyPrefix}|${totalPlayers}`);
+    } else if (house.mapChoice) {
+      spawnRandom = createSeededRng(`${house.mapChoice.seed}|${house.prefix}|${house.enemyPrefix}|${totalPlayers}`);
+    }
+    const spawnPositions = getSpawnPositions(terrain.getMapWidth(), terrain.getMapHeight(), totalPlayers, spawnRandom);
     const playerBase = spawnPositions[0];
 
     // Update all AI targets/bases to match spawn positions

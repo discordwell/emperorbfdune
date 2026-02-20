@@ -65,7 +65,7 @@ export class Sidebar {
     // Z: cycle sidebar tabs
     if (key === 'z' && !e.ctrlKey && !e.shiftKey) {
       const tabs: typeof this.currentTab[] = ['Buildings', 'Units', 'Infantry'];
-      const starportOffers = this.production.getStarportOffers(this.factionPrefix);
+      const starportOffers = this.production.getStarportOffers(this.factionPrefix, this.playerId);
       if (starportOffers.length > 0) tabs.push('Starport');
       const idx = tabs.indexOf(this.currentTab);
       this.currentTab = tabs[(idx + 1) % tabs.length];
@@ -105,7 +105,7 @@ export class Sidebar {
     tabBar.style.cssText = 'display:flex;border-bottom:1px solid #444;';
     const tabs = ['Buildings', 'Units', 'Infantry'] as ('Buildings' | 'Units' | 'Infantry' | 'Starport')[];
     // Add Starport tab if player has offers
-    const starportOffers = this.production.getStarportOffers(this.factionPrefix);
+    const starportOffers = this.production.getStarportOffers(this.factionPrefix, this.playerId);
     if (starportOffers.length > 0) tabs.push('Starport');
 
     // Count queued items per category for badges
@@ -368,7 +368,7 @@ export class Sidebar {
   }
 
   private renderStarportItems(grid: HTMLElement): void {
-    const offers = this.production.getStarportOffers(this.factionPrefix);
+    const offers = this.production.getStarportOffers(this.factionPrefix, this.playerId);
     for (const { name, price } of offers) {
       const def = this.rules.units.get(name);
       if (!def) continue;

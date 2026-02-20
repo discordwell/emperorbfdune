@@ -74,6 +74,13 @@ export class AIPlayer implements GameSystem {
   private difficultyLevel: 'easy' | 'normal' | 'hard' = 'normal';
   private maxAttackFronts = 2; // Multi-front: easy=1, normal=2, hard=3
 
+  // Campaign personality tuning (0..4)
+  private personality = 2;
+  private aggressionBias = 1.0;
+  private defenseBias = 1.0;
+  private economyBias = 1.0;
+  private retreatBias = 1.0;
+
   // Map dimensions (configurable for variable-size maps)
   private mapWidth = 128;
   private mapHeight = 128;
@@ -120,6 +127,47 @@ export class AIPlayer implements GameSystem {
       this.maxAttackFronts = 3;
     }
     // 'normal' uses defaults (maxScouts = 2, maxAttackFronts = 2)
+  }
+
+  /** 0=fortifier, 1=economic, 2=balanced, 3=raider, 4=berserker */
+  setPersonality(personality: number): void {
+    const p = Math.max(0, Math.min(4, Math.floor(personality)));
+    this.personality = p;
+
+    // Reset to neutral multipliers before applying a profile
+    this.aggressionBias = 1.0;
+    this.defenseBias = 1.0;
+    this.economyBias = 1.0;
+    this.retreatBias = 1.0;
+
+    switch (p) {
+      case 0: // Fortifier
+        this.aggressionBias = 0.8;
+        this.defenseBias = 1.4;
+        this.economyBias = 1.0;
+        this.retreatBias = 1.2;
+        break;
+      case 1: // Economic
+        this.aggressionBias = 0.85;
+        this.defenseBias = 0.9;
+        this.economyBias = 1.35;
+        this.retreatBias = 1.1;
+        break;
+      case 3: // Raider
+        this.aggressionBias = 1.25;
+        this.defenseBias = 0.9;
+        this.economyBias = 0.95;
+        this.retreatBias = 0.9;
+        break;
+      case 4: // Berserker
+        this.aggressionBias = 1.5;
+        this.defenseBias = 0.75;
+        this.economyBias = 0.8;
+        this.retreatBias = 0.75;
+        break;
+      default: // Balanced
+        break;
+    }
   }
 
   constructor(rules: GameRules, combatSystem: CombatSystem, playerId: number, baseX: number, baseZ: number, targetX: number, targetZ: number) {
@@ -843,7 +891,8 @@ export class AIPlayer implements GameSystem {
     }
 
     // Desired harvester count by difficulty
-    const desiredHarvesters = this.difficultyLevel === 'hard' ? 3 : 2;
+    const baseHarvesters = this.difficultyLevel === 'hard' ? 3 : 2;
+    const desiredHarvesters = Math.max(2, Math.min(5, Math.round(baseHarvesters * this.economyBias)));
 
     if (harvesterCount < desiredHarvesters) {
       const solaris = this.harvestSystem.getSolaris(this.playerId);
@@ -1264,7 +1313,8 @@ export class AIPlayer implements GameSystem {
       }
 
       // Priority 1: Defense turrets (especially when under attack)
-      if (this.baseUnderAttack && turretCount < 4 && solaris > 500) {
+      const defensiveTurretCap = Math.max(3, Math.floor(4 * this.defenseBias));
+      if (this.baseUnderAttack && turretCount < defensiveTurretCap && solaris > 500) {
         const turretTypes = [`${px}GunTurret`, `${px}RocketTurret`, `${px}Turret`];
         for (const turret of turretTypes) {
           if (this.production.canBuild(this.playerId, turret, true)) {
@@ -1283,7 +1333,7 @@ export class AIPlayer implements GameSystem {
       }
 
       // Priority 3: Economy — scale up refineries with difficulty
-      const desiredRefineries = Math.min(4, 2 + Math.floor(this.difficulty));
+      const desiredRefineries = Math.max(2, Math.min(5, Math.round((2 + Math.floor(this.difficulty)) * this.economyBias)));
       if (refineryCount < desiredRefineries && solaris > 1600) {
         if (this.production.canBuild(this.playerId, `${px}Refinery`, true)) {
           this.production.startProduction(this.playerId, `${px}Refinery`, true);
@@ -1300,7 +1350,8 @@ export class AIPlayer implements GameSystem {
       }
 
       // Priority 5: Turrets periodically (cap at 6)
-      if (turretCount < 6 && solaris > 800 && Math.random() < 0.25) {
+      const periodicTurretCap = Math.max(4, Math.floor(6 * this.defenseBias));
+      if (turretCount < periodicTurretCap && solaris > 800 && Math.random() < 0.25) {
         const turretTypes = [`${px}GunTurret`, `${px}RocketTurret`, `${px}Turret`];
         for (const turret of turretTypes) {
           if (this.production.canBuild(this.playerId, turret, true)) {
@@ -1435,7 +1486,7 @@ export class AIPlayer implements GameSystem {
     // Must own a Starport building
     if (!this.production.ownsAnyBuildingSuffix(this.playerId, 'Starport')) return;
 
-    const offers = this.production.getStarportOffers(this.factionPrefix);
+    const offers = this.production.getStarportOffers(this.factionPrefix, this.playerId);
     if (offers.length === 0) return;
 
     // Find best deal: lowest price relative to base cost
@@ -1653,7 +1704,7 @@ export class AIPlayer implements GameSystem {
     }
 
     // Scale max defenders with difficulty
-    const scaledMaxDefenders = Math.floor(this.maxDefenders * this.difficulty);
+    const scaledMaxDefenders = Math.max(2, Math.floor(this.maxDefenders * this.difficulty * this.defenseBias));
 
     // Ensure we have some defenders near base
     if (this.defenders.size < scaledMaxDefenders && nearBaseUnits.length > scaledMaxDefenders) {
@@ -1666,8 +1717,9 @@ export class AIPlayer implements GameSystem {
     }
 
     // Dynamic attack group size based on difficulty
-    const attackThreshold = Math.max(3, Math.floor(this.attackGroupSize * this.difficulty));
-    const canAttack = this.tickCounter - this.lastAttackTick > this.attackCooldown;
+    const attackThreshold = Math.max(3, Math.floor((this.attackGroupSize * this.difficulty) / this.aggressionBias));
+    const effectiveAttackCooldown = Math.max(150, Math.floor(this.attackCooldown / this.aggressionBias));
+    const canAttack = this.tickCounter - this.lastAttackTick > effectiveAttackCooldown;
 
     // Filter out designated defenders from attack group
     const attackableUnits = nearBaseUnits.filter(eid => !this.defenders.has(eid));
@@ -1820,7 +1872,8 @@ export class AIPlayer implements GameSystem {
       if (this.specialEntities.has(eid)) continue;
 
       const ratio = Health.max[eid] > 0 ? Health.current[eid] / Health.max[eid] : 1;
-      if (ratio < this.retreatHealthPct) {
+      const retreatThreshold = Math.max(0.1, Math.min(0.95, this.retreatHealthPct * this.retreatBias));
+      if (ratio < retreatThreshold) {
         // Retreat to base
         const dist = distance2D(Position.x[eid], Position.z[eid], this.baseX, this.baseZ);
         if (dist > 30) {
@@ -1970,7 +2023,7 @@ export class AIPlayer implements GameSystem {
     if (attackForce.length < 3) return;
 
     // Keep some defenders behind (half of scaled maxDefenders)
-    const scaledMaxDefenders = Math.floor(this.maxDefenders * this.difficulty);
+    const scaledMaxDefenders = Math.max(2, Math.floor(this.maxDefenders * this.difficulty * this.defenseBias));
     const keepBack = Math.floor(scaledMaxDefenders / 2);
     this.defenders.clear();
     for (let i = 0; i < keepBack && i < attackForce.length; i++) {

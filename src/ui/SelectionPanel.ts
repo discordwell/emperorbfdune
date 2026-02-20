@@ -1,6 +1,6 @@
 import {
   Position, Health, Owner, UnitType, BuildingType, Veterancy,
-  Combat, Armour, Speed, Harvester,
+  Combat, Armour, Speed, Harvester, Shield,
   hasComponent, type World,
 } from '../core/ECS';
 import type { GameRules } from '../config/RulesParser';
@@ -190,6 +190,20 @@ export class SelectionPanel {
     const maxHp = Health.max[eid];
     const hpPct = maxHp > 0 ? Math.round((hp / maxHp) * 100) : 0;
     const hpColor = hpPct > 60 ? '#0f0' : hpPct > 30 ? '#ff0' : '#f00';
+
+    // Shield info
+    let shieldHtml = '';
+    if (hasComponent(this.world, Shield, eid) && Shield.max[eid] > 0) {
+      const shieldCur = Shield.current[eid];
+      const shieldMax = Shield.max[eid];
+      const shieldPct = Math.round((shieldCur / shieldMax) * 100);
+      shieldHtml = `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+        <div style="flex:1;height:4px;background:#333;border-radius:2px;overflow:hidden;">
+          <div style="height:100%;width:${shieldPct}%;background:#00ddff;"></div>
+        </div>
+        <span style="font-size:10px;color:#00ddff;">Shield ${Math.ceil(shieldCur)}/${shieldMax}</span>
+      </div>`;
+    }
 
     // Role tags
     let roleHtml = '';
@@ -383,6 +397,7 @@ export class SelectionPanel {
           </div>
           <span style="font-size:11px;color:${hpColor};">${Math.ceil(hp)}/${maxHp}</span>
         </div>
+        ${shieldHtml}
         ${harvesterHtml}
         ${ammoHtml}
         ${upgradeProgressHtml}

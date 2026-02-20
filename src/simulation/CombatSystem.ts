@@ -2,7 +2,7 @@ import type { GameSystem } from '../core/Game';
 import type { World } from '../core/ECS';
 import {
   Position, Health, Combat, Owner, AttackTarget, MoveTarget, Rotation, Speed,
-  Armour, BuildingType, Veterancy, TurretRotation,
+  Armour, BuildingType, Veterancy, TurretRotation, Shield,
   combatQuery, healthQuery, hasComponent,
 } from '../core/ECS';
 import type { GameRules } from '../config/RulesParser';
@@ -224,6 +224,16 @@ export class CombatSystem implements GameSystem {
 
   isAttackMove(eid: number): boolean {
     return this.attackMoveEntities.has(eid);
+  }
+
+  getAttackMoveDestination(eid: number): { x: number; z: number } | undefined {
+    return this.attackMoveDestinations.get(eid);
+  }
+
+  /** Restore attack-move state with explicit destination (for save/load) */
+  restoreAttackMove(eid: number, dest: { x: number; z: number }): void {
+    this.attackMoveEntities.add(eid);
+    this.attackMoveDestinations.set(eid, dest);
   }
 
   /** Check if an entity just fired (for animation triggering) */
@@ -537,6 +547,17 @@ export class CombatSystem implements GameSystem {
   ): void {
     if (damage <= 0) return;
     if (!hasComponent(world, Health, targetEid) || Health.current[targetEid] <= 0) return;
+
+    // Shield absorbs damage first
+    if (hasComponent(world, Shield, targetEid) && Shield.current[targetEid] > 0) {
+      const absorbed = Math.min(Shield.current[targetEid], damage);
+      Shield.current[targetEid] -= absorbed;
+      damage -= absorbed;
+      if (damage <= 0) {
+        EventBus.emit('shield:hit', { eid: targetEid, absorbed });
+        return;
+      }
+    }
 
     Health.current[targetEid] -= damage;
 

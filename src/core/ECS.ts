@@ -111,6 +111,11 @@ export const ViewRange = defineComponent({
   range: Types.f32,
 });
 
+export const Shield = defineComponent({
+  current: Types.f32,
+  max: Types.f32,
+});
+
 export const Renderable = defineComponent({
   modelId: Types.ui16,
   sceneIndex: Types.i32, // Index into Three.js objects array, -1 if not yet created

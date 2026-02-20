@@ -234,6 +234,8 @@ function parseUnitDef(name: string, section: Section): UnitDef {
       case 'AiSpecial': def.aiSpecial = parseBool(value); break;
       case 'AIThreat': def.aiThreat = parseNum(value); break;
       case 'StormDamage': def.stormDamage = parseNum(value); break;
+      case 'ShieldHealth': def.shieldHealth = parseNum(value); break;
+      case 'CanSelfRepairShield': def.canSelfRepairShield = parseBool(value); break;
       case 'HitSlowDownAmount': def.hitSlowDownAmount = parseNum(value); break;
       case 'HitSlowDownDuration': def.hitSlowDownDuration = parseNum(value); break;
       case 'GetsHeightAdvantage': def.getsHeightAdvantage = parseBool(value); break;
@@ -257,6 +259,7 @@ function parseUnitDef(name: string, section: Section): UnitDef {
         break;
       case 'CanSelfRepair':
         if (currentVet) currentVet.canSelfRepair = parseBool(value);
+        else def.canSelfRepair = parseBool(value);
         break;
       case 'Elite':
         if (currentVet) currentVet.elite = parseBool(value);

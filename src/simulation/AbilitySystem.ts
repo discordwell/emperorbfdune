@@ -12,7 +12,7 @@ import type { SelectionPanel } from '../ui/SelectionPanel';
 import { EventBus } from '../core/EventBus';
 import {
   Position, Health, Combat, Owner, UnitType, AttackTarget, MoveTarget,
-  BuildingType, Veterancy,
+  BuildingType, Veterancy, Shield,
   unitQuery, buildingQuery, hasComponent,
   type World,
 } from '../core/ECS';
@@ -781,19 +781,28 @@ export class AbilitySystem {
       if (Health.current[eid] <= 0) continue;
       if (Health.current[eid] >= Health.max[eid]) continue;
 
+      const typeId = UnitType.id[eid];
+      const typeName = this.deps.unitTypeNames[typeId];
+      const unitDef = typeName ? this.deps.rules.units.get(typeName) : null;
+
+      // Unit-level self-repair (Ordos units): always active, 1% HP per tick interval
+      if (unitDef?.canSelfRepair) {
+        Health.current[eid] = Math.min(Health.max[eid], Health.current[eid] + Health.max[eid] * 0.01);
+        // Also regenerate shield if applicable
+        if (unitDef.canSelfRepairShield && hasComponent(world, Shield, eid) && Shield.current[eid] < Shield.max[eid]) {
+          Shield.current[eid] = Math.min(Shield.max[eid], Shield.current[eid] + Shield.max[eid] * 0.02);
+        }
+        continue; // Self-repair active, skip base proximity healing
+      }
+
       // Veterancy self-repair: units with canSelfRepair slowly heal anywhere (even while moving/fighting)
       if (hasComponent(world, Veterancy, eid)) {
         const rank = Veterancy.rank[eid];
-        if (rank > 0) {
-          const typeId = UnitType.id[eid];
-          const typeName = this.deps.unitTypeNames[typeId];
-          const unitDef = typeName ? this.deps.rules.units.get(typeName) : null;
-          if (unitDef && unitDef.veterancy.length >= rank) {
-            const vetLevel = unitDef.veterancy[rank - 1];
-            if (vetLevel.canSelfRepair) {
-              Health.current[eid] = Math.min(Health.max[eid], Health.current[eid] + Health.max[eid] * 0.01);
-              continue; // Self-repair active, skip base proximity healing
-            }
+        if (rank > 0 && unitDef && unitDef.veterancy.length >= rank) {
+          const vetLevel = unitDef.veterancy[rank - 1];
+          if (vetLevel.canSelfRepair) {
+            Health.current[eid] = Math.min(Health.max[eid], Health.current[eid] + Health.max[eid] * 0.01);
+            continue; // Self-repair active, skip base proximity healing
           }
         }
       }

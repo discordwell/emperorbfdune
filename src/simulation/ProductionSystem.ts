@@ -572,12 +572,13 @@ export class ProductionSystem {
     }
   }
 
-  /** Get available starport units with current prices */
-  getStarportOffers(factionPrefix: string): { name: string; price: number }[] {
+  /** Get available starport units with current prices (difficulty-adjusted) */
+  getStarportOffers(factionPrefix: string, playerId?: number): { name: string; price: number }[] {
+    const costMult = playerId !== undefined ? (this.costMultipliers.get(playerId) ?? 1.0) : 1.0;
     const offers: { name: string; price: number }[] = [];
     for (const [name, price] of this.starportPrices) {
       if (!name.startsWith(factionPrefix)) continue;
-      offers.push({ name, price });
+      offers.push({ name, price: Math.round(price * costMult) });
     }
     return offers;
   }
@@ -595,8 +596,10 @@ export class ProductionSystem {
 
   /** Purchase a unit from the starport (arrives after delay via normal production:complete) */
   buyFromStarport(playerId: number, unitName: string): boolean {
-    const price = this.starportPrices.get(unitName);
-    if (price === undefined) return false;
+    const basePrice = this.starportPrices.get(unitName);
+    if (basePrice === undefined) return false;
+    const costMult = this.costMultipliers.get(playerId) ?? 1.0;
+    const price = Math.round(basePrice * costMult);
 
     // Queue as a unit with reduced build time (arrives by air)
     const def = this.rules.units.get(unitName);
