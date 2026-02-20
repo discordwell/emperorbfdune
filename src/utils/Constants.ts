@@ -38,6 +38,12 @@ export const GameConstants = {
   CASH_NO_SPICE_AMOUNT_MAX: 20000,
   CASH_NO_SPICE_FREQ_MIN: 4000,
   CASH_NO_SPICE_FREQ_MAX: 8000,
+  // Sandstorm mechanics (from rules.txt [General])
+  STORM_MIN_WAIT: 7500,
+  STORM_MAX_WAIT: 1500,
+  STORM_MIN_LIFE: 2000,
+  STORM_MAX_LIFE: 2500,
+  STORM_KILL_CHANCE: 127,
   // Difficulty multipliers (percentage values from rules.txt [General])
   EASY_BUILD_COST: 50,
   NORMAL_BUILD_COST: 100,
@@ -78,6 +84,11 @@ export function loadConstants(general: Record<string, string>): void {
   GameConstants.CASH_NO_SPICE_AMOUNT_MAX = g('CashDeliveryWhenNoSpiceAmountMax', 20000);
   GameConstants.CASH_NO_SPICE_FREQ_MIN = g('CashDeliveryWhenNoSpiceFrequencyMin', 4000);
   GameConstants.CASH_NO_SPICE_FREQ_MAX = g('CashDeliveryWhenNoSpiceFrequencyMax', 8000);
+  GameConstants.STORM_MIN_WAIT = g('StormMinWait', 7500);
+  GameConstants.STORM_MAX_WAIT = g('StormMaxWait', 1500);
+  GameConstants.STORM_MIN_LIFE = g('StormMinLife', 2000);
+  GameConstants.STORM_MAX_LIFE = g('StormMaxLife', 2500);
+  GameConstants.STORM_KILL_CHANCE = g('StormKillChance', 127);
   GameConstants.EASY_BUILD_COST = g('EasyBuildCost', 50);
   GameConstants.NORMAL_BUILD_COST = g('NormalBuildCost', 100);
   GameConstants.HARD_BUILD_COST = g('HardBuildCost', 125);

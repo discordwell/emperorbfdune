@@ -91,6 +91,9 @@ export interface UnitDef {
   // Production
   upgradedPrimaryRequired: boolean; // Requires primary building to be upgraded
 
+  // Harvesting
+  spiceCapacity: number; // Maximum cash value of spice carried (default 700)
+
   // Special
   getUnitWhenBuilt?: string;
   deploysTo?: string;
@@ -161,5 +164,6 @@ export function createDefaultUnitDef(name: string): UnitDef {
     hitSlowDownDuration: 0,
     getsHeightAdvantage: true, // Default: most units get height advantage
     upgradedPrimaryRequired: false,
+    spiceCapacity: 700,
   };
 }

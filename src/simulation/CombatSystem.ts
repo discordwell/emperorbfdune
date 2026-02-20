@@ -94,12 +94,19 @@ export class CombatSystem implements GameSystem {
     if (newRank > oldRank) {
       Veterancy.rank[eid] = newRank;
       if (aDef && aDef.veterancy.length > 0) {
-        for (let r = oldRank; r < newRank; r++) {
-          const lvl = aDef.veterancy[r];
-          if (lvl?.health) {
-            Health.max[eid] += lvl.health;
-            Health.current[eid] += lvl.health;
+        // Find the highest rank with a health value (handles rank-jumping)
+        let healthToApply: number | undefined;
+        for (let r = newRank - 1; r >= oldRank; r--) {
+          if (aDef.veterancy[r]?.health) {
+            healthToApply = aDef.veterancy[r].health;
+            break;
           }
+        }
+        if (healthToApply) {
+          const oldMax = Health.max[eid];
+          Health.max[eid] = healthToApply;
+          Health.current[eid] = Math.min(Health.max[eid],
+            Health.current[eid] + Math.max(0, healthToApply - oldMax));
         }
       }
       EventBus.emit('unit:promoted', { entityId: eid, rank: newRank });
@@ -626,8 +633,12 @@ export class CombatSystem implements GameSystem {
     if (Health.current[targetEid] <= 0) {
       Health.current[targetEid] = 0;
 
-      // Grant XP to killer and check rank promotion
-      this.addXp(attackerEid, 1);
+      // Grant XP to killer based on killed unit's Score value
+      const targetTypeName = this.unitTypeMap.get(targetEid);
+      const targetDef = targetTypeName ? this.rules.units.get(targetTypeName) : null;
+      const targetBldgDef = targetTypeName ? this.rules.buildings.get(targetTypeName) : null;
+      const scoreValue = targetDef?.score ?? targetBldgDef?.score ?? 1;
+      this.addXp(attackerEid, scoreValue);
 
       EventBus.emit('unit:died', { entityId: targetEid, killerEntity: attackerEid });
     }

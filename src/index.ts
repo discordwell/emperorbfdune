@@ -966,7 +966,8 @@ async function main() {
     // Auto-add harvester component for harvester units
     if (typeName.includes('Harvester') || typeName.includes('Harv')) {
       addComponent(world, Harvester, eid);
-      Harvester.maxCapacity[eid] = 1.0;
+      const spiceCap = def.spiceCapacity || 700;
+      Harvester.maxCapacity[eid] = spiceCap / GameConstants.SPICE_VALUE;
       Harvester.spiceCarried[eid] = 0;
       Harvester.state[eid] = 0;
       // Link to nearest refinery owned by same player
@@ -1393,16 +1394,23 @@ async function main() {
       }
     }
 
-    // Auto-replace harvesters: queue a new one if player loses a harvester
+    // Auto-replace harvesters: queue a new one after HarvReplacementDelay
     const owner = Owner.playerId[entityId];
     if (owner === 0 && hasComponent(world, Harvester, entityId)) {
       const typeId = UnitType.id[entityId];
       const harvTypeName = unitTypeNames[typeId];
       if (harvTypeName && findRefinery(world, 0)) {
-        // Auto-queue replacement
-        if (productionSystem.startProduction(0, harvTypeName, false)) {
-          selectionPanel.addMessage('Harvester lost - replacement queued', '#ff8800');
-        }
+        const delayTicks = GameConstants.HARV_REPLACEMENT_DELAY;
+        selectionPanel.addMessage(`Harvester lost - replacement in ${Math.round(delayTicks / 25)}s`, '#ff8800');
+        deferAction(delayTicks, () => {
+          try {
+            if (findRefinery(game.getWorld(), 0)) {
+              if (productionSystem.startProduction(0, harvTypeName, false)) {
+                selectionPanel.addMessage('Replacement harvester queued', '#44ff44');
+              }
+            }
+          } catch { /* game may have ended */ }
+        });
       }
     }
 
@@ -1877,6 +1885,8 @@ async function main() {
     type: 'inkvine' | 'fallout'; // inkvine = infantry only, fallout = all units
   }
   const groundSplats: GroundSplat[] = [];
+  let stormWaitTimer = GameConstants.STORM_MIN_WAIT + Math.floor(Math.random() * GameConstants.STORM_MAX_WAIT);
+  let activeStormListener: ((data: { tick: number }) => void) | null = null;
 
   // --- APC TRANSPORT SYSTEM (delegated to AbilitySystem) ---
 
@@ -2436,56 +2446,47 @@ async function main() {
       }
     }
 
-    // Sandstorm events: ~1% chance every 20 seconds, lasts 8 seconds
-    if (game.getTickCount() % 500 === 0 && !effectsManager.isSandstormActive() && Math.random() < 0.01 * (game.getTickCount() / 2500 + 0.5)) {
-      effectsManager.startSandstorm();
-      selectionPanel.addMessage('Sandstorm approaching!', '#ff8844');
-      // End storm after 200 ticks (8 seconds)
-      const stormEnd = game.getTickCount() + 200;
-      const stormDamage = () => {
-        if (game.getTickCount() >= stormEnd) {
-          effectsManager.stopSandstorm();
-          selectionPanel.addMessage('Sandstorm subsided', '#aaa');
-          EventBus.off('game:tick', stormDamage);
-          return;
-        }
-        // Damage units and buildings on sand every 25 ticks during storm
-        if (game.getTickCount() % 25 === 0) {
+    // Sandstorm events: timer-based from rules.txt constants
+    if (!effectsManager.isSandstormActive()) {
+      stormWaitTimer--;
+      if (stormWaitTimer <= 0) {
+        effectsManager.startSandstorm();
+        selectionPanel.addMessage('Sandstorm approaching!', '#ff8844');
+        const stormDuration = GameConstants.STORM_MIN_LIFE +
+          Math.floor(Math.random() * (GameConstants.STORM_MAX_LIFE - GameConstants.STORM_MIN_LIFE));
+        const stormEnd = game.getTickCount() + stormDuration;
+        stormWaitTimer = GameConstants.STORM_MIN_WAIT +
+          Math.floor(Math.random() * GameConstants.STORM_MAX_WAIT);
+        const stormDamage = () => {
+          if (game.getTickCount() >= stormEnd) {
+            effectsManager.stopSandstorm();
+            selectionPanel.addMessage('Sandstorm subsided', '#aaa');
+            EventBus.off('game:tick', stormDamage);
+            activeStormListener = null;
+            return;
+          }
+          // Each tick, ground units on sand have a 1/StormKillChance of being killed
           const stormUnits = unitQuery(world);
           for (const eid of stormUnits) {
             if (Health.current[eid] <= 0) continue;
             const typeId = UnitType.id[eid];
             const tName = unitTypeNames[typeId];
             const uDef = tName ? gameRules.units.get(tName) : null;
-            const dmg = uDef?.stormDamage ?? 5;
-            if (dmg <= 0) continue;
-            // Only damage units on sand terrain
+            if (uDef?.canFly) continue; // Aircraft immune to storms
             const stormTile = worldToTile(Position.x[eid], Position.z[eid]);
             const terrType = terrain.getTerrainType(stormTile.tx, stormTile.tz);
             if (terrType === TerrainType.Sand || terrType === TerrainType.Dunes) {
-              Health.current[eid] = Math.max(0, Health.current[eid] - dmg);
-              if (Health.current[eid] <= 0) {
+              // StormKillChance: random instant-kill chance per tick
+              if (Math.floor(Math.random() * GameConstants.STORM_KILL_CHANCE) === 0) {
+                Health.current[eid] = 0;
                 EventBus.emit('unit:died', { entityId: eid, killerEntity: -1 });
               }
             }
           }
-          // Buildings also take storm damage (per-building stormDamage from rules.txt)
-          const stormBldgs = buildingQuery(world);
-          for (const bid of stormBldgs) {
-            if (Health.current[bid] <= 0) continue;
-            const bTypeId = BuildingType.id[bid];
-            const bName = buildingTypeNames[bTypeId];
-            const bDef = bName ? gameRules.buildings.get(bName) : null;
-            const bDmg = bDef?.stormDamage ?? 0;
-            if (bDmg <= 0) continue;
-            Health.current[bid] = Math.max(0, Health.current[bid] - bDmg);
-            if (Health.current[bid] <= 0) {
-              EventBus.emit('unit:died', { entityId: bid, killerEntity: -1 });
-            }
-          }
-        }
-      };
-      EventBus.on('game:tick', stormDamage);
+        };
+        activeStormListener = stormDamage;
+        EventBus.on('game:tick', stormDamage);
+      }
     }
 
     // InkVine ground splat DoT: damage infantry in toxic zones every 25 ticks
@@ -3185,6 +3186,14 @@ async function main() {
       }
       selectionManager.setControlGroups(restoredGroups);
     }
+
+    // Clean up any active storm listener before loading
+    if (activeStormListener) {
+      EventBus.off('game:tick', activeStormListener);
+      activeStormListener = null;
+      effectsManager.stopSandstorm();
+    }
+    stormWaitTimer = GameConstants.STORM_MIN_WAIT + Math.floor(Math.random() * GameConstants.STORM_MAX_WAIT);
 
     // Restore ground splats (InkVine toxic residue and Death Hand fallout)
     effectsManager.clearAllGroundSplats();

@@ -234,6 +234,7 @@ function parseUnitDef(name: string, section: Section): UnitDef {
         break;
       case 'AiSpecial': def.aiSpecial = parseBool(value); break;
       case 'AIThreat': def.aiThreat = parseNum(value); break;
+      case 'SpiceCapacity': def.spiceCapacity = parseNum(value); break;
       case 'StormDamage': def.stormDamage = parseNum(value); break;
       case 'ShieldHealth': def.shieldHealth = parseNum(value); break;
       case 'CanSelfRepairShield': def.canSelfRepairShield = parseBool(value); break;
