@@ -23,6 +23,7 @@ export class Sidebar {
 
   private factionPrefix: string;
   private subhousePrefix: string;
+  private subhousePrefixes: string[] = [];
   private tooltip: HTMLElement | null;
   // Maps hotkey letter to { name, isBuilding } for current tab
   private hotkeyMap = new Map<string, { name: string; isBuilding: boolean }>();
@@ -37,6 +38,7 @@ export class Sidebar {
     this.onBuild = onBuild;
     this.factionPrefix = factionPrefix;
     this.subhousePrefix = subhousePrefix;
+    if (subhousePrefix) this.subhousePrefixes = [subhousePrefix];
     this.tooltip = document.getElementById('tooltip');
     this.render();
     window.addEventListener('keydown', this.onKeyDown);
@@ -46,6 +48,13 @@ export class Sidebar {
   setIcons(icons: Map<string, string>): void {
     this.iconMap = icons;
     this.render(); // Re-render with icons
+  }
+
+  /** Set allowed sub-house prefixes (for campaign alliances) */
+  setSubhousePrefixes(prefixes: string[]): void {
+    this.subhousePrefixes = prefixes;
+    this.subhousePrefix = prefixes[0] ?? '';
+    this.render();
   }
 
   setConcreteCallback(cb: ConcreteCallback): void {
@@ -232,9 +241,15 @@ export class Sidebar {
     return `Tier ${tierIndex}`;
   }
 
+  private hasValidPrefix(name: string): boolean {
+    if (name.startsWith(this.factionPrefix)) return true;
+    for (const sp of this.subhousePrefixes) {
+      if (name.startsWith(sp)) return true;
+    }
+    return false;
+  }
+
   private renderBuildingItems(grid: HTMLElement): void {
-    const prefix = this.factionPrefix;
-    const subPrefix = this.subhousePrefix;
     let hotkeyIdx = 0;
 
     // Concrete slab button (always available)
@@ -251,7 +266,7 @@ export class Sidebar {
     // Collect and sort buildings by tech tier, then role, then cost
     const buildings: { name: string; def: BuildingDef }[] = [];
     for (const [name, def] of this.rules.buildings) {
-      const validPrefix = name.startsWith(prefix) || (subPrefix && name.startsWith(subPrefix));
+      const validPrefix = this.hasValidPrefix(name);
       if (!validPrefix) continue;
       if (name.startsWith('IN')) continue;
       // Filter out civilian/decorative buildings (IN-prefix after faction prefix)
@@ -314,14 +329,12 @@ export class Sidebar {
   }
 
   private renderUnitItems(grid: HTMLElement, infantryOnly: boolean): void {
-    const prefix = this.factionPrefix;
-    const subPrefix = this.subhousePrefix;
     let hotkeyIdx = 0;
 
     // Collect units
     const units: { name: string; def: UnitDef }[] = [];
     for (const [name, def] of this.rules.units) {
-      if (!name.startsWith(prefix) && !(subPrefix && name.startsWith(subPrefix))) continue;
+      if (!this.hasValidPrefix(name)) continue;
       if (def.cost <= 0) continue;
       if (infantryOnly && !def.infantry) continue;
       if (!infantryOnly && def.infantry) continue;

@@ -25,6 +25,8 @@ export interface SubHouseAlliance {
 export interface SubHouseState {
   alliances: SubHouseAlliance[];
   offeredAlliance: AllianceSubHouse | null; // Pending offer after mission
+  offeredPhase: number;                     // Phase when offer was made
+  offeredTerritory: number;                 // Territory when offer was made
   declinedOffers: AllianceSubHouse[];       // Previously declined sub-houses
 }
 
@@ -47,6 +49,8 @@ export class SubHouseSystem {
     this.state = {
       alliances: [],
       offeredAlliance: null,
+      offeredPhase: 0,
+      offeredTerritory: 0,
       declinedOffers: [],
     };
   }
@@ -121,11 +125,13 @@ export class SubHouseSystem {
     if (this.state.declinedOffers.includes(subHouse)) return null;
 
     this.state.offeredAlliance = subHouse;
+    this.state.offeredPhase = phase;
+    this.state.offeredTerritory = territory;
     return subHouse;
   }
 
-  /** Accept the current alliance offer. */
-  acceptAlliance(phase: number, territory: number): boolean {
+  /** Accept the current alliance offer. Uses stored phase/territory from when offer was made. */
+  acceptAlliance(): boolean {
     const sub = this.state.offeredAlliance;
     if (!sub || !this.canAlly(sub)) {
       this.state.offeredAlliance = null;
@@ -134,8 +140,8 @@ export class SubHouseSystem {
 
     this.state.alliances.push({
       subHouse: sub,
-      earnedInPhase: phase,
-      earnedAtTerritory: territory,
+      earnedInPhase: this.state.offeredPhase,
+      earnedAtTerritory: this.state.offeredTerritory,
     });
     this.state.offeredAlliance = null;
     return true;
@@ -149,9 +155,14 @@ export class SubHouseSystem {
     }
   }
 
+  /** Map alliance sub-house IDs to the actual unit/building prefix used in rules.txt */
+  private static readonly UNIT_PREFIX: Record<AllianceSubHouse, string> = {
+    FR: 'FR', SA: 'IM', IX: 'IX', TL: 'TL', GU: 'GU',
+  };
+
   /** Get sub-house unit prefixes that should be available to the player. */
-  getUnlockedPrefixes(): AllianceSubHouse[] {
-    return this.state.alliances.map(a => a.subHouse);
+  getUnlockedPrefixes(): string[] {
+    return this.state.alliances.map(a => SubHouseSystem.UNIT_PREFIX[a.subHouse]);
   }
 
   // ── Serialization ──────────────────────────────────────────────
@@ -160,6 +171,8 @@ export class SubHouseSystem {
     return {
       alliances: [...this.state.alliances],
       offeredAlliance: this.state.offeredAlliance,
+      offeredPhase: this.state.offeredPhase,
+      offeredTerritory: this.state.offeredTerritory,
       declinedOffers: [...this.state.declinedOffers],
     };
   }
@@ -169,6 +182,8 @@ export class SubHouseSystem {
     sys.state = {
       alliances: [...data.alliances],
       offeredAlliance: data.offeredAlliance,
+      offeredPhase: data.offeredPhase ?? 0,
+      offeredTerritory: data.offeredTerritory ?? 0,
       declinedOffers: [...data.declinedOffers],
     };
     return sys;

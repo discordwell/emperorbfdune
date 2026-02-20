@@ -8,6 +8,7 @@ import { loadMap, getCampaignMapId, getSpecialMissionMapId } from './config/MapL
 import { CampaignMap } from './ui/CampaignMap';
 import { loadCampaignStrings, type HousePrefix, JUMP_POINTS } from './campaign/CampaignData';
 import { CampaignPhaseManager } from './campaign/CampaignPhaseManager';
+import { SubHouseSystem, type AllianceSubHouse } from './campaign/SubHouseSystem';
 import { showMissionBriefing } from './ui/MissionBriefing';
 import { generateMissionConfig, type MissionConfigData } from './campaign/MissionConfig';
 import { deriveMissionRuntimeSettings, type MissionRuntimeSettings } from './campaign/MissionRuntime';
@@ -132,6 +133,12 @@ async function main() {
             const enemyCount = cState.territories.filter((t: { owner: string }) => t.owner === 'enemy' || t.owner === 'enemy2').length;
             const enemyHouse = territory.ownerHouse !== 'neutral' && territory.ownerHouse !== cState.housePrefix
               ? territory.ownerHouse as HousePrefix : cState.enemyPrefix as HousePrefix;
+            // Detect sub-house involvement for this mission
+            let subHousePresent: AllianceSubHouse | null = null;
+            if (cState.subHouseState) {
+              const tempSubSys = SubHouseSystem.deserialize(cState.subHouseState, cState.housePrefix as HousePrefix);
+              subHousePresent = tempSubSys.getMissionSubHouse(phaseManager.getCurrentPhase(), house.campaignTerritoryId!) ?? null;
+            }
             missionConfig = generateMissionConfig({
               playerHouse: cState.housePrefix as HousePrefix,
               phase: phaseManager.getCurrentPhase(),
@@ -141,7 +148,7 @@ async function main() {
               enemyHouse,
               isAttack: territory.owner !== 'player',
               territoryDiff: playerCount - enemyCount,
-              subHousePresent: null,
+              subHousePresent,
             });
             activeMissionConfig = missionConfig;
             house.enemyPrefix = enemyHouse;
@@ -201,6 +208,8 @@ async function main() {
         const enemyCount = cState.territories.filter(t => t.owner === 'enemy' || t.owner === 'enemy2').length;
         const enemyHouse = territory.ownerHouse !== 'neutral' && territory.ownerHouse !== cState.housePrefix
           ? territory.ownerHouse as HousePrefix : cState.enemyPrefix as HousePrefix;
+        const subSys2 = campaign.getSubHouseSystem();
+        const missionSH = subSys2.getMissionSubHouse(phase, house.campaignTerritoryId!) ?? null;
         activeMissionConfig = generateMissionConfig({
           playerHouse: cState.housePrefix as HousePrefix,
           phase, phaseType,
@@ -209,7 +218,7 @@ async function main() {
           enemyHouse,
           isAttack: territory.owner !== 'player',
           territoryDiff: playerCount - enemyCount,
-          subHousePresent: null,
+          subHousePresent: missionSH,
         });
       }
     }
@@ -250,13 +259,27 @@ async function main() {
     const techLevel = phaseManagerRef!.getCurrentTechLevel();
     ctx.productionSystem.setOverrideTechLevel(0, techLevel);
 
+    // Track battle result for civil war handling in campaign continue
+    let lastBattleResult: { civilWarChoice: boolean } | null = null;
+
     ctx.victorySystem.setVictoryCallback(() => {
       const targetTerritory = campaignRef!.getState().territories.find(t => t.id === house.campaignTerritoryId);
       const capturedTerritory = targetTerritory ? targetTerritory.owner !== 'player' : true;
       const playerJP = JUMP_POINTS[house.prefix as HousePrefix];
       const isJumpPoint = Object.values(JUMP_POINTS).some(jp => jp === house.campaignTerritoryId && jp !== playerJP);
+
+      // Capture phase BEFORE recordBattleResult (which may advance the phase)
+      const missionPhase = phaseManagerRef!.getCurrentPhase();
       campaignRef!.recordVictory(house.campaignTerritoryId!);
-      phaseManagerRef!.recordBattleResult(true, capturedTerritory, isJumpPoint);
+      lastBattleResult = phaseManagerRef!.recordBattleResult(true, capturedTerritory, isJumpPoint);
+
+      // Check for sub-house alliance offer using the pre-battle phase
+      const subSys = campaignRef!.getSubHouseSystem();
+      const missionSubHouse = subSys.getMissionSubHouse(missionPhase, house.campaignTerritoryId!);
+      if (missionSubHouse) {
+        subSys.offerAlliance(missionSubHouse, missionPhase, house.campaignTerritoryId!);
+      }
+
       campaignRef!.saveCampaign();
     });
 
@@ -291,6 +314,27 @@ async function main() {
         document.body.appendChild(overlay);
         return;
       }
+
+      // Handle Harkonnen civil war choice
+      if (lastBattleResult?.civilWarChoice && house.prefix === 'HK') {
+        const civilWarChoice = await showCivilWarChoice();
+        phaseManagerRef!.setCivilWarChoice(civilWarChoice);
+        campaignRef!.saveCampaign();
+      }
+
+      // Handle sub-house alliance offer
+      const subSys = campaignRef!.getSubHouseSystem();
+      const pendingOffer = subSys.getState().offeredAlliance;
+      if (pendingOffer) {
+        const accepted = await showAllianceOffer(pendingOffer);
+        if (accepted) {
+          subSys.acceptAlliance();
+        } else {
+          subSys.declineAlliance();
+        }
+        campaignRef!.saveCampaign();
+      }
+
       const choice = await campaignRef!.show();
       if (choice) {
         localStorage.setItem('ebfd_campaign_next', JSON.stringify({
@@ -301,6 +345,14 @@ async function main() {
         window.location.reload();
       }
     });
+  }
+
+  // Pass campaign alliance prefixes to sidebar
+  if (campaignRef) {
+    const alliances = campaignRef.getSubHouseSystem().getUnlockedPrefixes();
+    if (alliances.length > 0) {
+      ctx.sidebar.setSubhousePrefixes(alliances);
+    }
   }
 
   // Apply skirmish/campaign/observer credits
@@ -585,6 +637,79 @@ async function main() {
       }
     },
   };
+}
+
+/** Show Harkonnen civil war choice dialog. Returns 'copec' or 'gunseng'. */
+function showCivilWarChoice(): Promise<'copec' | 'gunseng'> {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.95);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:3000;font-family:inherit;';
+    overlay.innerHTML = `
+      <div style="color:#ff4444;font-size:36px;font-weight:bold;margin-bottom:12px;">HARKONNEN CIVIL WAR</div>
+      <div style="color:#ccc;font-size:16px;margin-bottom:8px;max-width:500px;text-align:center;">
+        The Harkonnen family is divided. You must choose your allegiance.
+      </div>
+      <div style="color:#888;font-size:14px;margin-bottom:24px;max-width:500px;text-align:center;">
+        This choice determines which faction you will face in the civil war.
+      </div>
+      <div style="display:flex;gap:20px;"></div>
+    `;
+    const btnContainer = overlay.querySelector('div:last-child')!;
+
+    const makeBtn = (label: string, desc: string, choice: 'copec' | 'gunseng', color: string) => {
+      const btn = document.createElement('button');
+      btn.style.cssText = `padding:16px 32px;font-size:16px;background:${color}22;border:2px solid ${color};color:#fff;cursor:pointer;min-width:180px;text-align:center;`;
+      btn.innerHTML = `<div style="font-weight:bold;margin-bottom:4px;">${label}</div><div style="font-size:12px;color:#aaa;">${desc}</div>`;
+      btn.onclick = () => { overlay.remove(); resolve(choice); };
+      btn.onmouseenter = () => { btn.style.background = `${color}44`; };
+      btn.onmouseleave = () => { btn.style.background = `${color}22`; };
+      return btn;
+    };
+
+    btnContainer.appendChild(makeBtn('House Copec', 'Attack the Copec stronghold', 'copec', '#cc4444'));
+    btnContainer.appendChild(makeBtn('House Gunseng', 'Attack the Gunseng fortress', 'gunseng', '#cc8844'));
+    document.body.appendChild(overlay);
+  });
+}
+
+const SUB_HOUSE_NAMES: Record<AllianceSubHouse, string> = {
+  FR: 'Fremen', SA: 'Sardaukar', IX: 'Ixian', TL: 'Tleilaxu', GU: 'Guild',
+};
+
+/** Show sub-house alliance offer. Returns true if accepted. */
+function showAllianceOffer(subHouse: AllianceSubHouse): Promise<boolean> {
+  return new Promise((resolve) => {
+    const name = SUB_HOUSE_NAMES[subHouse] ?? subHouse;
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.92);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:3000;font-family:inherit;';
+    overlay.innerHTML = `
+      <div style="color:#d4a843;font-size:32px;font-weight:bold;margin-bottom:12px;">ALLIANCE OFFER</div>
+      <div style="color:#ccc;font-size:16px;margin-bottom:8px;max-width:480px;text-align:center;">
+        The ${name} offer their allegiance. Accepting will unlock their units and buildings.
+      </div>
+      <div style="color:#888;font-size:13px;margin-bottom:24px;text-align:center;">
+        You may hold at most 2 alliances. Some alliances are mutually exclusive.
+      </div>
+      <div style="display:flex;gap:16px;"></div>
+    `;
+    const btnContainer = overlay.querySelector('div:last-child')!;
+
+    const acceptBtn = document.createElement('button');
+    acceptBtn.textContent = `Accept ${name} Alliance`;
+    acceptBtn.style.cssText = 'padding:12px 28px;font-size:15px;background:#2a5a2a;border:2px solid #4c4;color:#fff;cursor:pointer;';
+    acceptBtn.onclick = () => { overlay.remove(); resolve(true); };
+    acceptBtn.onmouseenter = () => { acceptBtn.style.background = '#3a7a3a'; };
+    acceptBtn.onmouseleave = () => { acceptBtn.style.background = '#2a5a2a'; };
+
+    const declineBtn = document.createElement('button');
+    declineBtn.textContent = 'Decline';
+    declineBtn.style.cssText = 'padding:12px 28px;font-size:15px;background:#333;border:2px solid #666;color:#ccc;cursor:pointer;';
+    declineBtn.onclick = () => { overlay.remove(); resolve(false); };
+
+    btnContainer.appendChild(acceptBtn);
+    btnContainer.appendChild(declineBtn);
+    document.body.appendChild(overlay);
+  });
 }
 
 main().catch(console.error);
