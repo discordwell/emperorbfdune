@@ -162,9 +162,11 @@ export class SceneManager implements RenderSystem {
         pos[i] += 0.08;      // Wind X
         pos[i + 2] += 0.03;  // Wind Z
         pos[i + 1] += (Math.random() - 0.5) * 0.04; // Flutter
-        // Wrap around camera vicinity
+        // Wrap around camera vicinity (both directions)
         if (pos[i] > this.cameraTarget.x + 150) pos[i] = this.cameraTarget.x - 150;
+        if (pos[i] < this.cameraTarget.x - 150) pos[i] = this.cameraTarget.x + 150;
         if (pos[i + 2] > this.cameraTarget.z + 150) pos[i + 2] = this.cameraTarget.z - 150;
+        if (pos[i + 2] < this.cameraTarget.z - 150) pos[i + 2] = this.cameraTarget.z + 150;
         pos[i + 1] = Math.max(0.3, Math.min(15, pos[i + 1]));
       }
       this.sandParticles!.geometry.attributes.position.needsUpdate = true;
@@ -343,6 +345,7 @@ export class SceneManager implements RenderSystem {
   dispose(): void {
     window.removeEventListener('resize', this.onResize);
     if (this.sandParticles) {
+      this.scene.remove(this.sandParticles);
       this.sandParticles.geometry.dispose();
       (this.sandParticles.material as THREE.PointsMaterial).dispose();
     }

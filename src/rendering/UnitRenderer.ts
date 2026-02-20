@@ -585,7 +585,7 @@ export class UnitRenderer {
         child.castShadow = true;
         child.receiveShadow = true;
         if (child.material instanceof THREE.MeshStandardMaterial) {
-          // Tint the model slightly with team color
+          // Materials already cloned by ModelManager.cloneModel(), safe to tint in-place
           child.material.color.lerp(color, 0.3);
         }
       }
@@ -738,7 +738,7 @@ export class UnitRenderer {
   }
 
   private updateShieldVisuals(eid: number): void {
-    if (!hasComponent(this.currentWorld!, Shield, eid)) {
+    if (!this.currentWorld || !hasComponent(this.currentWorld, Shield, eid)) {
       // No shield component — hide if previously shown
       const bar = this.shieldBars.get(eid);
       if (bar) bar.visible = false;

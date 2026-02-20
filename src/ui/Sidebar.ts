@@ -667,4 +667,8 @@ export class Sidebar {
   refresh(): void {
     this.render();
   }
+
+  dispose(): void {
+    window.removeEventListener('keydown', this.onKeyDown);
+  }
 }

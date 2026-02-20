@@ -62,7 +62,8 @@ export class SandwormSystem implements GameSystem {
 
     // Try to spawn new worm
     if (this.worms.length < this.maxWorms && this.tickCounter % 100 === 0) {
-      if (Math.random() * this.spawnChance < 1) {
+      // spawnChance is per-tick rate; scale by check interval (100 ticks)
+      if (Math.random() * this.spawnChance < 100) {
         this.spawnWorm();
       }
     }
@@ -266,6 +267,8 @@ export class SandwormSystem implements GameSystem {
   }
 
   private eatUnit(_world: World, eid: number, worm: Worm): void {
+    // Guard against eating already-dead units (killed by another system this tick)
+    if (Health.current[eid] <= 0) return;
     // Capture owner before killing (entity data may be invalid after death event)
     const ownerId = Owner.playerId[eid];
     // Kill the unit

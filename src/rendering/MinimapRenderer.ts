@@ -169,7 +169,14 @@ export class MinimapRenderer {
       this.ctx.fillStyle = '#000';
       for (let tz = 0; tz < mapH; tz++) {
         for (let tx = 0; tx < mapW; tx++) {
-          const v = vis[tz * fogW + tx];
+          const fogIdx = tz * fogW + tx;
+          if (fogIdx >= vis.length) {
+            // Treat out-of-bounds as unexplored (fully fogged)
+            this.ctx.globalAlpha = 0.85;
+            this.ctx.fillRect(tx * tileScaleX, tz * tileScaleZ, Math.ceil(tileScaleX), Math.ceil(tileScaleZ));
+            continue;
+          }
+          const v = vis[fogIdx];
           if (v === FOG_VISIBLE) continue; // Fully visible
           if (v === FOG_EXPLORED) {
             this.ctx.globalAlpha = 0.4;
@@ -472,4 +479,12 @@ export class MinimapRenderer {
     const worldH = mapH * TILE_SIZE;
     this.onRightClick((mx / 200) * worldW, (my / 200) * worldH);
   };
+
+  dispose(): void {
+    this.canvas.removeEventListener('mousedown', this.onClick);
+    this.canvas.removeEventListener('mousemove', this.onDrag);
+    window.removeEventListener('mouseup', this.onMouseUp);
+    this.canvas.removeEventListener('dblclick', this.onDoubleClick);
+    this.canvas.removeEventListener('contextmenu', this.onContextMenu);
+  }
 }
