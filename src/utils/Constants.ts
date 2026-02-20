@@ -29,7 +29,7 @@ export const GameConstants = {
   SPICE_BLOOM_RADIUS: 6, // Radius of spice bloom patch (in tiles)
   SPICE_MOUND_REGROW_MIN: 200, // Min delay before mound starts regrowing
   SPICE_MOUND_REGROW_MAX: 2000, // Max delay before mound starts regrowing
-  SPICE_BLOOM_DAMAGE: 10, // Damage to nearby units on eruption
+  SPICE_BLOOM_DAMAGE: 200, // Damage to nearby units on eruption (with linear falloff from center)
   SPICE_BLOOM_DAMAGE_RADIUS: 12, // Bloom damage radius in world units (matches 6-tile bloom radius)
   SPICE_SPREAD_INTERVAL: 100, // Ticks between spread attempts
   SPICE_SPREAD_CHANCE: 0.03, // Chance per spice tile per spread tick

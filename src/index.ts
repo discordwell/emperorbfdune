@@ -1322,8 +1322,7 @@ async function main() {
     else gameStats.recordUnitLost(deadOwner);
 
     combatSystem.unregisterUnit(entityId);
-    movement.unregisterFlyer(entityId);
-    movement.unregisterInfantry(entityId);
+    movement.unregisterEntity(entityId);
     effectsManager.clearBuildingDamage(entityId);
 
     // Clean up aircraft ammo tracking

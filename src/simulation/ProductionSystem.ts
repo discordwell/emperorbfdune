@@ -499,19 +499,19 @@ export class ProductionSystem {
       const queue = this.buildingQueues.get(playerId);
       if (!queue || queue.length === 0) return null;
       const item = queue[0];
-      return { typeName: item.typeName, progress: item.totalTime > 0 ? item.elapsed / item.totalTime : 1 };
+      return { typeName: item.typeName, progress: item.totalTime > 0 ? Math.min(1, item.elapsed / item.totalTime) : 1 };
     }
     // Unit queues: return specific type or first active
     if (unitType === 'infantry' || unitType === undefined) {
       const q = this.infantryQueues.get(playerId);
       if (q && q.length > 0) {
-        return { typeName: q[0].typeName, progress: q[0].totalTime > 0 ? q[0].elapsed / q[0].totalTime : 1 };
+        return { typeName: q[0].typeName, progress: q[0].totalTime > 0 ? Math.min(1, q[0].elapsed / q[0].totalTime) : 1 };
       }
     }
     if (unitType === 'vehicle' || unitType === undefined) {
       const q = this.vehicleQueues.get(playerId);
       if (q && q.length > 0) {
-        return { typeName: q[0].typeName, progress: q[0].totalTime > 0 ? q[0].elapsed / q[0].totalTime : 1 };
+        return { typeName: q[0].typeName, progress: q[0].totalTime > 0 ? Math.min(1, q[0].elapsed / q[0].totalTime) : 1 };
       }
     }
     return null;

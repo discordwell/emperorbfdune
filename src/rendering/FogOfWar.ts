@@ -97,7 +97,7 @@ export class FogOfWar {
     this.fogTexture.minFilter = THREE.LinearFilter;
     this.fogTexture.needsUpdate = true;
 
-    this.tickCounter = 0;
+    this.tickCounter = this.updateInterval - 1; // Match constructor so first update fires immediately
     this.lastPositionHash = -1;
 
     // Remove old fog mesh and create new one

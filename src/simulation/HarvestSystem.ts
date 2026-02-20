@@ -2,7 +2,7 @@ import type { GameSystem } from '../core/Game';
 import type { World } from '../core/ECS';
 import {
   Position, Harvester, MoveTarget, Owner, Health, BuildingType,
-  harvestQuery, buildingQuery, unitQuery,
+  harvestQuery, buildingQuery, unitQuery, hasComponent,
 } from '../core/ECS';
 import type { TerrainRenderer } from '../rendering/TerrainRenderer';
 import { TerrainType } from '../rendering/TerrainRenderer';
@@ -48,6 +48,16 @@ export class HarvestSystem implements GameSystem {
   // Building lookup for refinery reassignment
   private world: World | null = null;
   private buildingTypeNames: string[] = [];
+
+  /** Validate that a stored refinery entity ID is still a living refinery (guards against ID recycling) */
+  private isValidRefinery(refEntity: number): boolean {
+    if (refEntity <= 0) return false;
+    if (!this.world || !hasComponent(this.world, BuildingType, refEntity)) return false;
+    if (Health.current[refEntity] <= 0) return false;
+    const bTypeId = BuildingType.id[refEntity];
+    const bName = this.buildingTypeNames[bTypeId] ?? '';
+    return bName.includes('Refinery');
+  }
 
   constructor(terrain: TerrainRenderer) {
     this.terrain = terrain;
@@ -314,8 +324,8 @@ export class HarvestSystem implements GameSystem {
 
     // AoE damage to units/buildings near the eruption (faithful to original)
     if (this.world) {
-      const bloomDamage = 200;
-      const worldRadius = radius * 2; // Convert tile radius to world units
+      const bloomDamage = GameConstants.SPICE_BLOOM_DAMAGE;
+      const worldRadius = GameConstants.SPICE_BLOOM_DAMAGE_RADIUS;
       const r2 = worldRadius * worldRadius;
       const allEntities = [...unitQuery(this.world), ...buildingQuery(this.world)];
       for (const eid of allEntities) {
@@ -537,7 +547,7 @@ export class HarvestSystem implements GameSystem {
       // Airlift complete - land adjacent to refinery (try cardinal directions to avoid obstacles)
       this.airlifting.delete(eid);
       const refEntity = Harvester.refineryEntity[eid];
-      if (refEntity > 0 && Health.current[refEntity] > 0) {
+      if (this.isValidRefinery(refEntity)) {
         const rx = Position.x[refEntity];
         const rz = Position.z[refEntity];
         // Try 4 cardinal offsets outside 3x3 building footprint
@@ -587,7 +597,7 @@ export class HarvestSystem implements GameSystem {
 
     // Verify refinery is still alive during unload
     const refEntity = Harvester.refineryEntity[eid];
-    if (refEntity <= 0 || Health.current[refEntity] <= 0) {
+    if (!this.isValidRefinery(refEntity)) {
       this.harvestTimers.delete(eid);
       Harvester.state[eid] = RETURNING;
       this.returnToRefinery(eid);
@@ -607,8 +617,8 @@ export class HarvestSystem implements GameSystem {
 
   private returnToRefinery(eid: number): void {
     const refineryEntity = Harvester.refineryEntity[eid];
-    // Validate refinery is alive
-    if (refineryEntity > 0 && Health.current[refineryEntity] > 0) {
+    // Validate refinery is alive and still a refinery (guards against entity ID recycling)
+    if (this.isValidRefinery(refineryEntity)) {
       MoveTarget.x[eid] = Position.x[refineryEntity];
       MoveTarget.z[eid] = Position.z[refineryEntity];
     } else {

@@ -82,6 +82,16 @@ export class MovementSystem implements GameSystem {
     this.infantryEntities.delete(eid);
   }
 
+  /** Clean up all cached state for a dead entity (prevents stale data on ID recycling) */
+  unregisterEntity(eid: number): void {
+    this.paths.delete(eid);
+    this.pathIndex.delete(eid);
+    this.stuckTicks.delete(eid);
+    this.lastPos.delete(eid);
+    this.flyingEntities.delete(eid);
+    this.infantryEntities.delete(eid);
+  }
+
   init(_world: World): void {}
 
   update(world: World, _dt: number): void {
