@@ -62,6 +62,10 @@ export class MovementSystem implements GameSystem {
     this.pathIndex.clear();
   }
 
+  isFlyer(eid: number): boolean {
+    return this.flyingEntities.has(eid);
+  }
+
   registerFlyer(eid: number): void {
     this.flyingEntities.add(eid);
   }

@@ -24,6 +24,8 @@ export interface ProductionState {
   repeatUnits: Record<number, string[]>;
   costMultipliers?: Record<number, number>;
   timeMultipliers?: Record<number, number>;
+  starportPrices?: Record<string, number>;
+  starportTick?: number;
 }
 
 export class ProductionSystem {
@@ -269,7 +271,7 @@ export class ProductionSystem {
     queue.push({
       typeName: buildingType,
       isBuilding: true,
-      totalTime: Math.round(def.buildTime * timeMult),
+      totalTime: Math.round(def.buildTime * 0.5 * timeMult),
       elapsed: 0,
       cost: adjustedUpgradeCost,
     });
@@ -534,6 +536,8 @@ export class ProductionSystem {
 
   /** Get available starport units with current prices (difficulty-adjusted) */
   getStarportOffers(factionPrefix: string, playerId?: number): { name: string; price: number }[] {
+    // Require player to own a Starport building before showing offers
+    if (playerId !== undefined && !this.ownsAnyBuildingSuffix(playerId, 'Starport')) return [];
     const costMult = playerId !== undefined ? (this.costMultipliers.get(playerId) ?? 1.0) : 1.0;
     const offers: { name: string; price: number }[] = [];
     for (const [name, price] of this.starportPrices) {
@@ -639,6 +643,10 @@ export class ProductionSystem {
     for (const [pid, m] of this.costMultipliers) costMults[pid] = m;
     const timeMults: Record<number, number> = {};
     for (const [pid, m] of this.timeMultipliers) timeMults[pid] = m;
+    const starportPricesObj: Record<string, number> = {};
+    for (const [name, price] of this.starportPrices) {
+      starportPricesObj[name] = price;
+    }
     return {
       buildingQueues: serializeQueue(this.buildingQueues),
       infantryQueues: serializeQueue(this.infantryQueues),
@@ -648,6 +656,8 @@ export class ProductionSystem {
       repeatUnits: serializeSet(this.repeatUnits),
       costMultipliers: costMults,
       timeMultipliers: timeMults,
+      starportPrices: starportPricesObj,
+      starportTick: this.starportTick,
     };
   }
 
@@ -693,6 +703,17 @@ export class ProductionSystem {
       for (const pid of Object.keys(state.timeMultipliers)) {
         this.timeMultipliers.set(Number(pid), state.timeMultipliers[Number(pid)]);
       }
+    }
+    // Restore starport prices (reset first for backward-compatible saves)
+    this.starportPrices.clear();
+    this.starportTick = 0;
+    if (state.starportPrices) {
+      for (const [name, price] of Object.entries(state.starportPrices)) {
+        this.starportPrices.set(name, price as number);
+      }
+    }
+    if (state.starportTick !== undefined) {
+      this.starportTick = state.starportTick;
     }
   }
 

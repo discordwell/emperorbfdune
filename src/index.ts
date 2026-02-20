@@ -3165,6 +3165,28 @@ async function main() {
     if (savedGame.production) {
       productionSystem.restoreState(savedGame.production);
     }
+    // Clear deferred actions and descending units from pre-save state
+    deferredActions.length = 0;
+    descendingUnits.clear();
+    // Snap any units with elevated Y to ground level (e.g. mid-descent Starport units)
+    for (const eid of unitQuery(world)) {
+      if (Health.current[eid] <= 0) continue;
+      const groundY = terrain.getHeightAt(Position.x[eid], Position.z[eid]) + 0.1;
+      if (Position.y[eid] > groundY + 1.0 && !movement.isFlyer(eid)) {
+        Position.y[eid] = groundY;
+        combatSystem.setSuppressed(eid, false);
+        // Send snapped units to rally point (as if descent just completed)
+        const owner = Owner.playerId[eid];
+        if (owner === 0) {
+          const rally = commandManager.getRallyPoint(0);
+          if (rally) {
+            MoveTarget.x[eid] = rally.x;
+            MoveTarget.z[eid] = rally.z;
+            MoveTarget.active[eid] = 1;
+          }
+        }
+      }
+    }
     // Restore fog of war explored tiles
     if (savedGame.fogExplored) {
       fogOfWar.setExploredData(savedGame.fogExplored);
