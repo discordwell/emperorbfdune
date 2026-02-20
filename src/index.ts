@@ -2974,7 +2974,7 @@ async function main() {
         if (amd) se.attackMoveDest = { x: amd.x, z: amd.z };
       }
       // Save shield state
-      if (hasComponent(world, Shield, eid)) {
+      if (hasComponent(w, Shield, eid)) {
         se.shield = { current: Shield.current[eid], max: Shield.max[eid] };
       }
       entities.push(se);

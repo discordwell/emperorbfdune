@@ -1367,11 +1367,13 @@ export class AbilitySystem {
   killPassengers(transportEid: number): void {
     const passengers = this.transportPassengers.get(transportEid);
     if (!passengers) return;
+    // Delete BEFORE iterating: handleUnitDeath (called synchronously via EventBus)
+    // scans transportPassengers and splices from the array, causing for..of to skip elements
+    this.transportPassengers.delete(transportEid);
     for (const pEid of passengers) {
       if (Health.current[pEid] <= 0) continue;
       Health.current[pEid] = 0;
       EventBus.emit('unit:died', { entityId: pEid, killerEntity: -1 });
     }
-    this.transportPassengers.delete(transportEid);
   }
 }
