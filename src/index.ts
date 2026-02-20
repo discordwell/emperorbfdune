@@ -516,6 +516,23 @@ async function main() {
   const world = ctx.game.getWorld();
   ctx.harvestSystem.setBuildingContext(world, typeRegistry.buildingTypeNames);
 
+  // --- MISSION SCRIPT INITIALIZATION ---
+  // Must happen before restore so script state can be restored alongside entities
+  const scriptId = ctx.activeMissionConfig?.scriptId ?? savedGame?.scriptId;
+  if (scriptId) {
+    const { MissionScriptRunner } = await import('./campaign/scripting/MissionScriptRunner');
+    const { loadMissionScript } = await import('./campaign/scripting/MissionScriptLoader');
+    const script = await loadMissionScript(scriptId);
+    if (script) {
+      const runner = new MissionScriptRunner();
+      ctx.missionScriptRunner = runner;
+      // skipGameSetup=true for saved games: only loads structure, avoids
+      // setting credits/victory/spawns that would conflict with restore
+      runner.init(ctx, script, !!savedGame);
+      console.log(`[MissionScript] Loaded script: ${script.id} (${script.name})`);
+    }
+  }
+
   if (savedGame) {
     restoreFromSave(ctx, savedGame);
   } else {

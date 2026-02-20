@@ -143,6 +143,8 @@ export function buildSaveData(ctx: GameContext): SaveData {
       return { deviated, leech, kobraDeployed, kobraBaseRange };
     })(),
     rngState: simRng.getState(),
+    scriptState: ctx.missionScriptRunner?.isActive() ? ctx.missionScriptRunner.serialize(eidToIndex) : undefined,
+    scriptId: ctx.missionScriptRunner?.getScriptId() ?? undefined,
   };
 }
 
@@ -367,6 +369,11 @@ export function restoreFromSave(ctx: GameContext, savedGame: SaveData): void {
   if (camCount > 0) {
     ctx.scene.cameraTarget.set(camX / camCount, 0, camZ / camCount);
     ctx.scene.updateCameraPosition();
+  }
+
+  // Restore mission script state
+  if (savedGame.scriptState && ctx.missionScriptRunner?.isActive()) {
+    ctx.missionScriptRunner.restore(savedGame.scriptState, indexToEid);
   }
 
   console.log(`Restored ${savedGame.entities.length} entities from save (tick ${savedGame.tick})`);

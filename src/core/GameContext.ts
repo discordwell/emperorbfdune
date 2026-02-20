@@ -36,6 +36,7 @@ import type { MissionRuntimeSettings } from '../campaign/MissionRuntime';
 import type { TypeRegistry } from './TypeRegistry';
 import type { SimulationHashTracker } from './SimulationHash';
 import type { ReplayRecorder, ReplayPlayer } from './ReplaySystem';
+import type { MissionScriptRunner } from '../campaign/scripting/MissionScriptRunner';
 
 // Save/Load types
 export interface SavedEntity {
@@ -86,6 +87,8 @@ export interface SaveData {
     kobraBaseRange?: Array<{ eid: number; range: number }>;
   };
   rngState?: [number, number, number, number];
+  scriptState?: import('../campaign/scripting/MissionScriptTypes').MissionScriptState;
+  scriptId?: string;
 }
 
 export interface GroundSplat {
@@ -142,6 +145,9 @@ export interface GameContext {
   sidebar: Sidebar;
   iconRenderer: IconRenderer;
   aiPlayers: AIPlayer[];
+
+  // Mission scripting
+  missionScriptRunner: MissionScriptRunner | null;
 
   // Shared mutable state
   aircraftAmmo: Map<number, number>;

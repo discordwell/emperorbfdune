@@ -453,6 +453,8 @@ export function initializeSystems(config: SystemInitConfig): GameContext {
     audioManager, buildingPlacement, victorySystem, gameStats,
     selectionPanel, sidebar, iconRenderer, aiPlayers,
 
+    missionScriptRunner: null,
+
     aircraftAmmo, rearmingAircraft, descendingUnits, dyingTilts,
     processedDeaths, deferredActions, repairingBuildings,
     groundSplats, bloomMarkers, activeCrates,

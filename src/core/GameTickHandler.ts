@@ -81,6 +81,11 @@ export function registerTickHandler(ctx: GameContext): void {
       }
     }
 
+    // Tick mission script runner
+    if (ctx.missionScriptRunner?.isActive()) {
+      ctx.missionScriptRunner.tick(ctx, currentTick);
+    }
+
     // Process starport descent animations
     for (const [eid, desc] of descendingUnits) {
       if (Health.current[eid] <= 0 || !hasComponent(world, Position, eid)) {

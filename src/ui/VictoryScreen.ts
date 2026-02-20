@@ -215,6 +215,12 @@ export class VictorySystem {
     }
   }
 
+  /** Force a victory outcome (called by mission scripts). */
+  forceVictory(): void { this.triggerVictory(); }
+
+  /** Force a defeat outcome (called by mission scripts). */
+  forceDefeat(): void { this.triggerDefeat(); }
+
   private triggerVictory(): void {
     this.outcome = 'victory';
     this.audioManager.playSfx('victory');

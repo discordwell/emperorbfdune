@@ -206,6 +206,14 @@ export class FogOfWar {
     this.updateTexture();
   }
 
+  /** Reveal an area using world coordinates (called by mission scripts). */
+  revealWorldArea(worldX: number, worldZ: number, worldRadius: number): void {
+    const tile = worldToTile(worldX, worldZ);
+    const tileRadius = Math.ceil(worldRadius / TILE_SIZE);
+    this.revealArea(tile.tx, tile.tz, tileRadius);
+    this.updateTexture();
+  }
+
   private revealArea(cx: number, cz: number, radius: number): void {
     const r2 = radius * radius;
     for (let dz = -radius; dz <= radius; dz++) {

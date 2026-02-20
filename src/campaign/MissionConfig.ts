@@ -27,6 +27,8 @@ export interface MissionConfigData {
   miniBriefingKey: string;         // Key for mini-briefing (territory hover)
   territoryName: string;
   phaseNumber: number;
+  /** Mission script ID for declarative scripting (e.g., 'ATP2M15IX'). */
+  scriptId?: string;
 }
 
 /** Starting credits by situation. */
@@ -112,6 +114,10 @@ export function generateMissionConfig(params: {
   const briefingKey = buildBriefingKey(playerHouse, phase, phaseType, territoryId, subHousePresent, enemyHouse);
   const miniBriefingKey = buildMiniBriefingKey(playerHouse, phase, phaseType, territoryId, subHousePresent, enemyHouse);
 
+  // Script ID matches the briefing key pattern (e.g., ATP2M15IX)
+  // Only set if a corresponding script JSON exists (checked at load time)
+  const scriptId = briefingKey;
+
   return {
     victoryCondition,
     difficultyValue,
@@ -126,6 +132,7 @@ export function generateMissionConfig(params: {
     miniBriefingKey,
     territoryName,
     phaseNumber: phase,
+    scriptId,
   };
 }
 

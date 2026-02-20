@@ -1,0 +1,129 @@
+{
+  "id": "ATP2M15IX",
+  "name": "Ixian Supply Escort",
+  "victoryCondition": "conyard",
+  "objectiveLabel": "Escort the Ixian supply convoy to your base",
+  "startingCredits": 5000,
+  "entityGroups": [
+    {
+      "name": "convoy",
+      "spawnAt": { "x": 20, "z": 20 },
+      "units": [
+        { "type": "IXCarryall", "count": 2, "owner": 0 },
+        { "type": "IXProjector", "count": 1, "owner": 0 }
+      ]
+    },
+    {
+      "name": "ambush1",
+      "spawnAt": { "x": 60, "z": 40 },
+      "units": [
+        { "type": "HKAssaultTank", "count": 3, "owner": 1 },
+        { "type": "HKTrooper", "count": 5, "owner": 1 }
+      ]
+    },
+    {
+      "name": "ambush2",
+      "spawnAt": { "x": 100, "z": 80 },
+      "units": [
+        { "type": "HKMissile", "count": 4, "owner": 1 },
+        { "type": "HKBuzzsaw", "count": 2, "owner": 1 }
+      ]
+    },
+    {
+      "name": "playerBase",
+      "matchExisting": {
+        "owner": 0,
+        "buildingType": "ConYard"
+      }
+    }
+  ],
+  "rules": [
+    {
+      "id": "start_dialog",
+      "trigger": { "type": "timer", "tick": 50 },
+      "actions": [
+        { "type": "showDialog", "key": "ATP2M15IX" },
+        { "type": "setObjective", "label": "Escort the Ixian convoy to your base" },
+        { "type": "revealArea", "x": 20, "z": 20, "radius": 15 }
+      ]
+    },
+    {
+      "id": "convoy_moving",
+      "trigger": { "type": "timer", "tick": 200 },
+      "actions": [
+        { "type": "moveGroup", "group": "convoy", "target": { "x": 120, "z": 120 } },
+        { "type": "showDialog", "key": "ATP2M15IXa" },
+        { "type": "addMessage", "text": "The convoy is moving out!", "color": "#88ccff" }
+      ]
+    },
+    {
+      "id": "first_ambush",
+      "trigger": {
+        "type": "groupReachedArea",
+        "group": "convoy",
+        "area": { "x": 50, "z": 35, "radius": 20 }
+      },
+      "actions": [
+        { "type": "spawnGroup", "group": "ambush1" },
+        { "type": "attackMoveGroup", "group": "ambush1", "target": { "x": 50, "z": 35 } },
+        { "type": "showDialog", "key": "ATP2M15IXb" },
+        { "type": "addMessage", "text": "Harkonnen ambush! Defend the convoy!", "color": "#ff4444" },
+        { "type": "playSound", "sound": "underattack" }
+      ]
+    },
+    {
+      "id": "second_ambush",
+      "trigger": {
+        "type": "groupReachedArea",
+        "group": "convoy",
+        "area": { "x": 90, "z": 70, "radius": 20 }
+      },
+      "actions": [
+        { "type": "spawnGroup", "group": "ambush2" },
+        { "type": "attackMoveGroup", "group": "ambush2", "target": { "x": 90, "z": 70 } },
+        { "type": "showDialog", "key": "ATP2M15IXc" },
+        { "type": "addMessage", "text": "More Harkonnen forces incoming!", "color": "#ff4444" }
+      ]
+    },
+    {
+      "id": "convoy_arrived",
+      "trigger": {
+        "type": "groupReachedArea",
+        "group": "convoy",
+        "area": { "x": 120, "z": 120, "radius": 15 }
+      },
+      "actions": [
+        { "type": "showDialog", "key": "ATP2M15IXd" },
+        { "type": "grantCredits", "owner": 0, "amount": 3000 },
+        { "type": "setObjective", "label": "Destroy the Harkonnen base" },
+        { "type": "setFlag", "name": "convoy_safe", "value": true },
+        { "type": "addMessage", "text": "Convoy has arrived safely! +3000 Solaris", "color": "#44ff44" }
+      ]
+    },
+    {
+      "id": "convoy_lost",
+      "trigger": { "type": "groupDefeated", "group": "convoy" },
+      "actions": [
+        { "type": "showDialog", "key": "ATP2M15IXe" },
+        { "type": "defeat", "message": "The convoy was destroyed" }
+      ]
+    },
+    {
+      "id": "enemy_reinforcements",
+      "trigger": {
+        "type": "and",
+        "triggers": [
+          { "type": "flag", "name": "convoy_safe" },
+          { "type": "timer", "tick": 1500 }
+        ]
+      },
+      "actions": [
+        { "type": "addMessage", "text": "Harkonnen reinforcements approaching from the north!", "color": "#ff8800" },
+        { "type": "reinforcements", "group": "ambush1", "edge": "north" }
+      ]
+    }
+  ],
+  "flags": {
+    "convoy_safe": false
+  }
+}
