@@ -6,8 +6,9 @@ import { fileURLToPath } from 'node:url';
 import { TokInterpreter } from '../../../src/campaign/scripting/tok/TokInterpreter';
 import { buildStringTable } from '../../../src/campaign/scripting/tok/TokStringTable';
 import { FUNC, type TokExpr } from '../../../src/campaign/scripting/tok/TokTypes';
+import { CombatSystem } from '../../../src/simulation/CombatSystem';
 import { EventBus } from '../../../src/core/EventBus';
-import { MoveTarget, Owner, buildingQuery, unitQuery } from '../../../src/core/ECS';
+import { addComponent, AttackTarget, Combat, MoveTarget, Owner, buildingQuery, unitQuery } from '../../../src/core/ECS';
 
 import { createMockCtx, spawnMockUnit, type MockCtx } from './mocks/MockGameContext';
 
@@ -261,6 +262,33 @@ describe('TokInterpreter integration', () => {
     b.dispose();
   });
 
+  it('restores SetThreatLevel state into fresh gameRules on load', () => {
+    const tokBuffer = readTok('ATP1D1FRFail');
+    const lit = (value: number): TokExpr => ({ kind: 'literal', value });
+
+    const ctxA = createMockCtx();
+    const tableA = buildStringTable(ctxA.typeRegistry);
+    const typeIndex = tableA.indexOf('CubScout');
+    expect(typeIndex).toBeGreaterThanOrEqual(0);
+
+    const a = new TokInterpreter();
+    a.init(ctxA, tokBuffer, 'ATP1D1FRFail');
+    const dispatchA = (a as any).functions;
+    const evaluatorA = (a as any).evaluator;
+    dispatchA.call(FUNC.SetThreatLevel, [lit(typeIndex), lit(9)], ctxA, evaluatorA, 0);
+
+    const saved = a.serialize(new Map());
+    a.dispose();
+
+    const ctxB = createMockCtx();
+    const b = new TokInterpreter();
+    b.init(ctxB, tokBuffer, 'ATP1D1FRFail');
+    b.restore(saved, new Map());
+
+    expect((ctxB.gameRules.units.get('CubScout') as any).aiThreat).toBe(9);
+    b.dispose();
+  });
+
   it('re-initializing the same interpreter instance clears prior dispatch state', () => {
     const ctx = createMockCtx();
     const tokBuffer = readTok('ATP1D1FRFail');
@@ -379,6 +407,79 @@ describe('TokInterpreter integration', () => {
     interpreter.dispose();
   });
 
+  it('treats EventSideAttacksSide as a one-tick event flag', () => {
+    const ctx = createMockCtx();
+
+    const script = buildTokBuffer([
+      [0x80, 162, 0x28, 0x81, 0x81, 0x29], // int(v1)
+      [0x80, 165, 0x28, 0x80, 0xb1, 0x29],   // if (TRUE)
+      [0x81, 0x81, 0x80, 0xb4, 0x80, 0xb0], //   v1 = FALSE
+      [0x80, 167],                           // endif
+      [
+        0x80, 165, 0x28,                   // if (
+        0x80, 0xaa, 0x80, 0x28,            // EventSideAttacksSide(
+        0x80, 0x8e, 0x80, 0x28, 0x29,      // GetPlayerSide()
+        0x2c,                               // ,
+        0x80, 0x90, 0x80, 0x28, 0x29,      // GetEnemySide()
+        0x29,                               // )
+        0x80, 0xa8,                         // ==
+        0x80, 0xb1,                         // TRUE
+        0x29,                               // )
+      ],
+      [0x81, 0x81, 0x80, 0xb4, 0x80, 0xb1], // v1 = TRUE
+      [0x80, 167],                           // endif
+    ]);
+
+    const interpreter = new TokInterpreter();
+    interpreter.init(ctx, script, 'event_tick_window_test');
+
+    const attacker = spawnMockUnit(ctx, 'CubScout', 0, 10, 10);
+    const target = spawnMockUnit(ctx, 'CubScout', 1, 12, 12);
+
+    EventBus.emit('unit:attacked', { attackerEid: attacker, targetEid: target });
+    interpreter.tick(ctx, 0);
+    expect(interpreter.serialize(new Map()).tokState!.intVars[1]).toBe(1);
+
+    // No new event on tick 1: flag should be clear and v1 should reset to FALSE.
+    interpreter.tick(ctx, 1);
+    expect(interpreter.serialize(new Map()).tokState!.intVars[1]).toBe(0);
+
+    interpreter.dispose();
+  });
+
+  it('ignores same-side unit:attacked events for side-attack tracking', () => {
+    const ctx = createMockCtx();
+
+    const script = buildTokBuffer([
+      [0x80, 162, 0x28, 0x81, 0x81, 0x29], // int(v1)
+      [
+        0x80, 165, 0x28,                   // if (
+        0x80, 0xaa, 0x80, 0x28,            // EventSideAttacksSide(
+        0x80, 0x8e, 0x80, 0x28, 0x29,      // GetPlayerSide()
+        0x2c,                               // ,
+        0x80, 0x8e, 0x80, 0x28, 0x29,      // GetPlayerSide()
+        0x29,                               // )
+        0x80, 0xa8,                         // ==
+        0x80, 0xb1,                         // TRUE
+        0x29,                               // )
+      ],
+      [0x81, 0x81, 0x80, 0xb4, 0x80, 0xb1], // v1 = TRUE
+      [0x80, 167],                           // endif
+    ]);
+
+    const interpreter = new TokInterpreter();
+    interpreter.init(ctx, script, 'same_side_attack_test');
+
+    const attacker = spawnMockUnit(ctx, 'CubScout', 0, 10, 10);
+    const target = spawnMockUnit(ctx, 'CubScout', 0, 12, 12);
+
+    EventBus.emit('unit:attacked', { attackerEid: attacker, targetEid: target });
+    interpreter.tick(ctx, 0);
+
+    expect(interpreter.serialize(new Map()).tokState!.intVars[1]).toBe(0);
+    interpreter.dispose();
+  });
+
   it('records EventObjectAttacksSide from unit:attacked events', () => {
     const ctx = createMockCtx();
     const attacker = spawnMockUnit(ctx, 'CubScout', 0, 10, 10);
@@ -405,6 +506,99 @@ describe('TokInterpreter integration', () => {
     interpreter.init(ctx, script, 'event_object_attack_test');
 
     EventBus.emit('unit:attacked', { attackerEid: attacker, targetEid: target });
+    interpreter.tick(ctx, 0);
+
+    const state = interpreter.serialize(new Map()).tokState!;
+    expect(state.intVars[1]).toBe(1);
+
+    interpreter.dispose();
+  });
+
+  it('bridges CombatSystem fire events into Tok EventSideAttacksSide', () => {
+    const ctx = createMockCtx();
+
+    const script = buildTokBuffer([
+      [0x80, 162, 0x28, 0x81, 0x81, 0x29], // int(v1)
+      [
+        0x80, 165, 0x28,                   // if (
+        0x80, 0xaa, 0x80, 0x28,            // EventSideAttacksSide(
+        0x80, 0x8e, 0x80, 0x28, 0x29,      // GetPlayerSide()
+        0x2c,                               // ,
+        0x80, 0x90, 0x80, 0x28, 0x29,      // GetEnemySide()
+        0x29,                               // )
+        0x80, 0xa8,                         // ==
+        0x80, 0xb1,                         // TRUE
+        0x29,                               // )
+      ],
+      [0x81, 0x81, 0x80, 0xb4, 0x80, 0xb1], // v1 = TRUE
+      [0x80, 167],                           // endif
+    ]);
+
+    const interpreter = new TokInterpreter();
+    interpreter.init(ctx, script, 'combat_bridge_test');
+
+    const world = ctx.game.getWorld();
+    const combat = new CombatSystem(ctx.gameRules as any);
+    combat.init(world);
+
+    const attacker = spawnMockUnit(ctx, 'CubScout', 0, 10, 10);
+    const target = spawnMockUnit(ctx, 'CubScout', 1, 12, 12);
+
+    addComponent(world, Combat, attacker);
+    addComponent(world, AttackTarget, attacker);
+    Combat.attackRange[attacker] = 25;
+    Combat.fireTimer[attacker] = 0;
+    Combat.rof[attacker] = 5;
+    AttackTarget.entityId[attacker] = target;
+    AttackTarget.active[attacker] = 1;
+
+    combat.update(world, 0);
+    interpreter.tick(ctx, 0);
+
+    const state = interpreter.serialize(new Map()).tokState!;
+    expect(state.intVars[1]).toBe(1);
+
+    interpreter.dispose();
+  });
+
+  it('bridges CombatSystem fire events into Tok EventObjectAttacksSide', () => {
+    const ctx = createMockCtx();
+    const world = ctx.game.getWorld();
+
+    const attacker = spawnMockUnit(ctx, 'CubScout', 0, 10, 10);
+    const target = spawnMockUnit(ctx, 'CubScout', 1, 12, 12);
+
+    const script = buildTokBuffer([
+      [0x80, 162, 0x28, 0x81, 0x81, 0x29], // int(v1)
+      [
+        0x80, 165, 0x28,                   // if (
+        0x80, 0xab, 0x80, 0x28,            // EventObjectAttacksSide(
+        ...encodeIntLiteral(attacker),
+        0x2c,                               // ,
+        0x80, 0x90, 0x80, 0x28, 0x29,      // GetEnemySide()
+        0x29,                               // )
+        0x80, 0xa8,                         // ==
+        0x80, 0xb1,                         // TRUE
+        0x29,                               // )
+      ],
+      [0x81, 0x81, 0x80, 0xb4, 0x80, 0xb1], // v1 = TRUE
+      [0x80, 167],                           // endif
+    ]);
+
+    const interpreter = new TokInterpreter();
+    interpreter.init(ctx, script, 'combat_object_bridge_test');
+
+    const combat = new CombatSystem(ctx.gameRules as any);
+    combat.init(world);
+    addComponent(world, Combat, attacker);
+    addComponent(world, AttackTarget, attacker);
+    Combat.attackRange[attacker] = 25;
+    Combat.fireTimer[attacker] = 0;
+    Combat.rof[attacker] = 5;
+    AttackTarget.entityId[attacker] = target;
+    AttackTarget.active[attacker] = 1;
+
+    combat.update(world, 0);
     interpreter.tick(ctx, 0);
 
     const state = interpreter.serialize(new Map()).tokState!;

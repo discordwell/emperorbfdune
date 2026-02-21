@@ -228,8 +228,24 @@ class Parser {
       this.skipSemicolons();
       if (this.pos >= this.tokens.length) break;
 
-      const block = this.parseBlock();
-      if (block) blocks.push(block);
+      if (this.isKeyword(KW.if)) {
+        const block = this.parseBlock();
+        if (block) blocks.push(block);
+        continue;
+      }
+
+      // Some scripts contain top-level statements outside any explicit if/endif
+      // block. Model them as implicit unconditional blocks so runtime semantics
+      // stay "evaluate each top-level item every tick".
+      const stmt = this.parseStatement();
+      if (stmt) {
+        blocks.push({
+          kind: 'block',
+          condition: { kind: 'bool', value: true },
+          body: [stmt],
+          elseBody: [],
+        });
+      }
     }
 
     return blocks;
@@ -465,11 +481,43 @@ class Parser {
 
     // Variable reference
     if (t.kind === TokKind.Var) {
+      const slot = t.value;
       this.pos++;
+      // Decompiler artifacts: variables can appear as `int_5 ()` or
+      // `int_0 (2000)` forms. Treat these as plain variable references and
+      // consume the parenthesized payload so outer expression parsing keeps
+      // the following operators/terms (e.g. `int_0 (2000) + int_7`).
+      if (this.isAscii(0x28)) {
+        let depth = 0;
+        while (this.pos < this.tokens.length) {
+          const cur = this.tokens[this.pos];
+          if (cur.kind === TokKind.Ascii && cur.value === 0x28) depth++;
+          else if (cur.kind === TokKind.Ascii && cur.value === 0x29) {
+            depth--;
+            if (depth === 0) {
+              this.pos++;
+              break;
+            }
+          }
+          this.pos++;
+        }
+      }
+
+      // Decompiler/bytecode artifact: occasionally a variable token is emitted
+      // directly before a function call token with no operator, e.g.
+      // `int_1 PIPRelease () + 175`. Treat the variable as an accumulator
+      // artifact and parse the function call as the primary expression.
+      if (this.pos < this.tokens.length && this.tokens[this.pos].kind === TokKind.Func) {
+        const funcId = this.tokens[this.pos].value;
+        this.pos++;
+        const args = this.parseFuncArgs();
+        return { kind: 'callExpr', funcId, args };
+      }
+
       return {
         kind: 'var',
-        slot: t.value,
-        varType: this.varDecls.get(t.value) ?? VarType.Int,
+        slot,
+        varType: this.varDecls.get(slot) ?? VarType.Int,
       };
     }
 
@@ -531,7 +579,11 @@ class Parser {
         || next.kind === TokKind.Var
         || next.kind === TokKind.Str
         || next.kind === TokKind.Int
-        || (next.kind === TokKind.Keyword && (next.value === KW.TRUE || next.value === KW.FALSE))) {
+        || (next.kind === TokKind.Keyword && (next.value === KW.TRUE || next.value === KW.FALSE))
+        || (next.kind === TokKind.Ascii
+          && next.value === 0x28
+          && this.pos + 2 < this.tokens.length
+          && this.tokens[this.pos + 2].kind === TokKind.Func)) {
         this.pos++; // skip accumulator
       }
     }

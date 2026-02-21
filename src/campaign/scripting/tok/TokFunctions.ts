@@ -239,6 +239,7 @@ export class TokFunctionDispatch {
       }
 
       case FUNC.GetEntrancePointByIndex:
+      case FUNC.GetEntranceNearToPos:
       case FUNC.GetEntrancNearToPos:
       case FUNC.GetEntranceFarFromPos:
         return this.getNeutralEntrancePoint(ctx);

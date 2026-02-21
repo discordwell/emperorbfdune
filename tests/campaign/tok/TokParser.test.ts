@@ -32,6 +32,21 @@ function topLevelIfCount(scriptText: string): number {
     .length;
 }
 
+function topLevelStatementCount(scriptText: string): number {
+  const lines = scriptText.split(/\r?\n/);
+  return lines.filter((line) => {
+    if (!line) return false;
+    if (line.startsWith('//')) return false;
+    if (line.startsWith('if ')) return false;
+    if (line.startsWith('else;')) return false;
+    if (line.startsWith('endif;')) return false;
+    if (/^(int|obj|pos) \(v\d+\)$/.test(line)) return false;
+    // Top-level script statements appear with zero indentation.
+    if (line.startsWith('  ')) return false;
+    return true;
+  }).length;
+}
+
 function compareMissionRoundTrip(name: string, expectedSize: number): void {
   const { bytes, buffer } = readTok(name);
   expect(bytes.byteLength).toBe(expectedSize);
@@ -100,7 +115,7 @@ describe('TokParser mission corpus smoke', () => {
       }
 
       const decompiled = fs.readFileSync(txtPath, 'utf8');
-      const expectedTopLevelBlocks = topLevelIfCount(decompiled);
+      const expectedTopLevelBlocks = topLevelIfCount(decompiled) + topLevelStatementCount(decompiled);
 
       if (expectedTopLevelBlocks === 0) {
         expect(parsed.program.length).toBe(0);
@@ -110,5 +125,71 @@ describe('TokParser mission corpus smoke', () => {
 
       expect(parsed.program.length).toBe(expectedTopLevelBlocks);
     }
+  });
+
+  it('tracks remaining corpus round-trip mismatches against decompiled text', () => {
+    const files = fs.readdirSync(TOK_DIR)
+      .filter((f) => f.endsWith('.tok'))
+      .sort((a, b) => a.localeCompare(b));
+
+    const mismatches: string[] = [];
+    const mismatchDetails: Array<{ mission: string; line: number; expected: string; actual: string }> = [];
+
+    for (const file of files) {
+      const mission = file.replace(/\.tok$/i, '');
+      const txtPath = path.join(DECOMPILED_DIR, `${mission}.txt`);
+      if (!fs.existsSync(txtPath)) continue;
+
+      const { bytes, buffer } = readTok(mission);
+      const parsed = parseTokFile(buffer);
+      const actual = normalizeTokText(astToText(
+        parsed,
+        {
+          fileName: `${mission}.tok`,
+          fileSize: bytes.byteLength,
+          segmentCount: countTokSegments(buffer),
+          varSlotCount: parsed.varSlotCount,
+        },
+        STRING_TABLE,
+      ));
+      const expected = normalizeTokText(readDecompiled(mission));
+
+      if (actual !== expected) {
+        mismatches.push(mission);
+        const actualLines = actual.split('\n');
+        const expectedLines = expected.split('\n');
+        const maxLines = Math.max(actualLines.length, expectedLines.length);
+        let line = 1;
+        let actualLine = '';
+        let expectedLine = '';
+        for (let i = 0; i < maxLines; i++) {
+          const a = actualLines[i] ?? '';
+          const e = expectedLines[i] ?? '';
+          if (a !== e) {
+            line = i + 1;
+            actualLine = a;
+            expectedLine = e;
+            break;
+          }
+        }
+        mismatchDetails.push({
+          mission,
+          line,
+          expected: expectedLine,
+          actual: actualLine,
+        });
+      }
+    }
+
+    const expectedMismatches: string[] = [];
+
+    console.log('[TokParserCorpusMismatches]', JSON.stringify({
+      count: mismatches.length,
+      missions: mismatches,
+    }));
+    if (process.env.TOK_VERBOSE_MISMATCHES === '1') {
+      console.log('[TokParserCorpusMismatchDetails]', JSON.stringify(mismatchDetails));
+    }
+    expect(mismatches).toEqual(expectedMismatches);
   });
 });
