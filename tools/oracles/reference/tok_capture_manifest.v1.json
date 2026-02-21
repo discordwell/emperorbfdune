@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "generator": "tok-reference-capture-manifest-v1",
-  "generatedAt": "2026-02-21T22:29:58.315Z",
+  "generatedAt": "2026-02-21T22:58:50.906Z",
   "seed": 9001,
   "defaultMaxTick": 80,
   "headerMaxTick": 8,
@@ -11,6 +11,7 @@
     {
       "scriptId": "ATENDMission",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -22,6 +23,7 @@
     {
       "scriptId": "ATJump_reb",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -33,6 +35,7 @@
     {
       "scriptId": "ATJump_reb2",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -44,6 +47,7 @@
     {
       "scriptId": "ATP1D11OR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -55,6 +59,7 @@
     {
       "scriptId": "ATP1D11ORFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -66,6 +71,7 @@
     {
       "scriptId": "ATP1D12GN",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -77,6 +83,7 @@
     {
       "scriptId": "ATP1D12GNFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -88,6 +95,7 @@
     {
       "scriptId": "ATP1D16GN",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -99,6 +107,7 @@
     {
       "scriptId": "ATP1D16GNFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -110,6 +119,7 @@
     {
       "scriptId": "ATP1D18GN",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -121,6 +131,7 @@
     {
       "scriptId": "ATP1D18SAFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -132,6 +143,7 @@
     {
       "scriptId": "ATP1D19GN",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -143,6 +155,7 @@
     {
       "scriptId": "ATP1D19GNWin",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -154,6 +167,7 @@
     {
       "scriptId": "ATP1D1FR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -165,6 +179,7 @@
     {
       "scriptId": "ATP1D1FRFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -176,6 +191,7 @@
     {
       "scriptId": "ATP1D3SA",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -187,6 +203,7 @@
     {
       "scriptId": "ATP1D3SAFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -198,6 +215,7 @@
     {
       "scriptId": "ATP1D4FR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -209,6 +227,7 @@
     {
       "scriptId": "ATP1D4FRFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -220,6 +239,7 @@
     {
       "scriptId": "ATP1D6FR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -231,6 +251,7 @@
     {
       "scriptId": "ATP1D6FRFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -242,6 +263,7 @@
     {
       "scriptId": "ATP1D7FR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -253,6 +275,7 @@
     {
       "scriptId": "ATP1D7FRFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -264,6 +287,7 @@
     {
       "scriptId": "ATP1D9GN",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -275,6 +299,7 @@
     {
       "scriptId": "ATP1D9GNfail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -286,6 +311,7 @@
     {
       "scriptId": "ATP1M11OR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -297,6 +323,7 @@
     {
       "scriptId": "ATP1M12GN",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -308,6 +335,7 @@
     {
       "scriptId": "ATP1M16AT",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -319,6 +347,7 @@
     {
       "scriptId": "ATP1M18SA",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -330,6 +359,7 @@
     {
       "scriptId": "ATP1M19GN",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -341,6 +371,7 @@
     {
       "scriptId": "ATP1M1FR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -352,6 +383,7 @@
     {
       "scriptId": "ATP1M3SA",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -363,6 +395,7 @@
     {
       "scriptId": "ATP1M4FR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -374,6 +407,7 @@
     {
       "scriptId": "ATP1M6FR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -385,6 +419,7 @@
     {
       "scriptId": "ATP1M7FR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -396,6 +431,7 @@
     {
       "scriptId": "ATP1M9GN",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -407,6 +443,7 @@
     {
       "scriptId": "ATP2D11SM",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -418,6 +455,7 @@
     {
       "scriptId": "ATP2D11SMFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -429,6 +467,7 @@
     {
       "scriptId": "ATP2D13IX",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -440,6 +479,7 @@
     {
       "scriptId": "ATP2D13IXFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -451,6 +491,7 @@
     {
       "scriptId": "ATP2D16TL",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -462,6 +503,7 @@
     {
       "scriptId": "ATP2D19IX",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -473,6 +515,7 @@
     {
       "scriptId": "ATP2D19IXFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -484,6 +527,7 @@
     {
       "scriptId": "ATP2D1FR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -495,6 +539,7 @@
     {
       "scriptId": "ATP2D1FRFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -506,6 +551,7 @@
     {
       "scriptId": "ATP2D3SA",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -517,6 +563,7 @@
     {
       "scriptId": "ATP2D3SAFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -528,6 +575,7 @@
     {
       "scriptId": "ATP2D4IX",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -539,6 +587,7 @@
     {
       "scriptId": "ATP2D4IXfail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -550,6 +599,7 @@
     {
       "scriptId": "ATP2D7FR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -561,6 +611,7 @@
     {
       "scriptId": "ATP2D7FRFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -572,6 +623,7 @@
     {
       "scriptId": "ATP2M11SM",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -583,6 +635,7 @@
     {
       "scriptId": "ATP2M13IX",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -594,6 +647,7 @@
     {
       "scriptId": "ATP2M16TL",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -605,6 +659,7 @@
     {
       "scriptId": "ATP2M19IX",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -616,6 +671,7 @@
     {
       "scriptId": "ATP2M1FR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -627,6 +683,7 @@
     {
       "scriptId": "ATP2M3SA",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -638,6 +695,7 @@
     {
       "scriptId": "ATP2M4IX",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -649,6 +707,7 @@
     {
       "scriptId": "ATP2M7FR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -660,6 +719,7 @@
     {
       "scriptId": "ATP3D10FR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -671,6 +731,7 @@
     {
       "scriptId": "ATP3D10FRFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -682,6 +743,7 @@
     {
       "scriptId": "ATP3D1FR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -693,6 +755,7 @@
     {
       "scriptId": "ATP3D1FRFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -704,6 +767,7 @@
     {
       "scriptId": "ATP3D3FR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -715,6 +779,7 @@
     {
       "scriptId": "ATP3D3FRFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -726,6 +791,7 @@
     {
       "scriptId": "ATP3D5TL",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -737,6 +803,7 @@
     {
       "scriptId": "ATP3D5TLFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -748,6 +815,7 @@
     {
       "scriptId": "ATP3D8TL",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -759,6 +827,7 @@
     {
       "scriptId": "ATP3D8TlFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -770,6 +839,7 @@
     {
       "scriptId": "ATp3M10FR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -781,6 +851,7 @@
     {
       "scriptId": "ATP3M1FR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -792,6 +863,7 @@
     {
       "scriptId": "ATP3M3FR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -803,6 +875,7 @@
     {
       "scriptId": "ATP3M5TL",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -814,6 +887,7 @@
     {
       "scriptId": "ATP3M8TL",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -825,6 +899,7 @@
     {
       "scriptId": "Atreides Heighliner Mission",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -836,6 +911,7 @@
     {
       "scriptId": "ATStart",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -847,6 +923,7 @@
     {
       "scriptId": "ATTutorial",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -858,6 +935,7 @@
     {
       "scriptId": "DAT Save The Duke",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -869,6 +947,7 @@
     {
       "scriptId": "Harkonnen homeworld assault_AT",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -880,6 +959,7 @@
     {
       "scriptId": "Harkonnen homeworld assault_OR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -891,6 +971,7 @@
     {
       "scriptId": "header",
       "maxTick": 8,
+      "frameCount": 9,
       "checkpointTicks": [
         0,
         8
@@ -899,6 +980,7 @@
     {
       "scriptId": "HHK Civil War Attack Mission",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -910,6 +992,7 @@
     {
       "scriptId": "HHK Civil War Defence Mission",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -921,6 +1004,7 @@
     {
       "scriptId": "HHK Heighliner Mission",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -932,6 +1016,7 @@
     {
       "scriptId": "HKENDMission",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -943,6 +1028,7 @@
     {
       "scriptId": "HKjump_reb",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -954,6 +1040,7 @@
     {
       "scriptId": "HKjump_reb2",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -965,6 +1052,7 @@
     {
       "scriptId": "HKP1D10OR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -976,6 +1064,7 @@
     {
       "scriptId": "HKP1D10ORFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -987,6 +1076,7 @@
     {
       "scriptId": "HKP1D11GN",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -998,6 +1088,7 @@
     {
       "scriptId": "HKP1D11GNFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1009,6 +1100,7 @@
     {
       "scriptId": "HKP1D15HK",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1020,6 +1112,7 @@
     {
       "scriptId": "HKP1D15HKFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1031,6 +1124,7 @@
     {
       "scriptId": "HKP1D17SA",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1042,6 +1136,7 @@
     {
       "scriptId": "HKP1D17SAFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1053,6 +1148,7 @@
     {
       "scriptId": "HKP1D18GN",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1064,6 +1160,7 @@
     {
       "scriptId": "HKP1D18GNWin",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1075,6 +1172,7 @@
     {
       "scriptId": "HKP1D1FR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1086,6 +1184,7 @@
     {
       "scriptId": "HKP1D1FRFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1097,6 +1196,7 @@
     {
       "scriptId": "HKP1D2FR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1108,6 +1208,7 @@
     {
       "scriptId": "HKP1D2FRFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1119,6 +1220,7 @@
     {
       "scriptId": "HKP1D4SA",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1130,6 +1232,7 @@
     {
       "scriptId": "HKP1D4SAFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1141,6 +1244,7 @@
     {
       "scriptId": "HKP1D5SA",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1152,6 +1256,7 @@
     {
       "scriptId": "HKP1D5SAFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1163,6 +1268,7 @@
     {
       "scriptId": "HKP1D6SA",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1174,6 +1280,7 @@
     {
       "scriptId": "HKP1D6SAFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1185,6 +1292,7 @@
     {
       "scriptId": "HKP1D7HK",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1196,6 +1304,7 @@
     {
       "scriptId": "HKP1D7HKFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1207,6 +1316,7 @@
     {
       "scriptId": "HKP1M10OR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1218,6 +1328,7 @@
     {
       "scriptId": "HKP1M11GN",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1229,6 +1340,7 @@
     {
       "scriptId": "HKP1M15HK",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1240,6 +1352,7 @@
     {
       "scriptId": "HKP1M17SA",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1251,6 +1364,7 @@
     {
       "scriptId": "HKP1M18GN",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1262,6 +1376,7 @@
     {
       "scriptId": "HKP1M1FR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1273,6 +1388,7 @@
     {
       "scriptId": "HKP1M2FR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1284,6 +1400,7 @@
     {
       "scriptId": "HKP1M4SA",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1295,6 +1412,7 @@
     {
       "scriptId": "HKP1M5SA",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1306,6 +1424,7 @@
     {
       "scriptId": "HKP1M6SA",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1317,6 +1436,7 @@
     {
       "scriptId": "HKP1M7HK",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1328,6 +1448,7 @@
     {
       "scriptId": "HKP2D12SM",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1339,6 +1460,7 @@
     {
       "scriptId": "HKP2D14IX",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1350,6 +1472,7 @@
     {
       "scriptId": "HKP2D14IXFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1361,6 +1484,7 @@
     {
       "scriptId": "HKP2D16IX",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1372,6 +1496,7 @@
     {
       "scriptId": "HKP2D16IXFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1383,6 +1508,7 @@
     {
       "scriptId": "HKP2D17TL",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1394,6 +1520,7 @@
     {
       "scriptId": "HKP2D17TLFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1405,6 +1532,7 @@
     {
       "scriptId": "HKP2D20TL",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1416,6 +1544,7 @@
     {
       "scriptId": "HKP2D20TLFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1427,6 +1556,7 @@
     {
       "scriptId": "HKP2D21TL",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1438,6 +1568,7 @@
     {
       "scriptId": "HKP2D21TLFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1449,6 +1580,7 @@
     {
       "scriptId": "HKP2D9IX",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1460,6 +1592,7 @@
     {
       "scriptId": "HKP2D9IXFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1471,6 +1604,7 @@
     {
       "scriptId": "HKP2M12SM",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1482,6 +1616,7 @@
     {
       "scriptId": "HKP2M14IX",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1493,6 +1628,7 @@
     {
       "scriptId": "HKP2M16IX",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1504,6 +1640,7 @@
     {
       "scriptId": "HKP2M17TL",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1515,6 +1652,7 @@
     {
       "scriptId": "HKP2M20TL",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1526,6 +1664,7 @@
     {
       "scriptId": "HKP2M21TL",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1537,6 +1676,7 @@
     {
       "scriptId": "HKP2M9IX",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1548,6 +1688,7 @@
     {
       "scriptId": "HKP3D10FR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1559,6 +1700,7 @@
     {
       "scriptId": "HKP3D10FRFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1570,6 +1712,7 @@
     {
       "scriptId": "HKP3D3TL",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1581,6 +1724,7 @@
     {
       "scriptId": "HKP3D5HK",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1592,6 +1736,7 @@
     {
       "scriptId": "HKP3D5HKFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1603,6 +1748,7 @@
     {
       "scriptId": "HKP3D8SA",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1614,6 +1760,7 @@
     {
       "scriptId": "HKP3D8SAFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1625,6 +1772,7 @@
     {
       "scriptId": "HKP3M10FR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1636,6 +1784,7 @@
     {
       "scriptId": "HKP3M3TL",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1647,6 +1796,7 @@
     {
       "scriptId": "HKP3M5HK",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1658,6 +1808,7 @@
     {
       "scriptId": "HKP3M8SA",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1669,6 +1820,7 @@
     {
       "scriptId": "HKStart",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1680,6 +1832,7 @@
     {
       "scriptId": "Ordos Heighliner Mission",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1691,6 +1844,7 @@
     {
       "scriptId": "Ordos homeworld assault",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1702,6 +1856,7 @@
     {
       "scriptId": "Ordos homeworld assault _Atreides",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1713,6 +1868,7 @@
     {
       "scriptId": "Ordos Homeworld Defense",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1724,6 +1880,7 @@
     {
       "scriptId": "ORENDMission",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1735,6 +1892,7 @@
     {
       "scriptId": "ORJump_reb",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1746,6 +1904,7 @@
     {
       "scriptId": "ORJump2_reb",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1757,6 +1916,7 @@
     {
       "scriptId": "ORP1D13OR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1768,6 +1928,7 @@
     {
       "scriptId": "orp1d15sa",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1779,6 +1940,7 @@
     {
       "scriptId": "ORP1D15SAFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1790,6 +1952,7 @@
     {
       "scriptId": "ORP1D1FR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1801,6 +1964,7 @@
     {
       "scriptId": "ORP1D1FRFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1812,6 +1976,7 @@
     {
       "scriptId": "ORP1D3SA",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1823,6 +1988,7 @@
     {
       "scriptId": "ORP1D3SAFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1834,6 +2000,7 @@
     {
       "scriptId": "ORP1D4HK",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1845,6 +2012,7 @@
     {
       "scriptId": "ORP1D4HKFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1856,6 +2024,7 @@
     {
       "scriptId": "ORP1D5FR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1867,6 +2036,7 @@
     {
       "scriptId": "ORP1D5FRFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1878,6 +2048,7 @@
     {
       "scriptId": "ORP1D6SA",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1889,6 +2060,7 @@
     {
       "scriptId": "ORP1D6SAFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1900,6 +2072,7 @@
     {
       "scriptId": "ORP1D9GN",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1911,6 +2084,7 @@
     {
       "scriptId": "ORP1D9GNFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1922,6 +2096,7 @@
     {
       "scriptId": "ORP1M13OR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1933,6 +2108,7 @@
     {
       "scriptId": "ORP1M15SA",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1944,6 +2120,7 @@
     {
       "scriptId": "ORP1M16GN",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1955,6 +2132,7 @@
     {
       "scriptId": "ORP1M1FR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1966,6 +2144,7 @@
     {
       "scriptId": "ORP1M3SA",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1977,6 +2156,7 @@
     {
       "scriptId": "ORP1M4HK",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1988,6 +2168,7 @@
     {
       "scriptId": "ORP1M5FR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -1999,6 +2180,7 @@
     {
       "scriptId": "ORP1M6SA",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2010,6 +2192,7 @@
     {
       "scriptId": "ORP1M9GN",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2021,6 +2204,7 @@
     {
       "scriptId": "ORP2D14IX",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2032,6 +2216,7 @@
     {
       "scriptId": "ORP2D14IXFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2043,6 +2228,7 @@
     {
       "scriptId": "ORP2D15IX",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2054,6 +2240,7 @@
     {
       "scriptId": "ORP2D15IXFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2065,6 +2252,7 @@
     {
       "scriptId": "ORP2D17IX",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2076,6 +2264,7 @@
     {
       "scriptId": "ORP2D17IXFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2087,6 +2276,7 @@
     {
       "scriptId": "ORP2D18TL",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2098,6 +2288,7 @@
     {
       "scriptId": "ORP2D4OR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2109,6 +2300,7 @@
     {
       "scriptId": "ORP2D4ORFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2120,6 +2312,7 @@
     {
       "scriptId": "ORP2D5SM",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2131,6 +2324,7 @@
     {
       "scriptId": "ORP2D5SMFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2142,6 +2336,7 @@
     {
       "scriptId": "ORP2D6TL",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2153,6 +2348,7 @@
     {
       "scriptId": "ORP2D6TLFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2164,6 +2360,7 @@
     {
       "scriptId": "ORP2D7IX",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2175,6 +2372,7 @@
     {
       "scriptId": "ORP2D7IXFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2186,6 +2384,7 @@
     {
       "scriptId": "ORP2D8GN",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2197,6 +2396,7 @@
     {
       "scriptId": "ORP2d8GNwin",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2208,6 +2408,7 @@
     {
       "scriptId": "ORP2D9TL",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2219,6 +2420,7 @@
     {
       "scriptId": "ORP2D9TLFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2230,6 +2432,7 @@
     {
       "scriptId": "ORP2M14IX",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2241,6 +2444,7 @@
     {
       "scriptId": "ORP2M15IX",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2252,6 +2456,7 @@
     {
       "scriptId": "ORP2M17IX",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2263,6 +2468,7 @@
     {
       "scriptId": "ORP2M18TL",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2274,6 +2480,7 @@
     {
       "scriptId": "ORP2M4OR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2285,6 +2492,7 @@
     {
       "scriptId": "ORP2M5SM",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2296,6 +2504,7 @@
     {
       "scriptId": "ORP2M6TL",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2307,6 +2516,7 @@
     {
       "scriptId": "ORP2M7IX",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2318,6 +2528,7 @@
     {
       "scriptId": "ORP2M9TL",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2329,6 +2540,7 @@
     {
       "scriptId": "ORP3D10TL",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2340,6 +2552,7 @@
     {
       "scriptId": "ORP3D10TLFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2351,6 +2564,7 @@
     {
       "scriptId": "ORP3D11FR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2362,6 +2576,7 @@
     {
       "scriptId": "ORP3D11FRFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2373,6 +2588,7 @@
     {
       "scriptId": "ORP3D2TL",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2384,6 +2600,7 @@
     {
       "scriptId": "ORP3D2TLFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2395,6 +2612,7 @@
     {
       "scriptId": "ORP3D5FR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2406,6 +2624,7 @@
     {
       "scriptId": "ORP3D5FRFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2417,6 +2636,7 @@
     {
       "scriptId": "ORP3D6SA",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2428,6 +2648,7 @@
     {
       "scriptId": "ORP3D6SAFail",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2439,6 +2660,7 @@
     {
       "scriptId": "ORP3M10TL",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2450,6 +2672,7 @@
     {
       "scriptId": "ORP3M11FR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2461,6 +2684,7 @@
     {
       "scriptId": "ORP3M2TL",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2472,6 +2696,7 @@
     {
       "scriptId": "ORP3M5FR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2483,6 +2708,7 @@
     {
       "scriptId": "ORP3M6SA",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2494,6 +2720,7 @@
     {
       "scriptId": "ORStart",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2505,6 +2732,7 @@
     {
       "scriptId": "T36 Atreides Homeworld Assault",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,
@@ -2516,6 +2744,7 @@
     {
       "scriptId": "T36 Atreides Homeworld Assault_OR",
       "maxTick": 80,
+      "frameCount": 81,
       "checkpointTicks": [
         0,
         20,

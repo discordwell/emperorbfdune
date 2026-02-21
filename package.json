@@ -17,8 +17,12 @@
     "oracle:reference:extract": "node tools/oracles/extract-reference-log-lines.mjs",
     "oracle:reference:merge": "node tools/oracles/merge-reference-jsonl.mjs",
     "oracle:reference:validate": "node tools/oracles/validate-reference-jsonl.mjs",
+    "oracle:reference:progress": "node tools/oracles/check-capture-progress.mjs",
+    "oracle:reference:hook-header": "node tools/oracles/generate-hook-manifest-header.mjs",
     "oracle:reference:compare": "node tools/oracles/compare-reference.mjs --report-out artifacts/oracle-diffs/reference_vs_internal.report.json",
-    "oracle:reference:strict": "node tools/oracles/compare-reference.mjs --strict --require-reference --require-all-missions --min-coverage 1 --report-out artifacts/oracle-diffs/reference_vs_internal.report.json"
+    "oracle:reference:strict": "node tools/oracles/compare-reference.mjs --strict --require-reference --require-all-missions --min-coverage 1 --report-out artifacts/oracle-diffs/reference_vs_internal.report.json",
+    "oracle:reference:runtime": "vitest run tests/campaign/tok/TokReferenceRuntimeOracle.test.ts",
+    "oracle:reference:runtime:strict": "TOK_REFERENCE_REQUIRE=1 TOK_REFERENCE_FULL=1 vitest run tests/campaign/tok/TokReferenceRuntimeOracle.test.ts"
   },
   "dependencies": {
     "bitecs": "^0.3.40",

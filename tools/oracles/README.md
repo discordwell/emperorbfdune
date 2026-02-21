@@ -34,6 +34,14 @@ npm run oracle:reference:manifest
 
 This writes `tools/oracles/reference/tok_capture_manifest.v1.json` with expected missions, max ticks, and checkpoint ticks.
 
+Optional C/C++ hook helper header:
+
+```bash
+npm run oracle:reference:hook-header
+```
+
+See `tools/oracles/reference/HOOK_INTEGRATION_GUIDE.md` for runtime hook integration.
+
 ### 2) Extract hook lines from game logs (optional)
 
 If your hook logs prefixed JSON frames (for example `TOKTRACE {...}`):
@@ -63,7 +71,17 @@ npm run oracle:reference:validate -- \
   --input tools/oracles/reference/tok_capture_merged.jsonl \
   --require-all-missions \
   --require-expected-max-tick \
+  --require-manifest-checkpoints \
   --report-out artifacts/oracle-diffs/reference_jsonl_validation.report.json
+```
+
+Optional progress report:
+
+```bash
+npm run oracle:reference:progress -- \
+  --input tools/oracles/reference/tok_capture_merged.jsonl \
+  --strict \
+  --report-out artifacts/oracle-diffs/reference_capture_progress.report.json
 ```
 
 ### 5) Normalize JSONL -> oracle dataset
@@ -97,3 +115,23 @@ Advanced flags:
 - `--require-reference`: fail if the reference file is missing
 - `--require-all-missions`: fail if mission sets differ
 - `--min-coverage <0..1>`: require minimum reference mission coverage
+
+### 7) Replay runtime against external reference
+
+This step replays the current interpreter and compares checkpoint hashes against the external reference:
+
+```bash
+npm run oracle:reference:runtime
+```
+
+Strict full-corpus mode (fails if the reference file is missing):
+
+```bash
+npm run oracle:reference:runtime:strict
+```
+
+Optional env flags:
+
+- `TOK_REFERENCE_REQUIRE=1`: fail when reference file is missing
+- `TOK_REFERENCE_FULL=1`: replay all missions present in the reference dataset
+- `TOK_REFERENCE_MAX_MISSIONS=<N>`: cap mission count for local debug runs

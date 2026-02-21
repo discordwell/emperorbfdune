@@ -7,6 +7,11 @@ Required fields:
 - `scriptId` (or alias `s`)
 - `tick` (or alias `t`)
 
+Optional mission metadata fields (useful for checkpoint-only capture):
+
+- `maxTick` / `mt`
+- `frameCount` / `fc`
+
 Frame payload options:
 
 - Full state fields (hashes computed during normalization):
@@ -34,7 +39,7 @@ Example (full fields):
 Example (compact aliases + precomputed hashes):
 
 ```json
-{"s":"ATP1D1FRFail","t":0,"fh":"...64hex...","ih":"...64hex...","oh":"...64hex...","ph":"...64hex...","rh":"...64hex...","eh":"...64hex...","dh":"...64hex..."}
+{"s":"ATP1D1FRFail","t":0,"mt":80,"fc":81,"fh":"...64hex...","ih":"...64hex...","oh":"...64hex...","ph":"...64hex...","rh":"...64hex...","eh":"...64hex...","dh":"...64hex..."}
 ```
 
 ## Log Prefix Mode

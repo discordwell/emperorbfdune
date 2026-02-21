@@ -13,6 +13,8 @@ describe('Tok reference JSONL tools', () => {
       {
         s: 'ATP1D1FRFail',
         t: 0,
+        mt: 1,
+        fc: 2,
         i: [1, 2],
         o: [3],
         p: [{ x: 10, z: 20 }],
@@ -23,6 +25,8 @@ describe('Tok reference JSONL tools', () => {
       {
         s: 'ATP1D1FRFail',
         t: 1,
+        mt: 1,
+        fc: 2,
         i: [4, 5],
         o: [6],
         p: [{ x: 30, z: 40 }],
@@ -42,6 +46,7 @@ describe('Tok reference JSONL tools', () => {
     expect(out.schemaVersion).toBe(1);
     expect(Object.keys(out.missions)).toEqual(['ATP1D1FRFail']);
     expect(out.missions.ATP1D1FRFail.frameCount).toBe(2);
+    expect(out.missions.ATP1D1FRFail.maxTick).toBe(1);
     expect(out.missions.ATP1D1FRFail.final.tick).toBe(1);
     expect(out.missions.ATP1D1FRFail.checkpoints.length).toBe(2);
   });
@@ -89,14 +94,15 @@ describe('Tok reference JSONL tools', () => {
       checkpointStride: 20,
       fastScripts: ['ATP1D1FRFail'],
       missions: {
-        ATP1D1FRFail: { maxTick: 80 },
-        ATP1D1FR: { maxTick: 80 },
+        ATP1D1FRFail: { maxTick: 80, frameCount: 81 },
+        ATP1D1FR: { maxTick: 80, frameCount: 81 },
       },
     };
 
     const manifestFast = buildCaptureManifestFromOracleDataset(dataset, { scripts: 'fast' });
     expect(manifestFast.missionCount).toBe(1);
     expect(manifestFast.missions[0].scriptId).toBe('ATP1D1FRFail');
+    expect(manifestFast.missions[0].frameCount).toBe(81);
     expect(manifestFast.missions[0].checkpointTicks).toEqual([0, 20, 40, 60, 80]);
 
     const manifestAll = buildCaptureManifestFromOracleDataset(dataset, { scripts: 'all' });

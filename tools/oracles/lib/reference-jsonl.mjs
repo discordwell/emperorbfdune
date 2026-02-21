@@ -30,6 +30,15 @@ function pickField(row, longName, shortName, fallback) {
   return fallback;
 }
 
+function pickFiniteNumberOrNull(row, longName, shortName) {
+  const value = row[longName] ?? row[shortName];
+  if (value === undefined || value === null) return null;
+  if (!isFiniteNumber(value)) {
+    throw new Error(`${longName} must be a finite number when present: ${JSON.stringify(value)}`);
+  }
+  return value;
+}
+
 function pickHash(row, longName, shortName) {
   const value = row[longName] ?? row[shortName];
   if (value === undefined) return null;
@@ -62,6 +71,14 @@ export function canonicalFrameFromRow(row) {
     eventFlags: pickField(row, 'eventFlags', 'e', []),
     dispatch: pickField(row, 'dispatch', 'd', {}),
   };
+}
+
+export function pickDeclaredFrameCount(row) {
+  return pickFiniteNumberOrNull(row, 'frameCount', 'fc');
+}
+
+export function pickDeclaredMaxTick(row) {
+  return pickFiniteNumberOrNull(row, 'maxTick', 'mt');
 }
 
 export function buildSignalFromRow(row) {
@@ -173,6 +190,15 @@ export function buildMissionOracleDatasetFromRows(rows, options = {}) {
   const missionIds = [...grouped.keys()].sort((a, b) => a.localeCompare(b));
   for (const scriptId of missionIds) {
     const rowsForMission = grouped.get(scriptId).slice().sort((a, b) => pickTick(a) - pickTick(b));
+    let declaredFrameCount = null;
+    let declaredMaxTick = null;
+    for (const row of rowsForMission) {
+      const fc = pickDeclaredFrameCount(row);
+      if (fc !== null) declaredFrameCount = declaredFrameCount === null ? fc : Math.max(declaredFrameCount, fc);
+      const mt = pickDeclaredMaxTick(row);
+      if (mt !== null) declaredMaxTick = declaredMaxTick === null ? mt : Math.max(declaredMaxTick, mt);
+    }
+
     const checkpoints = [];
     for (const row of rowsForMission) {
       const tick = pickTick(row);
@@ -182,14 +208,19 @@ export function buildMissionOracleDatasetFromRows(rows, options = {}) {
 
     const finalRow = rowsForMission[rowsForMission.length - 1];
     const final = buildSignalFromRow(finalRow);
+    if (declaredMaxTick !== null && final.tick !== declaredMaxTick) {
+      throw new Error(`Mission ${scriptId} final tick ${final.tick} != declared maxTick ${declaredMaxTick}`);
+    }
+
+    const missionMaxTick = declaredMaxTick ?? final.tick;
     if (!checkpoints.length || checkpoints[checkpoints.length - 1].tick !== final.tick) {
       checkpoints.push(final);
     }
 
     missions[scriptId] = {
       scriptId,
-      maxTick: final.tick,
-      frameCount: rowsForMission.length,
+      maxTick: missionMaxTick,
+      frameCount: declaredFrameCount ?? rowsForMission.length,
       checkpoints,
       final,
     };
@@ -214,6 +245,7 @@ export function buildCaptureManifestFromOracleDataset(dataset, options = {}) {
     .map(([scriptId, entry]) => ({
       scriptId,
       maxTick: entry.maxTick,
+      frameCount: entry.frameCount ?? (entry.maxTick + 1),
     }))
     .sort((a, b) => a.scriptId.localeCompare(b.scriptId));
 
@@ -235,6 +267,7 @@ export function buildCaptureManifestFromOracleDataset(dataset, options = {}) {
       return {
         scriptId: mission.scriptId,
         maxTick: mission.maxTick,
+        frameCount: mission.frameCount,
         checkpointTicks,
       };
     });
@@ -270,9 +303,26 @@ export function validateReferenceRows(rows, options = {}) {
       errors.push(`Invalid row missing {scriptId, tick}: ${JSON.stringify(row)}`);
       continue;
     }
-    const mission = missions.get(scriptId) ?? { ticks: [], rows: 0 };
+    const mission = missions.get(scriptId) ?? {
+      ticks: [],
+      rows: 0,
+      declaredMaxTick: null,
+      declaredFrameCount: null,
+    };
     mission.ticks.push(tick);
     mission.rows++;
+    const rowMaxTick = pickDeclaredMaxTick(row);
+    if (rowMaxTick !== null) {
+      mission.declaredMaxTick = mission.declaredMaxTick === null
+        ? rowMaxTick
+        : Math.max(mission.declaredMaxTick, rowMaxTick);
+    }
+    const rowFrameCount = pickDeclaredFrameCount(row);
+    if (rowFrameCount !== null) {
+      mission.declaredFrameCount = mission.declaredFrameCount === null
+        ? rowFrameCount
+        : Math.max(mission.declaredFrameCount, rowFrameCount);
+    }
     missions.set(scriptId, mission);
   }
 
@@ -289,7 +339,8 @@ export function validateReferenceRows(rows, options = {}) {
       errors.push(`${scriptId} missing tick 0`);
     }
 
-    const maxCaptured = Math.max(...mission.ticks);
+    const maxCapturedTick = Math.max(...mission.ticks);
+    const maxCaptured = mission.declaredMaxTick ?? maxCapturedTick;
     const expectedMax = expectedMissionMax[scriptId];
     if (isFiniteNumber(expectedMax)) {
       if (maxCaptured < expectedMax) {
@@ -297,6 +348,10 @@ export function validateReferenceRows(rows, options = {}) {
         if (requireExpectedMaxTick) errors.push(msg);
         else warnings.push(msg);
       }
+    }
+
+    if (mission.declaredFrameCount !== null && mission.declaredFrameCount < maxCaptured + 1) {
+      errors.push(`${scriptId} declared frameCount ${mission.declaredFrameCount} < maxTick+1 (${maxCaptured + 1})`);
     }
   }
 

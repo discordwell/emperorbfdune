@@ -29,6 +29,10 @@ Scenarios:
 
 ## Tier 3: External reference oracle pipeline
 
+Runtime parity test:
+
+- `tests/campaign/tok/TokReferenceRuntimeOracle.test.ts`
+
 Tools:
 
 - `tools/oracles/normalize-reference-jsonl.mjs`
@@ -37,12 +41,14 @@ Tools:
 - `tools/oracles/extract-reference-log-lines.mjs`
 - `tools/oracles/merge-reference-jsonl.mjs`
 - `tools/oracles/validate-reference-jsonl.mjs`
+- `tools/oracles/check-capture-progress.mjs`
 
 Purpose:
 
 - Ingest original-game traces
 - Normalize to mission-oracle schema
 - Diff against internal oracle with first-diff artifact output
+- Replay current interpreter against external checkpoint captures
 - Enforce optional strict gates: required reference file, full mission-set match, and coverage thresholds
 
 ## Tier 4: ECS simulation-hash oracle
