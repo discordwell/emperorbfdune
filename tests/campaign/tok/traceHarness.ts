@@ -22,6 +22,19 @@ export interface TokTraceFrame {
   nextSideId: number;
   relationships: Array<{ a: number; b: number; rel: string }>;
   eventFlags: string[];
+  dispatch: {
+    airStrikes: Array<{ strikeId: number; units: number[]; targetX: number; targetZ: number }>;
+    tooltipMap: Array<{ entity: number; tooltipId: number }>;
+    sideColors: Array<{ side: number; color: number }>;
+    typeThreatLevels: Array<{ typeName: string; level: number }>;
+    lastCameraTick: number;
+    mainCameraTrackEid: number;
+    pipCameraTrackEid: number;
+    mainCameraSpin: { active: boolean; speed: number; direction: number };
+    pipCameraSpin: { active: boolean; speed: number; direction: number };
+    mainCameraStored: { x: number; z: number; zoom: number; rotation: number } | null;
+    pipCameraStored: { x: number; z: number; zoom: number; rotation: number } | null;
+  };
 }
 
 interface ObjIdNormalizer {
@@ -134,6 +147,44 @@ function snapshot(
       .filter((key) => state.eventFlags[key])
       .map((key) => normalizeEventFlagKey(key, normalizer))
       .sort((a, b) => a.localeCompare(b)),
+    dispatch: {
+      airStrikes: [...(state.dispatchState?.airStrikes ?? [])]
+        .map((strike) => ({
+          strikeId: strike.strikeId,
+          units: strike.units.map((rawId) => normalizeObjId(rawId, normalizer)),
+          targetX: strike.targetX,
+          targetZ: strike.targetZ,
+        }))
+        .sort((a, b) => a.strikeId - b.strikeId),
+      tooltipMap: [...(state.dispatchState?.tooltipMap ?? [])]
+        .map((entry) => ({
+          entity: normalizeObjId(entry.entity, normalizer),
+          tooltipId: entry.tooltipId,
+        }))
+        .sort((a, b) => {
+          if (a.entity !== b.entity) return a.entity - b.entity;
+          return a.tooltipId - b.tooltipId;
+        }),
+      sideColors: [...(state.dispatchState?.sideColors ?? [])]
+        .sort((a, b) => a.side - b.side),
+      typeThreatLevels: [...(state.dispatchState?.typeThreatLevels ?? [])]
+        .sort((a, b) => a.typeName.localeCompare(b.typeName)),
+      lastCameraTick: state.dispatchState?.lastCameraTick ?? -1,
+      mainCameraTrackEid: normalizeObjId(state.dispatchState?.mainCameraTrackEid ?? -1, normalizer),
+      pipCameraTrackEid: normalizeObjId(state.dispatchState?.pipCameraTrackEid ?? -1, normalizer),
+      mainCameraSpin: state.dispatchState?.mainCameraSpin
+        ? { ...state.dispatchState.mainCameraSpin }
+        : { active: false, speed: 0, direction: 1 },
+      pipCameraSpin: state.dispatchState?.pipCameraSpin
+        ? { ...state.dispatchState.pipCameraSpin }
+        : { active: false, speed: 0, direction: 1 },
+      mainCameraStored: state.dispatchState?.mainCameraStored
+        ? { ...state.dispatchState.mainCameraStored }
+        : null,
+      pipCameraStored: state.dispatchState?.pipCameraStored
+        ? { ...state.dispatchState.pipCameraStored }
+        : null,
+    },
   };
 }
 

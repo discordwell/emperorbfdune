@@ -34,6 +34,10 @@ function buildTokBuffer(segments: number[][]): ArrayBuffer {
   return out.buffer;
 }
 
+function encodeIntLiteral(value: number): number[] {
+  return Array.from(String(value), (ch) => ch.charCodeAt(0));
+}
+
 function countUnitsForSide(ctx: MockCtx, side: number): number {
   let count = 0;
   const world = ctx.game.getWorld();
@@ -210,6 +214,136 @@ describe('TokInterpreter integration', () => {
     b.dispose();
   });
 
+  it('restores non-combat dispatch runtime state (tooltip/color/camera)', () => {
+    const ctx = createMockCtx();
+    const tokBuffer = readTok('ATP1D1FRFail');
+    const tracked = spawnMockUnit(ctx, 'CubScout', 0, 16, 18);
+    const lit = (value: number): TokExpr => ({ kind: 'literal', value });
+
+    const a = new TokInterpreter();
+    a.init(ctx, tokBuffer, 'ATP1D1FRFail');
+
+    const dispatchA = (a as any).functions;
+    const evaluatorA = (a as any).evaluator;
+
+    dispatchA.call(FUNC.ObjectToolTip, [lit(tracked), lit(91)], ctx, evaluatorA, 0);
+    dispatchA.call(FUNC.SetSideColor, [lit(3), lit(0x33)], ctx, evaluatorA, 0);
+    dispatchA.call(FUNC.CameraTrackObject, [lit(tracked)], ctx, evaluatorA, 0);
+    dispatchA.call(FUNC.CameraStartRotate, [lit(6), lit(2)], ctx, evaluatorA, 0);
+
+    const identity = buildIdentityEntityMap(ctx);
+    const saved = a.serialize(identity);
+    const before = saved.tokState?.dispatchState;
+    expect(before).toBeDefined();
+    expect(before?.mainCameraTrackEid).toBe(tracked);
+    expect(before?.mainCameraSpin.active).toBe(true);
+    expect(before?.mainCameraSpin.direction).toBe(-1);
+    expect(before?.tooltipMap).toContainEqual({ entity: tracked, tooltipId: 91 });
+    expect(before?.sideColors).toContainEqual({ side: 3, color: 0x33 });
+    a.dispose();
+
+    const b = new TokInterpreter();
+    b.init(ctx, tokBuffer, 'ATP1D1FRFail');
+    b.restore(saved, identity);
+
+    const after = b.serialize(identity).tokState?.dispatchState;
+    expect(after).toBeDefined();
+    expect(after?.mainCameraTrackEid).toBe(tracked);
+    expect(after?.mainCameraSpin.active).toBe(true);
+    expect(after?.mainCameraSpin.direction).toBe(-1);
+    expect(after?.tooltipMap).toContainEqual({ entity: tracked, tooltipId: 91 });
+    expect(after?.sideColors).toContainEqual({ side: 3, color: 0x33 });
+
+    const dispatchB = (b as any).functions;
+    const evaluatorB = (b as any).evaluator;
+    expect(dispatchB.call(FUNC.CameraIsSpinning, [], ctx, evaluatorB, 1)).toBe(1);
+
+    b.dispose();
+  });
+
+  it('re-initializing the same interpreter instance clears prior dispatch state', () => {
+    const ctx = createMockCtx();
+    const tokBuffer = readTok('ATP1D1FRFail');
+    const table = buildStringTable(ctx.typeRegistry);
+    const strikeType = table.indexOf('ATOrni');
+    expect(strikeType).toBeGreaterThanOrEqual(0);
+
+    const lit = (value: number): TokExpr => ({ kind: 'literal', value });
+    const strikePos: TokExpr = {
+      kind: 'callExpr',
+      funcId: FUNC.SetTilePos,
+      args: [lit(12), lit(12)],
+    };
+
+    const interpreter = new TokInterpreter();
+    interpreter.init(ctx, tokBuffer, 'ATP1D1FRFail');
+
+    const dispatchA = (interpreter as any).functions;
+    const evaluatorA = (interpreter as any).evaluator;
+    dispatchA.call(FUNC.AirStrike, [
+      lit(7),
+      strikePos,
+      lit(0),
+      lit(strikeType),
+      lit(strikeType),
+    ], ctx, evaluatorA, 0);
+    expect(dispatchA.call(FUNC.AirStrikeDone, [lit(7)], ctx, evaluatorA, 0)).toBe(0);
+    interpreter.dispose();
+
+    interpreter.init(ctx, tokBuffer, 'ATP1D1FRFail');
+    const dispatchB = (interpreter as any).functions;
+    const evaluatorB = (interpreter as any).evaluator;
+
+    // After re-init there should be no stale strike state.
+    expect(dispatchB.call(FUNC.AirStrikeDone, [lit(7)], ctx, evaluatorB, 0)).toBe(1);
+    interpreter.dispose();
+  });
+
+  it('re-initializing the same interpreter instance resets evaluator side state', () => {
+    const ctx = createMockCtx();
+    const tokBuffer = readTok('ATP1D1FR');
+    const interpreter = new TokInterpreter();
+
+    interpreter.init(ctx, tokBuffer, 'ATP1D1FR');
+    interpreter.tick(ctx, 0);
+    const first = interpreter.serialize(new Map()).tokState!;
+    expect(first.intVars[1]).toBe(2);
+    expect(first.intVars[2]).toBe(3);
+    expect(first.intVars[3]).toBe(4);
+    interpreter.dispose();
+
+    interpreter.init(ctx, tokBuffer, 'ATP1D1FR');
+    interpreter.tick(ctx, 0);
+    const second = interpreter.serialize(new Map()).tokState!;
+    expect(second.intVars[1]).toBe(2);
+    expect(second.intVars[2]).toBe(3);
+    expect(second.intVars[3]).toBe(4);
+    interpreter.dispose();
+  });
+
+  it('does not leak EventBus listeners across re-init/dispose cycles', () => {
+    const ctx = createMockCtx();
+    const tokBuffer = readTok('ATP1D1FRFail');
+    const interpreter = new TokInterpreter();
+    const listeners = (EventBus as any).listeners as Map<string, Set<unknown>>;
+
+    interpreter.init(ctx, tokBuffer, 'ATP1D1FRFail');
+    expect(listeners.get('unit:attacked')?.size ?? 0).toBe(1);
+    expect(listeners.get('unit:died')?.size ?? 0).toBe(1);
+    expect(listeners.get('building:completed')?.size ?? 0).toBe(1);
+
+    // Re-init should internally dispose and re-register exactly one listener per event.
+    interpreter.init(ctx, tokBuffer, 'ATP1D1FRFail');
+    expect(listeners.get('unit:attacked')?.size ?? 0).toBe(1);
+    expect(listeners.get('unit:died')?.size ?? 0).toBe(1);
+    expect(listeners.get('building:completed')?.size ?? 0).toBe(1);
+
+    interpreter.dispose();
+    expect(listeners.get('unit:attacked')?.size ?? 0).toBe(0);
+    expect(listeners.get('unit:died')?.size ?? 0).toBe(0);
+    expect(listeners.get('building:completed')?.size ?? 0).toBe(0);
+  });
+
   it('records EventSideAttacksSide from unit:attacked events', () => {
     const ctx = createMockCtx();
 
@@ -235,6 +369,40 @@ describe('TokInterpreter integration', () => {
 
     const attacker = spawnMockUnit(ctx, 'CubScout', 0, 10, 10);
     const target = spawnMockUnit(ctx, 'CubScout', 1, 12, 12);
+
+    EventBus.emit('unit:attacked', { attackerEid: attacker, targetEid: target });
+    interpreter.tick(ctx, 0);
+
+    const state = interpreter.serialize(new Map()).tokState!;
+    expect(state.intVars[1]).toBe(1);
+
+    interpreter.dispose();
+  });
+
+  it('records EventObjectAttacksSide from unit:attacked events', () => {
+    const ctx = createMockCtx();
+    const attacker = spawnMockUnit(ctx, 'CubScout', 0, 10, 10);
+    const target = spawnMockUnit(ctx, 'CubScout', 1, 12, 12);
+
+    const script = buildTokBuffer([
+      [0x80, 162, 0x28, 0x81, 0x81, 0x29], // int(v1)
+      [
+        0x80, 165, 0x28,                   // if (
+        0x80, 0xab, 0x80, 0x28,            // EventObjectAttacksSide(
+        ...encodeIntLiteral(attacker),     // attacker eid literal
+        0x2c,                               // ,
+        0x80, 0x90, 0x80, 0x28, 0x29,      // GetEnemySide()
+        0x29,                               // )
+        0x80, 0xa8,                         // ==
+        0x80, 0xb1,                         // TRUE
+        0x29,                               // )
+      ],
+      [0x81, 0x81, 0x80, 0xb4, 0x80, 0xb1], // v1 = TRUE
+      [0x80, 167],                           // endif
+    ]);
+
+    const interpreter = new TokInterpreter();
+    interpreter.init(ctx, script, 'event_object_attack_test');
 
     EventBus.emit('unit:attacked', { attackerEid: attacker, targetEid: target });
     interpreter.tick(ctx, 0);

@@ -76,5 +76,10 @@ describe('Tok function coverage', () => {
 
     const frequentStubbed = rows.filter((r) => r.uses >= 10 && r.status === 'stubbed');
     expect(frequentStubbed).toEqual([]);
+
+    // 1:1 goal guard: every declared FUNC must have explicit dispatch coverage,
+    // not only the frequently-used campaign subset.
+    const anyStubbed = rows.filter((r) => r.status === 'stubbed');
+    expect(anyStubbed).toEqual([]);
   });
 });

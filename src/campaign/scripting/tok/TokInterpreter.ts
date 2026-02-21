@@ -26,10 +26,19 @@ export class TokInterpreter {
   private functions = new TokFunctionDispatch();
   private initialized = false;
   private scriptId = '';
-  private eventListeners: Array<{ event: string; callback: (data: any) => void }> = [];
+  private ctx: GameContext | null = null;
+  private eventListeners: Array<() => void> = [];
 
   init(ctx: GameContext, tokBuffer: ArrayBuffer, scriptId: string): void {
+    if (this.initialized || this.eventListeners.length > 0) {
+      this.dispose();
+    }
+
+    // Always start from a clean VM/runtime state for each mission load.
+    this.evaluator = new TokEvaluator();
+    this.functions = new TokFunctionDispatch();
     this.scriptId = scriptId;
+    this.ctx = ctx;
 
     // Build string table from type registry
     const stringTable = buildStringTable(ctx.typeRegistry);
@@ -93,7 +102,9 @@ export class TokInterpreter {
   restore(state: MissionScriptState, indexToEid: Map<number, number>): void {
     if (state.tokState) {
       this.evaluator.restore(state.tokState, indexToEid);
-      this.functions.restore(state.tokState.dispatchState, indexToEid);
+      if (this.ctx) {
+        this.functions.restore(state.tokState.dispatchState, indexToEid, this.ctx);
+      }
     }
   }
 
@@ -103,13 +114,14 @@ export class TokInterpreter {
   }
 
   dispose(): void {
-    for (const { event, callback } of this.eventListeners) {
-      EventBus.off(event as any, callback);
+    for (const off of this.eventListeners) {
+      off();
     }
     this.eventListeners = [];
     this.initialized = false;
     this.program = [];
     this.scriptId = '';
+    this.ctx = null;
   }
 
   private registerEventListeners(ctx: GameContext): void {
@@ -130,7 +142,7 @@ export class TokInterpreter {
       }
     };
     EventBus.on('unit:died', onDied);
-    this.eventListeners.push({ event: 'unit:died', callback: onDied });
+    this.eventListeners.push(() => EventBus.off('unit:died', onDied));
 
     // Track attacks for EventSideAttacksSide
     const onAttack = (data: { attackerEid: number; targetEid: number }) => {
@@ -145,7 +157,7 @@ export class TokInterpreter {
       }
     };
     EventBus.on('unit:attacked', onAttack);
-    this.eventListeners.push({ event: 'unit:attacked', callback: onAttack });
+    this.eventListeners.push(() => EventBus.off('unit:attacked', onAttack));
 
     // Track building construction for EventObjectConstructed
     const onBuilt = (data: { entityId: number; playerId: number; typeName?: string }) => {
@@ -155,6 +167,6 @@ export class TokInterpreter {
       }
     };
     EventBus.on('building:completed', onBuilt);
-    this.eventListeners.push({ event: 'building:completed', callback: onBuilt });
+    this.eventListeners.push(() => EventBus.off('building:completed', onBuilt));
   }
 }

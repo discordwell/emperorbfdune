@@ -75,7 +75,7 @@ export class TokFunctionDispatch {
     };
   }
 
-  restore(state: TokDispatchSaveState | undefined, indexToEid: Map<number, number>): void {
+  restore(state: TokDispatchSaveState | undefined, indexToEid: Map<number, number>, ctx: GameContext): void {
     const mapEntity = (idx: number): number =>
       idx >= 0 ? (indexToEid.get(idx) ?? -1) : -1;
 
@@ -114,6 +114,14 @@ export class TokFunctionDispatch {
 
     for (const entry of state.typeThreatLevels ?? []) {
       this.typeThreatLevels.set(entry.typeName, entry.level);
+      const unitDef = ctx.gameRules.units.get(entry.typeName);
+      if (unitDef) {
+        (unitDef as any).aiThreat = entry.level;
+      }
+      const buildingDef = ctx.gameRules.buildings.get(entry.typeName);
+      if (buildingDef) {
+        (buildingDef as any).aiThreat = entry.level;
+      }
     }
 
     this.lastCameraTick = typeof state.lastCameraTick === 'number' ? state.lastCameraTick : -1;
