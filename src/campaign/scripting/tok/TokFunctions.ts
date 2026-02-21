@@ -20,7 +20,7 @@ import {
 import { getCampaignString } from '../../CampaignData';
 import { EventBus } from '../../../core/EventBus';
 import { simRng } from '../../../utils/DeterministicRNG';
-import { TILE_SIZE, worldToTile } from '../../../utils/MathUtils';
+import { TILE_SIZE, tileToWorld, worldToTile } from '../../../utils/MathUtils';
 
 export class TokFunctionDispatch {
   private stringTable: string[] = [];
@@ -28,6 +28,10 @@ export class TokFunctionDispatch {
   private airStrikes = new Map<number, { units: number[]; targetX: number; targetZ: number }>();
   // Tooltip storage (cosmetic, no UI hook yet)
   private tooltipMap = new Map<number, number>();
+  // Script-assigned side color overrides.
+  private sideColors = new Map<number, number>();
+  // Script-assigned threat levels by type name.
+  private typeThreatLevels = new Map<string, number>();
 
   setStringTable(table: string[]): void {
     this.stringTable = table;
@@ -615,8 +619,32 @@ export class TokFunctionDispatch {
         return 0;
       }
 
-      case FUNC.SideAIEnterBuilding:
-        return 0;
+      case FUNC.SideAIEnterBuilding: {
+        const side = asInt(args[0]);
+        const targetEid = asInt(args[1]);
+        const w = ctx.game.getWorld();
+        if (targetEid < 0 || !hasComponent(w, Position, targetEid)) return 0;
+        const tx = Position.x[targetEid];
+        const tz = Position.z[targetEid];
+        const enterRadiusSq = 12 * 12;
+        let enteredCount = 0;
+
+        for (const eid of unitQuery(w)) {
+          if (Owner.playerId[eid] !== side || Health.current[eid] <= 0) continue;
+          const dx = Position.x[eid] - tx;
+          const dz = Position.z[eid] - tz;
+          if (dx * dx + dz * dz <= enterRadiusSq) {
+            Health.current[eid] = 0;
+            EventBus.emit('unit:died', { entityId: eid, killerEntity: -1 });
+            enteredCount++;
+          } else {
+            MoveTarget.x[eid] = tx;
+            MoveTarget.z[eid] = tz;
+            MoveTarget.active[eid] = 1;
+          }
+        }
+        return enteredCount;
+      }
 
       // -------------------------------------------------------------------
       // Dialog / Messages
@@ -1037,7 +1065,11 @@ export class TokFunctionDispatch {
       }
 
       case FUNC.SetSideColor:
+        this.sideColors.set(asInt(args[0]), asInt(args[1]));
+        return 0;
+
       case FUNC.GetSideColor:
+        return this.sideColors.get(asInt(args[0])) ?? 0;
         return 0;
 
       case FUNC.PlaySound: {
@@ -1046,9 +1078,15 @@ export class TokFunctionDispatch {
       }
 
       case FUNC.FreezeGame:
-      case FUNC.UnFreezeGame:
       case FUNC.DisableUI:
+        this.setScriptUiEnabled(ctx, false);
+        return 0;
+
+      case FUNC.UnFreezeGame:
       case FUNC.EnableUI:
+        this.setScriptUiEnabled(ctx, true);
+        return 0;
+
       case FUNC.BreakPoint:
         return 0;
 
@@ -1073,9 +1111,27 @@ export class TokFunctionDispatch {
         return 0;
       }
 
-      case FUNC.SetThreatLevel:
-      case FUNC.SetTilePos:
+      case FUNC.SetThreatLevel: {
+        const typeName = this.resolveString(asInt(args[0]));
+        const level = asInt(args[1]);
+        this.typeThreatLevels.set(typeName, level);
+
+        const unitDef = ctx.gameRules.units.get(typeName);
+        if (unitDef) {
+          (unitDef as any).aiThreat = level;
+        }
+        const buildingDef = ctx.gameRules.buildings.get(typeName);
+        if (buildingDef) {
+          (buildingDef as any).aiThreat = level;
+        }
         return 0;
+      }
+
+      case FUNC.SetTilePos: {
+        const tx = asInt(args[0]);
+        const tz = asInt(args[1]);
+        return tileToWorld(tx, tz);
+      }
 
       default: {
         const name = FUNC_NAMES[funcId] ?? `Func_${funcId}`;
@@ -1100,6 +1156,21 @@ export class TokFunctionDispatch {
     Health.current[eid] = 0;
     EventBus.emit('unit:died', { entityId: eid, killerEntity: -1 });
     return this.spawnObject(ctx, typeName, side, x, z);
+  }
+
+  private setScriptUiEnabled(ctx: GameContext, enabled: boolean): void {
+    const input = ctx.input as any;
+    if (typeof input?.setEnabled === 'function') input.setEnabled(enabled);
+
+    const selectionManager = ctx.selectionManager as any;
+    if (typeof selectionManager?.setEnabled === 'function') {
+      selectionManager.setEnabled(enabled);
+    }
+
+    const commandManager = ctx.commandManager as any;
+    if (typeof commandManager?.setEnabled === 'function') {
+      commandManager.setEnabled(enabled);
+    }
   }
 
   private spawnDeliveryObjects(

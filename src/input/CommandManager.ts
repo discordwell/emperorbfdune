@@ -14,6 +14,7 @@ export class CommandManager {
   private sceneManager: SceneManager;
   private selectionManager: SelectionManager;
   private unitRenderer: UnitRenderer;
+  private enabled = true;
   private audioManager: AudioManager | null = null;
   private combatSystem: CombatSystem | null = null;
   private world: any = null;
@@ -57,6 +58,16 @@ export class CommandManager {
 
   setUnitClassifier(fn: (eid: number) => UnitCategory): void {
     this.unitClassifier = fn;
+  }
+
+  setEnabled(enabled: boolean): void {
+    this.enabled = enabled;
+    if (!enabled) {
+      this.commandMode = 'normal';
+      document.body.style.cursor = 'default';
+      const modeEl = document.getElementById('command-mode');
+      if (modeEl) modeEl.style.display = 'none';
+    }
   }
 
   private getSelectedCategory(entityIds: number[]): UnitCategory {
@@ -142,6 +153,7 @@ export class CommandManager {
   }
 
   private onMouseUp = (e: MouseEvent): void => {
+    if (!this.enabled) return;
     if (e.button !== 2) return; // Right-click only
     if (this.isOverUI(e.clientX, e.clientY)) return; // Ignore clicks on UI
 
@@ -232,6 +244,7 @@ export class CommandManager {
   };
 
   private onKeyDown = (e: KeyboardEvent): void => {
+    if (!this.enabled) return;
     // Don't capture keys when typing in text inputs
     const tag = document.activeElement?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA') return;

@@ -179,6 +179,19 @@ describe('TokFunctionDispatch', () => {
       expect(MoveTarget.z[mover]).toBe(30);
       expect(ctx.combatSystem.setAttackMove).toHaveBeenCalled();
     });
+
+    it('handles SideAIEnterBuilding by consuming nearby units', () => {
+      const target = spawnMockBuilding(ctx, 'FRCamp', 0, 20, 20);
+      const near = spawnMockUnit(ctx, 'CubScout', 6, 22, 21);
+      const far = spawnMockUnit(ctx, 'CubScout', 6, 80, 80);
+
+      const entered = call(FUNC.SideAIEnterBuilding, [lit(6), lit(target)]);
+      expect(entered).toBe(1);
+      expect(Health.current[near]).toBe(0);
+      expect(MoveTarget.active[far]).toBe(1);
+      expect(MoveTarget.x[far]).toBe(20);
+      expect(MoveTarget.z[far]).toBe(20);
+    });
   });
 
   describe('events', () => {
@@ -249,6 +262,43 @@ describe('TokFunctionDispatch', () => {
     it('reveals the full map via RemoveMapShroud', () => {
       call(FUNC.RemoveMapShroud, []);
       expect(ctx.fogOfWar.revealWorldArea).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('misc script helpers', () => {
+    it('tracks side colors and returns them', () => {
+      call(FUNC.SetSideColor, [lit(3), lit(7)]);
+      expect(call(FUNC.GetSideColor, [lit(3)])).toBe(7);
+      expect(call(FUNC.GetSideColor, [lit(2)])).toBe(0);
+    });
+
+    it('updates threat level for type definitions', () => {
+      const typeIdx = indexOfType('ATRepairUnit');
+      call(FUNC.SetThreatLevel, [lit(typeIdx), lit(80)]);
+      const def = ctx.gameRules.units.get('ATRepairUnit') as any;
+      expect(def.aiThreat).toBe(80);
+    });
+
+    it('converts tile coordinates to world positions with SetTilePos', () => {
+      const pos = dispatch.call(FUNC.SetTilePos, [lit(207), lit(108)], ctx, ev, 0) as { x: number; z: number };
+      expect(pos).toEqual({ x: 414, z: 216 });
+    });
+
+    it('toggles player interaction for freeze/ui script calls', () => {
+      call(FUNC.DisableUI, []);
+      expect((ctx.input as any).setEnabled).toHaveBeenCalledWith(false);
+      expect((ctx.selectionManager as any).setEnabled).toHaveBeenCalledWith(false);
+      expect((ctx.commandManager as any).setEnabled).toHaveBeenCalledWith(false);
+
+      call(FUNC.EnableUI, []);
+      expect((ctx.input as any).setEnabled).toHaveBeenCalledWith(true);
+      expect((ctx.selectionManager as any).setEnabled).toHaveBeenCalledWith(true);
+      expect((ctx.commandManager as any).setEnabled).toHaveBeenCalledWith(true);
+
+      call(FUNC.FreezeGame, []);
+      expect((ctx.input as any).setEnabled).toHaveBeenCalledWith(false);
+      call(FUNC.UnFreezeGame, []);
+      expect((ctx.input as any).setEnabled).toHaveBeenCalledWith(true);
     });
   });
 

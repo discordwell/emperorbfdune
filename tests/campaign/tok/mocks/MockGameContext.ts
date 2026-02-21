@@ -124,11 +124,17 @@ export function createMockCtx(): MockCtx {
       getMapHeight: () => 64,
       getTerrainType: () => 0,
     },
-    input: {},
+    input: {
+      setEnabled: vi.fn(),
+    },
     modelManager: {},
     unitRenderer: {},
-    selectionManager: {},
-    commandManager: {},
+    selectionManager: {
+      setEnabled: vi.fn(),
+    },
+    commandManager: {
+      setEnabled: vi.fn(),
+    },
     pathfinder: {},
     asyncPathfinder: {},
     movement: {},

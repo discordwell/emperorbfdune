@@ -9,6 +9,7 @@ const ROTATE_SPEED = 0.04;
 
 export class InputManager implements GameSystem {
   private sceneManager: SceneManager;
+  private enabled = true;
   private keys = new Set<string>();
   private scrollSpeedMultiplier = 1.0;
   private mouseX = 0;
@@ -40,7 +41,20 @@ export class InputManager implements GameSystem {
     this.scrollSpeedMultiplier = Math.max(0.25, Math.min(2.0, multiplier));
   }
 
+  setEnabled(enabled: boolean): void {
+    this.enabled = enabled;
+    if (!enabled) {
+      this.keys.clear();
+      this.mouseDown = false;
+      this.rightMouseDown = false;
+      this.middleMouseDown = false;
+      this.middleDragPrev = null;
+      this.dragStart = null;
+    }
+  }
+
   update(_world: World, _dt: number): void {
+    if (!this.enabled) return;
     let dx = 0;
     let dz = 0;
     const wasdSpeed = 2.0 * this.scrollSpeedMultiplier;
@@ -101,14 +115,17 @@ export class InputManager implements GameSystem {
   }
 
   private onKeyDown = (e: KeyboardEvent): void => {
+    if (!this.enabled) return;
     this.keys.add(e.key.toLowerCase());
   };
 
   private onKeyUp = (e: KeyboardEvent): void => {
+    if (!this.enabled) return;
     this.keys.delete(e.key.toLowerCase());
   };
 
   private onMouseMove = (e: MouseEvent): void => {
+    if (!this.enabled) return;
     this.mouseX = e.clientX;
     this.mouseY = e.clientY;
 
@@ -129,6 +146,7 @@ export class InputManager implements GameSystem {
   };
 
   private onMouseDown = (e: MouseEvent): void => {
+    if (!this.enabled) return;
     if (e.button === 0) {
       this.mouseDown = true;
       this.dragStart = { x: e.clientX, y: e.clientY };
@@ -142,6 +160,7 @@ export class InputManager implements GameSystem {
   };
 
   private onMouseUp = (e: MouseEvent): void => {
+    if (!this.enabled) return;
     if (e.button === 0) {
       this.mouseDown = false;
       this.dragStart = null;
@@ -155,12 +174,14 @@ export class InputManager implements GameSystem {
   };
 
   private onWheel = (e: WheelEvent): void => {
+    if (!this.enabled) return;
     e.preventDefault();
     const delta = e.deltaY > 0 ? ZOOM_SPEED : -ZOOM_SPEED;
     this.sceneManager.zoom(delta);
   };
 
   private onContextMenu = (e: Event): void => {
+    if (!this.enabled) return;
     e.preventDefault();
   };
 

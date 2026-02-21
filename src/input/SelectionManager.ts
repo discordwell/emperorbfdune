@@ -8,6 +8,7 @@ import { EventBus } from '../core/EventBus';
 export class SelectionManager {
   private sceneManager: SceneManager;
   private unitRenderer: UnitRenderer;
+  private enabled = true;
   private selectedEntities: number[] = [];
   private lastIdleIndex = 0; // For Tab cycling
 
@@ -75,6 +76,14 @@ export class SelectionManager {
     this.controlGroups = groups;
   }
 
+  setEnabled(enabled: boolean): void {
+    this.enabled = enabled;
+    if (!enabled) {
+      this.isDragging = false;
+      this.dragBox.style.display = 'none';
+    }
+  }
+
   clearSelection(world: World): void {
     for (const eid of this.selectedEntities) {
       Selectable.selected[eid] = 0;
@@ -97,6 +106,7 @@ export class SelectionManager {
   }
 
   private onMouseDown = (e: MouseEvent): void => {
+    if (!this.enabled) return;
     if (e.button !== 0) return;
     // Ignore clicks on UI
     if (this.isOverUI(e.clientX, e.clientY)) return;
@@ -109,6 +119,7 @@ export class SelectionManager {
   };
 
   private onMouseMove = (e: MouseEvent): void => {
+    if (!this.enabled) return;
     if (!this.isDragging) return;
     this.dragEnd.x = e.clientX;
     this.dragEnd.y = e.clientY;
@@ -126,6 +137,7 @@ export class SelectionManager {
   };
 
   private onMouseUp = (e: MouseEvent): void => {
+    if (!this.enabled) return;
     if (e.button !== 0 || !this.isDragging) return;
     this.isDragging = false;
     this.dragBox.style.display = 'none';
@@ -233,6 +245,7 @@ export class SelectionManager {
   }
 
   private onKeyDown = (e: KeyboardEvent): void => {
+    if (!this.enabled) return;
     // Don't capture keys when typing in text inputs
     const tag = document.activeElement?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA') return;
