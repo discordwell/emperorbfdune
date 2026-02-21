@@ -130,37 +130,34 @@ export class VoiceManager {
 
   /**
    * Build the unit type -> soundId mapping.
-   * Called after rules are parsed. Uses the hardcoded SOUND_ID_MAP
-   * since the SoundID properties are commented out in rules.txt.
+   * Called after rules are parsed. Tries rules.txt parsed soundFile values first,
+   * falls back to hardcoded SOUND_ID_MAP (since SoundID is commented out in vanilla rules.txt).
    */
   init(rules: GameRules): void {
-    // Build reverse map: for each soundId -> unitTypeName entry,
-    // store the primary unit name (skip variant duplicates for the mapping)
-    const primaryUnits = new Map<string, number>();
-
-    for (const [soundId, unitName] of Object.entries(SOUND_ID_MAP)) {
-      const id = Number(soundId);
-      // Strip trailing digit suffixes for variant matching (e.g. ATSonicTank2 -> ATSonicTank)
-      const baseName = unitName.replace(/\d+$/, '');
-
-      // Check if this exact unit name exists in rules
-      if (rules.units.has(unitName)) {
-        this.unitSoundIds.set(unitName, id);
-      }
-      // Also try the base name (without variant suffix)
-      if (baseName !== unitName && rules.units.has(baseName)) {
-        // Only set if not already mapped
-        if (!this.unitSoundIds.has(baseName)) {
-          this.unitSoundIds.set(baseName, id);
-        }
+    // First, try to build from rules.txt parsed soundFile values
+    for (const [unitName, def] of rules.units) {
+      if (def.soundFile >= 0) {
+        this.unitSoundIds.set(unitName, def.soundFile);
       }
     }
 
-    // Also add primary mappings from the canonical list
-    for (const [soundId, unitName] of Object.entries(SOUND_ID_MAP)) {
-      const id = Number(soundId);
-      if (rules.units.has(unitName) && !primaryUnits.has(unitName)) {
-        primaryUnits.set(unitName, id);
+    // If no soundFile values found (all commented out), fall back to hardcoded map
+    if (this.unitSoundIds.size === 0) {
+      for (const [soundId, unitName] of Object.entries(SOUND_ID_MAP)) {
+        const id = Number(soundId);
+        // Strip trailing digit suffixes for variant matching (e.g. ATSonicTank2 -> ATSonicTank)
+        const baseName = unitName.replace(/\d+$/, '');
+
+        // Check if this exact unit name exists in rules
+        if (rules.units.has(unitName)) {
+          this.unitSoundIds.set(unitName, id);
+        }
+        // Also try the base name (without variant suffix)
+        if (baseName !== unitName && rules.units.has(baseName)) {
+          if (!this.unitSoundIds.has(baseName)) {
+            this.unitSoundIds.set(baseName, id);
+          }
+        }
       }
     }
 

@@ -88,6 +88,12 @@ export interface UnitDef {
   // Audio
   soundFile: number; // SoundID for voice lines (-1 = none)
 
+  // Superweapon flags
+  deathHand: boolean; // DeathHand missile unit
+  hawkWeapon: boolean; // Hawk airstrike unit
+  beamWeapon: boolean; // Chaos Lightning beam unit
+  resource: string; // Resource field (bullet/FX name for superweapons)
+
   // Production
   upgradedPrimaryRequired: boolean; // Requires primary building to be upgraded
 
@@ -156,6 +162,10 @@ export function createDefaultUnitDef(name: string): UnitDef {
     aiThreat: 0,
     veterancy: [],
     soundFile: -1,
+    deathHand: false,
+    hawkWeapon: false,
+    beamWeapon: false,
+    resource: '',
     shieldHealth: 0,
     canSelfRepair: false,
     canSelfRepairShield: false,

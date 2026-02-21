@@ -7,6 +7,7 @@ import {
   type World,
 } from '../core/ECS';
 import { worldToTile, TILE_SIZE } from '../utils/MathUtils';
+import { GameConstants } from '../utils/Constants';
 
 // Visibility states
 export const FOG_UNEXPLORED = 0;
@@ -188,7 +189,7 @@ export class FogOfWar {
     for (const eid of units) {
       if (Owner.playerId[eid] !== this.localPlayerId) continue;
       if (Health.current[eid] <= 0) continue;
-      const range = ViewRange.range[eid] || 10; // Default 5 tiles * 2
+      const range = ViewRange.range[eid] || GameConstants.DEFAULT_UNIT_VIEW_RANGE;
       const tile = worldToTile(Position.x[eid], Position.z[eid]);
       this.revealArea(tile.tx, tile.tz, Math.ceil(range / TILE_SIZE));
     }
@@ -197,7 +198,7 @@ export class FogOfWar {
     for (const eid of buildings) {
       if (Owner.playerId[eid] !== this.localPlayerId) continue;
       if (Health.current[eid] <= 0) continue;
-      const range = ViewRange.range[eid] || 20; // Default 10 tiles * 2
+      const range = ViewRange.range[eid] || GameConstants.DEFAULT_BUILDING_VIEW_RANGE;
       const tile = worldToTile(Position.x[eid], Position.z[eid]);
       this.revealArea(tile.tx, tile.tz, Math.ceil(range / TILE_SIZE));
     }

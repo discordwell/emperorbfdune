@@ -51,6 +51,38 @@ export const GameConstants = {
   EASY_BUILD_TIME: 75,
   NORMAL_BUILD_TIME: 100,
   HARD_BUILD_TIME: 125,
+  // Combat
+  SANDSTORM_DAMAGE_MULT: 0.7,
+  INF_ROCK_DAMAGE_MULT: 1.5, // derived: 1 + InfDamageRangeBonus/100
+  DAMAGE_DEGRADATION_MIN: 0.5,
+  VET_DAMAGE_FALLBACK: [1.0, 1.15, 1.30, 1.50] as number[],
+  VET_DEFENSE_FALLBACK: [1.0, 0.9, 0.8, 0.7] as number[],
+  SUPPRESSION_CHANCE: 0.2,
+  SUPPRESSION_SPEED_MULT: 0.5,
+  STEALTHED_DETECT_RANGE: 4,
+  // Sandworm
+  THUMPER_DURATION: 500,
+  WORM_ROAM_SPEED: 0.3,
+  WORM_HUNT_SPEED: 0.6,
+  WORM_MOUNTED_SPEED: 0.8,
+  WORM_EMERGE_TICKS: 25,
+  WORM_MOUNTED_MIN_LIFE: 1500,
+  WORM_HARVESTER_ATTRACTION: 0.5,
+  WORM_TASTY_ATTRACTION: 0.3,
+  WORM_SPICE_DESTROY_RATE: 0.1,
+  MIN_WORM_RIDE_WAIT: 100,
+  MAX_WORM_RIDE_WAIT: 2000,
+  WORM_RIDER_LIFESPAN: 1000,
+  // Abilities
+  STEALTH_DELAY_AFTER_FIRING: 10,
+  HAWK_STRIKE_DURATION: 500,
+  LIGHTNING_DURATION: 300,
+  // Fog
+  DEFAULT_UNIT_VIEW_RANGE: 10,
+  DEFAULT_BUILDING_VIEW_RANGE: 20,
+  // Campaign
+  CAMPAIGN_ATTACK_MONEY: 5000,
+  CAMPAIGN_DEFEND_MONEY: 2500,
 };
 
 export function loadConstants(general: Record<string, string>): void {
@@ -95,4 +127,19 @@ export function loadConstants(general: Record<string, string>): void {
   GameConstants.EASY_BUILD_TIME = g('EasyBuildTime', 75);
   GameConstants.NORMAL_BUILD_TIME = g('NormalBuildTime', 100);
   GameConstants.HARD_BUILD_TIME = g('HardBuildTime', 125);
+  // Combat: derive values from parsed rules
+  GameConstants.INF_ROCK_DAMAGE_MULT = 1 + GameConstants.INF_DAMAGE_RANGE_BONUS / 100;
+  GameConstants.SUPPRESSION_CHANCE = 1 / GameConstants.SUPPRESSION_PROB;
+  // Sandworm
+  GameConstants.THUMPER_DURATION = g('ThumperDuration', 500);
+  GameConstants.MIN_WORM_RIDE_WAIT = g('MinWormRideWaitDelay', 100);
+  GameConstants.MAX_WORM_RIDE_WAIT = g('MaxWormRideWaitDelay', 2000);
+  GameConstants.WORM_RIDER_LIFESPAN = g('WormRiderLifespan', 1000);
+  // Abilities
+  GameConstants.STEALTH_DELAY_AFTER_FIRING = g('StealthDelayAfterFiring', 10);
+  GameConstants.HAWK_STRIKE_DURATION = g('HawkStrikeDuration', 500);
+  GameConstants.LIGHTNING_DURATION = g('LightningDuration', 300);
+  // Campaign
+  GameConstants.CAMPAIGN_ATTACK_MONEY = g('CampaignAttackMoney', 5000);
+  GameConstants.CAMPAIGN_DEFEND_MONEY = g('CampaignDefendMoney', 2500);
 }

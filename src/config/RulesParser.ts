@@ -229,7 +229,11 @@ function parseUnitDef(name: string, section: Section): UnitDef {
       case 'Kobra': def.kobra = parseBool(value); break;
       case 'Repair': def.repair = parseBool(value); break;
       case 'DustScout': def.dustScout = parseBool(value); break;
+      case 'DeathHand': def.deathHand = parseBool(value); break;
+      case 'HawkWeapon': def.hawkWeapon = parseBool(value); break;
+      case 'BeamWeapon': def.beamWeapon = parseBool(value); break;
       case 'Resource':
+        def.resource = value;
         if (value === 'WormRider') def.wormRider = true;
         break;
       case 'AiSpecial': def.aiSpecial = parseBool(value); break;

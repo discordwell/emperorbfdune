@@ -9,6 +9,7 @@ import {
 import type { GameRules } from '../config/RulesParser';
 import type { BulletDef } from '../config/WeaponDefs';
 import { distance2D, worldToTile, angleBetween, lerpAngle } from '../utils/MathUtils';
+import { GameConstants } from '../utils/Constants';
 import { EventBus } from '../core/EventBus';
 import type { VeterancyLevel } from '../config/UnitDefs';
 import type { FogOfWar } from '../rendering/FogOfWar';
@@ -254,8 +255,8 @@ export class CombatSystem implements GameSystem {
     let mult = 1.0;
     const slow = this.hitSlowdowns.get(eid);
     if (slow) mult = Math.max(0.1, 1.0 - slow.amount / 100);
-    // Suppressed infantry move at 50% speed
-    if (this.infantrySuppressed.has(eid)) mult *= 0.5;
+    // Suppressed infantry move at reduced speed
+    if (this.infantrySuppressed.has(eid)) mult *= GameConstants.SUPPRESSION_SPEED_MULT;
     return mult;
   }
 
@@ -635,8 +636,8 @@ export class CombatSystem implements GameSystem {
     const targetTypeName = this.unitTypeMap.get(targetEid);
     if (targetTypeName && !this.suppressionTimers.has(targetEid)) {
       const targetDef = this.rules.units.get(targetTypeName);
-      if (targetDef && targetDef.canBeSuppressed && simRng.random() < 0.2) {
-        this.suppressionTimers.set(targetEid, 200);
+      if (targetDef && targetDef.canBeSuppressed && simRng.random() < GameConstants.SUPPRESSION_CHANCE) {
+        this.suppressionTimers.set(targetEid, GameConstants.SUPPRESSION_DELAY);
         this.infantrySuppressed.add(targetEid);
       }
     }
@@ -699,7 +700,7 @@ export class CombatSystem implements GameSystem {
       if (hasComponent(world, Veterancy, eid)) {
         const dVetLevel = this.getVetLevel(eid);
         const extraArmour = dVetLevel ? dVetLevel.extraArmour : 0;
-        const defBonus = extraArmour > 0 ? Math.max(0.1, 1.0 - extraArmour / 100) : ([1.0, 0.9, 0.8, 0.7][Veterancy.rank[eid]] ?? 1.0);
+        const defBonus = extraArmour > 0 ? Math.max(0.1, 1.0 - extraArmour / 100) : (GameConstants.VET_DEFENSE_FALLBACK[Veterancy.rank[eid]] ?? 1.0);
         damage = Math.round(damage * defBonus);
       }
 
@@ -721,7 +722,7 @@ export class CombatSystem implements GameSystem {
     if (hasComponent(world, Veterancy, attackerEid)) {
       const vetLevel = this.getVetLevel(attackerEid);
       const extraDmg = vetLevel ? vetLevel.extraDamage : 0;
-      const vetBonus = extraDmg > 0 ? 1.0 + extraDmg / 100 : ([1.0, 1.15, 1.30, 1.50][Veterancy.rank[attackerEid]] ?? 1.0);
+      const vetBonus = extraDmg > 0 ? 1.0 + extraDmg / 100 : (GameConstants.VET_DAMAGE_FALLBACK[Veterancy.rank[attackerEid]] ?? 1.0);
       baseDamage = Math.round(baseDamage * vetBonus);
     }
 
@@ -731,8 +732,8 @@ export class CombatSystem implements GameSystem {
     const attackerFaction = this.playerFactions.get(attackerOwner);
     if (attackerFaction !== 'HK') {
       const hpRatio = Health.current[attackerEid] / Math.max(1, Health.max[attackerEid]);
-      // Scale: 100% HP = full damage, 50% HP = 75% damage, 0% HP = 50% damage
-      const degradation = 0.5 + hpRatio * 0.5;
+      // Scale: 100% HP = full damage, 50% HP = 75% damage, 0% HP = DAMAGE_DEGRADATION_MIN damage
+      const degradation = GameConstants.DAMAGE_DEGRADATION_MIN + hpRatio * (1 - GameConstants.DAMAGE_DEGRADATION_MIN);
       baseDamage = Math.round(baseDamage * degradation);
     }
 
@@ -742,7 +743,7 @@ export class CombatSystem implements GameSystem {
       const attackerTypeName = this.unitTypeMap.get(attackerEid);
       const aDef = attackerTypeName ? this.rules.units.get(attackerTypeName) : null;
       if (!aDef?.canFly) {
-        baseDamage = Math.round(baseDamage * 0.7);
+        baseDamage = Math.round(baseDamage * GameConstants.SANDSTORM_DAMAGE_MULT);
       }
     }
 
@@ -754,7 +755,7 @@ export class CombatSystem implements GameSystem {
         const tile = worldToTile(Position.x[attackerEid], Position.z[attackerEid]);
         const terrainType = this.terrain.getTerrainType(tile.tx, tile.tz);
         if (terrainType === TerrainType.InfantryRock && attackerDef.infantry) {
-          baseDamage = Math.round(baseDamage * 1.5); // +50% per rules.txt InfDamageRangeBonus
+          baseDamage = Math.round(baseDamage * GameConstants.INF_ROCK_DAMAGE_MULT);
         }
       }
     }
@@ -788,7 +789,7 @@ export class CombatSystem implements GameSystem {
     if (hasComponent(world, Veterancy, targetEid)) {
       const tVetLevel = this.getVetLevel(targetEid);
       const tExtraArmour = tVetLevel ? tVetLevel.extraArmour : 0;
-      const defBonus = tExtraArmour > 0 ? Math.max(0.1, 1.0 - tExtraArmour / 100) : ([1.0, 0.9, 0.8, 0.7][Veterancy.rank[targetEid]] ?? 1.0);
+      const defBonus = tExtraArmour > 0 ? Math.max(0.1, 1.0 - tExtraArmour / 100) : (GameConstants.VET_DEFENSE_FALLBACK[Veterancy.rank[targetEid]] ?? 1.0);
       baseDamage = Math.round(baseDamage * defBonus);
     }
 
@@ -835,9 +836,9 @@ export class CombatSystem implements GameSystem {
       if (Owner.playerId[other] === myOwner) continue;
       if (!hasComponent(world, Health, other)) continue;
       if (Health.current[other] <= 0) continue;
-      // Skip stealthed enemies (unless very close - within 4 units)
+      // Skip stealthed enemies (unless very close)
       if (this.stealthedEntities.has(other)) {
-        const closeRange = 4;
+        const closeRange = GameConstants.STEALTHED_DETECT_RANGE;
         const cdx = px - Position.x[other];
         const cdz = pz - Position.z[other];
         if (cdx * cdx + cdz * cdz > closeRange * closeRange) continue;

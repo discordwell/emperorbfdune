@@ -410,6 +410,7 @@ export function initializeSystems(config: SystemInitConfig): GameContext {
     minimapRenderer,
     totalPlayers,
     buildingTypeNames,
+    gameRules,
     getWorld: () => game.getWorld(),
     getTickCount: () => game.getTickCount(),
     getPowerMultiplier: (pid) => productionSystem.getPowerMultiplier(pid),

@@ -15,13 +15,90 @@ import type { EffectsManager } from '../rendering/EffectsManager';
 import type { AudioManager } from '../audio/AudioManager';
 import type { SelectionPanel } from '../ui/SelectionPanel';
 import type { MinimapRenderer } from '../rendering/MinimapRenderer';
+import type { GameRules } from '../config/RulesParser';
+import { TILE_SIZE } from '../utils/MathUtils';
 
-const SUPERWEAPON_CONFIG: Record<string, { name: string; chargeTime: number; radius: number; damage: number; style: 'missile' | 'airstrike' | 'lightning' }> = {
-  'HKPalace': { name: 'Death Hand Missile', chargeTime: 5184, radius: 15, damage: 800, style: 'missile' },
-  'ATPalace': { name: 'Hawk Strike', chargeTime: 4536, radius: 10, damage: 500, style: 'airstrike' },
-  'ORPalace': { name: 'Chaos Lightning', chargeTime: 6220, radius: 12, damage: 600, style: 'lightning' },
-  'GUPalace': { name: 'Guild NIAB Strike', chargeTime: 5500, radius: 10, damage: 700, style: 'lightning' },
+interface SuperweaponConfig {
+  name: string;
+  chargeTime: number;
+  radius: number;
+  damage: number;
+  style: 'missile' | 'airstrike' | 'lightning';
+}
+
+// Display names and styles for superweapon types (not available in rules.txt)
+const SUPERWEAPON_DISPLAY: Record<string, { name: string; style: 'missile' | 'airstrike' | 'lightning' }> = {
+  'HKPalace': { name: 'Death Hand Missile', style: 'missile' },
+  'ATPalace': { name: 'Hawk Strike', style: 'airstrike' },
+  'ORPalace': { name: 'Chaos Lightning', style: 'lightning' },
+  'GUPalace': { name: 'Guild NIAB Strike', style: 'lightning' },
 };
+
+// Hardcoded fallback config (used when rules.txt data can't be resolved)
+// Radius values are in world units (tiles * TILE_SIZE)
+const FALLBACK_CONFIG: Record<string, SuperweaponConfig> = {
+  'HKPalace': { name: 'Death Hand Missile', chargeTime: 5184, radius: 6, damage: 5000, style: 'missile' },
+  'ATPalace': { name: 'Hawk Strike', chargeTime: 4536, radius: 8, damage: 1000, style: 'airstrike' },
+  'ORPalace': { name: 'Chaos Lightning', chargeTime: 6220, radius: 8, damage: 1000, style: 'lightning' },
+  'GUPalace': { name: 'Guild NIAB Strike', chargeTime: 5500, radius: 20, damage: 700, style: 'lightning' },
+};
+
+/** Build superweapon config dynamically from parsed rules.txt data */
+function buildSuperweaponConfig(rules: GameRules): Record<string, SuperweaponConfig> {
+  const config: Record<string, SuperweaponConfig> = {};
+
+  // Scan units for superweapon flags and resolve their data chains
+  for (const [unitName, unitDef] of rules.units) {
+    let style: 'missile' | 'airstrike' | 'lightning' | null = null;
+    if (unitDef.deathHand) style = 'missile';
+    else if (unitDef.hawkWeapon) style = 'airstrike';
+    else if (unitDef.beamWeapon) style = 'lightning';
+    if (!style) continue;
+
+    // Find which palace building produces this unit
+    const palaceName = unitDef.primaryBuilding;
+    if (!palaceName) continue;
+
+    const display = SUPERWEAPON_DISPLAY[palaceName];
+    const chargeTime = unitDef.buildTime;
+
+    // Resolve bullet from Resource field
+    // Resource format: "BulletName" or "FXName, BulletName"
+    let bulletName = '';
+    if (unitDef.resource) {
+      const parts = unitDef.resource.split(',').map(s => s.trim());
+      bulletName = parts.length > 1 ? parts[parts.length - 1] : parts[0];
+    }
+
+    let damage = 0;
+    let radius = 0;
+    if (bulletName) {
+      const bullet = rules.bullets.get(bulletName);
+      if (bullet) {
+        damage = bullet.damage;
+        // Convert game units to world units: 32 game units = 1 tile, 1 tile = TILE_SIZE world units
+        radius = (bullet.blastRadius / 32) * TILE_SIZE;
+      }
+    }
+
+    config[palaceName] = {
+      name: display?.name ?? unitName,
+      chargeTime: chargeTime || FALLBACK_CONFIG[palaceName]?.chargeTime || 5000,
+      radius: radius || FALLBACK_CONFIG[palaceName]?.radius || 4,
+      damage: damage || FALLBACK_CONFIG[palaceName]?.damage || 500,
+      style: display?.style ?? style,
+    };
+  }
+
+  // Add fallbacks for any palaces not found in rules (e.g. GUPalace)
+  for (const [palaceName, fallback] of Object.entries(FALLBACK_CONFIG)) {
+    if (!config[palaceName]) {
+      config[palaceName] = fallback;
+    }
+  }
+
+  return config;
+}
 
 export interface SuperweaponDeps {
   scene: SceneManager;
@@ -31,6 +108,7 @@ export interface SuperweaponDeps {
   minimapRenderer: MinimapRenderer;
   totalPlayers: number;
   buildingTypeNames: string[];
+  gameRules: GameRules;
   getWorld: () => World;
   getTickCount: () => number;
   getPowerMultiplier: (playerId: number) => number;
@@ -38,6 +116,7 @@ export interface SuperweaponDeps {
 
 export class SuperweaponSystem {
   private deps: SuperweaponDeps;
+  private superweaponConfig: Record<string, SuperweaponConfig>;
   private state = new Map<number, { palaceType: string; charge: number; ready: boolean }>();
   private targetMode = false;
   private swButton: HTMLDivElement;
@@ -46,6 +125,7 @@ export class SuperweaponSystem {
 
   constructor(deps: SuperweaponDeps) {
     this.deps = deps;
+    this.superweaponConfig = buildSuperweaponConfig(deps.gameRules);
 
     // Create UI button
     this.swButton = document.createElement('div');
@@ -82,7 +162,7 @@ export class SuperweaponSystem {
       const cmdMode = document.getElementById('command-mode');
       if (cmdMode) {
         cmdMode.style.display = 'block';
-        cmdMode.textContent = `${SUPERWEAPON_CONFIG[sw.palaceType]?.name ?? 'Superweapon'} - Click to target`;
+        cmdMode.textContent = `${this.superweaponConfig[sw.palaceType]?.name ?? 'Superweapon'} - Click to target`;
         cmdMode.style.background = 'rgba(200,0,0,0.85)';
       }
     });
@@ -125,7 +205,7 @@ export class SuperweaponSystem {
     const sw = this.state.get(playerId);
     if (!sw || !sw.ready) return;
 
-    const config = SUPERWEAPON_CONFIG[sw.palaceType];
+    const config = this.superweaponConfig[sw.palaceType];
     if (!config) return;
 
     sw.charge = 0;
@@ -209,7 +289,7 @@ export class SuperweaponSystem {
         if (Owner.playerId[bid] !== pid || Health.current[bid] <= 0) continue;
         const bTypeId = BuildingType.id[bid];
         const bName = buildingTypeNames[bTypeId] ?? '';
-        if (SUPERWEAPON_CONFIG[bName]) {
+        if (this.superweaponConfig[bName]) {
           palaceType = bName;
           break;
         }
@@ -221,7 +301,7 @@ export class SuperweaponSystem {
         }
         const sw = this.state.get(pid)!;
         sw.palaceType = palaceType;
-        const config = SUPERWEAPON_CONFIG[palaceType];
+        const config = this.superweaponConfig[palaceType];
         if (!sw.ready) {
           const mult = getPowerMultiplier(pid);
           sw.charge += 25 * mult;
@@ -246,7 +326,7 @@ export class SuperweaponSystem {
     const sw = this.state.get(0);
     if (sw) {
       this.swButton.style.display = 'flex';
-      const config = SUPERWEAPON_CONFIG[sw.palaceType];
+      const config = this.superweaponConfig[sw.palaceType];
       const pct = Math.min(100, (sw.charge / (config?.chargeTime ?? 1)) * 100);
       this.swChargeBar.style.width = `${pct}%`;
       if (sw.ready) {
@@ -306,7 +386,7 @@ export class SuperweaponSystem {
   setChargeState(data: Array<{ playerId: number; palaceType: string; charge: number }>): void {
     this.state.clear();
     for (const entry of data) {
-      const cfg = SUPERWEAPON_CONFIG[entry.palaceType];
+      const cfg = this.superweaponConfig[entry.palaceType];
       if (!cfg) continue;
       this.state.set(entry.playerId, {
         palaceType: entry.palaceType,

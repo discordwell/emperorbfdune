@@ -56,7 +56,7 @@ export class SandwormSystem implements GameSystem {
 
   /** Deploy a thumper at a location (attracts worms for ~20 seconds) */
   deployThumper(x: number, z: number): void {
-    this.thumpers.push({ x, z, ticksLeft: 500 }); // ~20 seconds at 25 TPS
+    this.thumpers.push({ x, z, ticksLeft: GameConstants.THUMPER_DURATION });
   }
 
   update(world: World, _dt: number): void {
@@ -119,7 +119,7 @@ export class SandwormSystem implements GameSystem {
         const wormTile = worldToTile(worm.x, worm.z);
         const spice = this.terrain.getSpice(wormTile.tx, wormTile.tz);
         if (spice > 0) {
-          this.terrain.setSpice(wormTile.tx, wormTile.tz, Math.max(0, spice - 0.1));
+          this.terrain.setSpice(wormTile.tx, wormTile.tz, Math.max(0, spice - GameConstants.WORM_SPICE_DESTROY_RATE));
         }
       }
     }
@@ -173,12 +173,12 @@ export class SandwormSystem implements GameSystem {
       x, z,
       targetX: Math.max(10, Math.min(worldW - 10, x + randomFloat(-50, 50))),
       targetZ: Math.max(10, Math.min(worldH - 10, z + randomFloat(-50, 50))),
-      speed: 0.3,
+      speed: GameConstants.WORM_ROAM_SPEED,
       life: minLife + Math.floor(simRng.random() * (maxLife - minLife)),
       huntingEid: null,
       huntingOwner: -1,
       state: 'emerging',
-      emergeTicks: 25, // 1 second emerge animation
+      emergeTicks: GameConstants.WORM_EMERGE_TICKS,
     };
 
     this.worms.push(worm);
@@ -212,7 +212,7 @@ export class SandwormSystem implements GameSystem {
         worm.huntingEid = prey;
         worm.huntingOwner = Owner.playerId[prey];
         worm.state = 'hunting';
-        worm.speed = 0.6; // Faster when hunting
+        worm.speed = GameConstants.WORM_HUNT_SPEED;
       }
     }
   }
@@ -220,7 +220,7 @@ export class SandwormSystem implements GameSystem {
   private updateHunting(world: World, worm: Worm): void {
     if (worm.huntingEid === null) {
       worm.state = 'roaming';
-      worm.speed = 0.3;
+      worm.speed = GameConstants.WORM_ROAM_SPEED;
       return;
     }
 
@@ -231,7 +231,7 @@ export class SandwormSystem implements GameSystem {
           Owner.playerId[worm.huntingEid] !== worm.huntingOwner) {
         worm.huntingEid = null;
         worm.state = 'roaming';
-        worm.speed = 0.3;
+        worm.speed = GameConstants.WORM_ROAM_SPEED;
         return;
       }
       targetX = Position.x[worm.huntingEid];
@@ -240,7 +240,7 @@ export class SandwormSystem implements GameSystem {
     } catch {
       worm.huntingEid = null;
       worm.state = 'roaming';
-      worm.speed = 0.3;
+      worm.speed = GameConstants.WORM_ROAM_SPEED;
       return;
     }
 
@@ -251,7 +251,7 @@ export class SandwormSystem implements GameSystem {
       // Prey is on rock — can't reach, give up
       worm.huntingEid = null;
       worm.state = 'roaming';
-      worm.speed = 0.3;
+      worm.speed = GameConstants.WORM_ROAM_SPEED;
       return;
     }
 
@@ -264,7 +264,7 @@ export class SandwormSystem implements GameSystem {
       this.eatUnit(world, worm.huntingEid, worm);
       worm.huntingEid = null;
       worm.state = 'roaming';
-      worm.speed = 0.3;
+      worm.speed = GameConstants.WORM_ROAM_SPEED;
     } else if (dist > 0.1) {
       worm.x += (dx / dist) * worm.speed;
       worm.z += (dz / dist) * worm.speed;
@@ -305,13 +305,13 @@ export class SandwormSystem implements GameSystem {
       // Calculate attraction multiplier based on unit properties
       const isHarvester = hasComponent(world, Harvester, eid);
       let attractionMult = 1.0;
-      if (isHarvester) attractionMult = 0.5; // Harvesters attract from further away
+      if (isHarvester) attractionMult = GameConstants.WORM_HARVESTER_ATTRACTION;
       // Check unit def for wormAttraction and tastyToWorms
       if (this.rules && hasComponent(world, UnitType, eid)) {
         const typeName = this.unitTypeNames[UnitType.id[eid]];
         const def = typeName ? this.rules.units.get(typeName) : null;
         if (def) {
-          if (def.tastyToWorms) attractionMult *= 0.3; // Very attractive
+          if (def.tastyToWorms) attractionMult *= GameConstants.WORM_TASTY_ATTRACTION;
           if (def.wormAttraction > 0) attractionMult *= Math.max(0.1, 1 - def.wormAttraction * 0.1);
           else if (def.wormAttraction < 0) attractionMult *= 3.0; // Negative values repel worms
         }
@@ -331,14 +331,14 @@ export class SandwormSystem implements GameSystem {
   private updateMounted(world: World, worm: Worm): void {
     if (worm.riderEid == null) {
       worm.state = 'roaming';
-      worm.speed = 0.3;
+      worm.speed = GameConstants.WORM_ROAM_SPEED;
       return;
     }
 
     // Check if rider is still alive and is same entity (guards against entity ID recycling)
     if (Health.current[worm.riderEid] <= 0 || Owner.playerId[worm.riderEid] !== worm.riderOwner) {
       worm.state = 'roaming';
-      worm.speed = 0.3;
+      worm.speed = GameConstants.WORM_ROAM_SPEED;
       worm.riderEid = undefined;
       worm.riderOwner = undefined;
       return;
@@ -402,8 +402,8 @@ export class SandwormSystem implements GameSystem {
         worm.state = 'mounted';
         worm.riderEid = riderEid;
         worm.riderOwner = riderOwner;
-        worm.life = Math.max(worm.life, 1500); // Mounted worms last longer (~1 minute)
-        worm.speed = 0.8; // Faster when mounted
+        worm.life = Math.max(worm.life, GameConstants.WORM_MOUNTED_MIN_LIFE);
+        worm.speed = GameConstants.WORM_MOUNTED_SPEED;
         worm.huntingEid = null;
         return true;
       }
@@ -416,7 +416,7 @@ export class SandwormSystem implements GameSystem {
     for (const worm of this.worms) {
       if (worm.riderEid === riderEid) {
         worm.state = 'roaming';
-        worm.speed = 0.3;
+        worm.speed = GameConstants.WORM_ROAM_SPEED;
         Position.y[riderEid] = 0.1; // Return rider to ground level
         worm.riderEid = undefined;
         worm.riderOwner = undefined;
