@@ -83,6 +83,8 @@ export const GameConstants = {
   STARPORT_MAX_DELIVERY_SINGLE: 6,
   FRIGATE_COUNTDOWN: 2500,
   FRIGATE_TIMEOUT: 1000,
+  STARPORT_STOCK_INCREASE_PROB: 90,
+  STARPORT_STOCK_INCREASE_DELAY: 1000,
   // Worm (additional)
   SURFACE_WORM_DISAPPEAR_HEALTH: 25,
   MIN_TICKS_WORM_CAN_APPEAR: 1000,
@@ -171,6 +173,8 @@ export function loadConstants(general: Record<string, string>): void {
   GameConstants.STARPORT_MAX_DELIVERY_SINGLE = g('StarportMaxDeliverySingle', 6);
   GameConstants.FRIGATE_COUNTDOWN = g('FrigateCountdown', 2500);
   GameConstants.FRIGATE_TIMEOUT = g('FrigateTimeout', 1000);
+  GameConstants.STARPORT_STOCK_INCREASE_PROB = g('StarportStockIncreaseProb', 90);
+  GameConstants.STARPORT_STOCK_INCREASE_DELAY = g('StarportStockIncreaseDelay', 1000);
   // Worm (additional)
   GameConstants.SURFACE_WORM_DISAPPEAR_HEALTH = g('SurfaceWormDisappearHealth', 25);
   GameConstants.MIN_TICKS_WORM_CAN_APPEAR = g('MinimumTicksWormCanAppear', 1000);

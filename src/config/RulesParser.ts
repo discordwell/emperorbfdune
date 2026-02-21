@@ -382,6 +382,13 @@ function parseBulletDef(name: string, section: Section): BulletDef {
   def.reduceDamageWithDistance = parseBool(entries.get('ReduceDamageWithDistance') ?? 'true');
   def.damageFriendly = parseBool(entries.get('DamageFriendly') ?? 'false');
   def.friendlyDamageAmount = parseNum(entries.get('FriendlyDamageAmount') ?? '0');
+  def.continuous = parseBool(entries.get('Continuous') ?? 'false');
+  def.minRange = parseNum(entries.get('MinRange') ?? '0');
+  def.trajectory = parseBool(entries.get('Trajectory') ?? 'false');
+  def.homingDelay = parseNum(entries.get('HomingDelay') ?? '0');
+  def.antiGround = parseBool(entries.get('AntiGround') ?? 'true');
+  def.lingerDuration = parseNum(entries.get('LingerDuration') ?? '0');
+  def.lingerDamage = parseNum(entries.get('LingerDamage') ?? '0');
 
   return def;
 }

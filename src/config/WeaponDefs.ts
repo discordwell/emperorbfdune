@@ -29,6 +29,13 @@ export interface BulletDef {
   reduceDamageWithDistance: boolean; // Linear falloff from center to edge
   damageFriendly: boolean; // Whether AoE damages friendly units
   friendlyDamageAmount: number; // 0-100, percentage of damage applied to friendlies
+  continuous: boolean; // Fires every tick while in range (flame/sonic weapons)
+  minRange: number; // Minimum firing distance (game units, like maxRange)
+  trajectory: boolean; // Arcing trajectory (mortar-style)
+  homingDelay: number; // Ticks before homing kicks in
+  antiGround: boolean; // Can target ground units
+  lingerDuration: number; // Ticks of lingering damage after impact
+  lingerDamage: number; // Damage per linger tick
 }
 
 // Warhead damage multipliers per armor type (percentage 0-100)
@@ -77,6 +84,13 @@ export function createDefaultBulletDef(name: string): BulletDef {
     reduceDamageWithDistance: true,
     damageFriendly: false,
     friendlyDamageAmount: 0,
+    continuous: false,
+    minRange: 0,
+    trajectory: false,
+    homingDelay: 0,
+    antiGround: true,
+    lingerDuration: 0,
+    lingerDamage: 0,
   };
 }
 

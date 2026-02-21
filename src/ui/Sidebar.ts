@@ -383,15 +383,16 @@ export class Sidebar {
 
   private renderStarportItems(grid: HTMLElement): void {
     const offers = this.production.getStarportOffers(this.factionPrefix, this.playerId);
-    for (const { name, price } of offers) {
+    for (const { name, price, stock } of offers) {
       const def = this.rules.units.get(name);
       if (!def) continue;
-      // Starport bypasses factory/tech prerequisites — only check if player can afford the price
-      const canAfford = this.production.canAffordAmount(this.playerId, price);
+      // Starport bypasses factory/tech prerequisites — only check if player can afford the price and has stock
+      const canAfford = stock > 0 && this.production.canAffordAmount(this.playerId, price);
       const displayName = getDisplayName(name);
       const baseCost = def.cost;
       const priceDelta = price - baseCost;
       const priceColor = priceDelta <= 0 ? '#4f4' : priceDelta > baseCost * 0.3 ? '#f44' : '#ff8';
+      const stockLabel = stock <= 0 ? ' <span style="color:#f44">[OUT]</span>' : ` <span style="color:#888">x${stock}</span>`;
 
       const item = document.createElement('button');
       item.style.cssText = `
@@ -399,7 +400,7 @@ export class Sidebar {
         border:1px solid ${canAfford ? '#444' : '#222'};color:${canAfford ? '#ddd' : '#555'};
         cursor:${canAfford ? 'pointer' : 'default'};font-size:10px;text-align:center;
       `;
-      item.innerHTML = `<div style="font-size:11px;font-weight:bold">${displayName}</div><div style="color:${priceColor};font-size:10px">$${price}</div>`;
+      item.innerHTML = `<div style="font-size:11px;font-weight:bold">${displayName}</div><div style="color:${priceColor};font-size:10px">$${price}${stockLabel}</div>`;
 
       if (canAfford) {
         item.onclick = () => {

@@ -26,7 +26,9 @@ export interface ProductionState {
   costMultipliers?: Record<number, number>;
   timeMultipliers?: Record<number, number>;
   starportPrices?: Record<string, number>;
+  starportStock?: Record<string, number>;
   starportTick?: number;
+  starportStockTick?: number;
 }
 
 export class ProductionSystem {
@@ -536,31 +538,54 @@ export class ProductionSystem {
 
   // --- Starport Trading ---
   private starportPrices = new Map<string, number>(); // unit name -> current price
+  private starportStock = new Map<string, number>(); // unit name -> available stock
   private starportTick = 0;
+  private starportStockTick = 0;
 
-  /** Update starport prices (call periodically) */
+  /** Update starport prices and stock (call periodically) */
   updateStarportPrices(): void {
     this.starportTick++;
-    if (this.starportTick % GameConstants.STARPORT_COST_UPDATE_DELAY !== 0 && this.starportPrices.size > 0) return;
+    this.starportStockTick++;
 
-    const pct = GameConstants.STARPORT_COST_VARIATION_PCT / 100;
-    for (const [name, def] of this.rules.units) {
-      if (!def.starportable) continue;
-      // Price fluctuates within ±StarportCostVariationPercent of base cost
-      const variance = (1 - pct) + simRng.random() * (2 * pct);
-      this.starportPrices.set(name, Math.floor(def.cost * variance));
+    // Price update
+    if (this.starportTick % GameConstants.STARPORT_COST_UPDATE_DELAY === 0 || this.starportPrices.size === 0) {
+      const pct = GameConstants.STARPORT_COST_VARIATION_PCT / 100;
+      for (const [name, def] of this.rules.units) {
+        if (!def.starportable) continue;
+        // Price fluctuates within ±StarportCostVariationPercent of base cost
+        const variance = (1 - pct) + simRng.random() * (2 * pct);
+        this.starportPrices.set(name, Math.floor(def.cost * variance));
+        // Initialize stock on first run
+        if (!this.starportStock.has(name)) {
+          this.starportStock.set(name, GameConstants.STARPORT_MAX_DELIVERY_SINGLE);
+        }
+      }
+    }
+
+    // Stock replenishment
+    if (this.starportStockTick % GameConstants.STARPORT_STOCK_INCREASE_DELAY === 0) {
+      for (const [name] of this.starportPrices) {
+        const current = this.starportStock.get(name) ?? 0;
+        if (current < GameConstants.STARPORT_MAX_DELIVERY_SINGLE) {
+          // STARPORT_STOCK_INCREASE_PROB% chance to add 1 stock
+          if (simRng.random() * 100 < GameConstants.STARPORT_STOCK_INCREASE_PROB) {
+            this.starportStock.set(name, current + 1);
+          }
+        }
+      }
     }
   }
 
-  /** Get available starport units with current prices (difficulty-adjusted) */
-  getStarportOffers(factionPrefix: string, playerId?: number): { name: string; price: number }[] {
+  /** Get available starport units with current prices (difficulty-adjusted) and stock */
+  getStarportOffers(factionPrefix: string, playerId?: number): { name: string; price: number; stock: number }[] {
     // Require player to own a Starport building before showing offers
     if (playerId !== undefined && !this.ownsAnyBuildingSuffix(playerId, 'Starport')) return [];
     const costMult = playerId !== undefined ? (this.costMultipliers.get(playerId) ?? 1.0) : 1.0;
-    const offers: { name: string; price: number }[] = [];
+    const offers: { name: string; price: number; stock: number }[] = [];
     for (const [name, price] of this.starportPrices) {
       if (!name.startsWith(factionPrefix)) continue;
-      offers.push({ name, price: Math.round(price * costMult) });
+      const stock = this.starportStock.get(name) ?? 0;
+      offers.push({ name, price: Math.round(price * costMult), stock });
     }
     return offers;
   }
@@ -590,6 +615,10 @@ export class ProductionSystem {
     // Check player owns a Starport building
     if (!this.ownsAnyBuildingSuffix(playerId, 'Starport')) return false;
 
+    // Check stock availability
+    const stock = this.starportStock.get(unitName) ?? 0;
+    if (stock <= 0) return false;
+
     // Population cap check (including queued units)
     if (this.unitCountCallback) {
       const queuedUnits = (this.infantryQueues.get(playerId)?.length ?? 0)
@@ -605,6 +634,8 @@ export class ProductionSystem {
 
     // All validation passed — now spend money
     if (!this.harvestSystem.spendSolaris(playerId, price)) return false;
+    // Decrement stock
+    this.starportStock.set(unitName, (this.starportStock.get(unitName) ?? 1) - 1);
     queue.push({
       typeName: unitName,
       isBuilding: false,
@@ -665,6 +696,10 @@ export class ProductionSystem {
     for (const [name, price] of this.starportPrices) {
       starportPricesObj[name] = price;
     }
+    const starportStockObj: Record<string, number> = {};
+    for (const [name, stock] of this.starportStock) {
+      starportStockObj[name] = stock;
+    }
     return {
       buildingQueues: serializeQueue(this.buildingQueues),
       infantryQueues: serializeQueue(this.infantryQueues),
@@ -675,7 +710,9 @@ export class ProductionSystem {
       costMultipliers: costMults,
       timeMultipliers: timeMults,
       starportPrices: starportPricesObj,
+      starportStock: starportStockObj,
       starportTick: this.starportTick,
+      starportStockTick: this.starportStockTick,
     };
   }
 
@@ -722,16 +759,26 @@ export class ProductionSystem {
         this.timeMultipliers.set(Number(pid), state.timeMultipliers[Number(pid)]);
       }
     }
-    // Restore starport prices (reset first for backward-compatible saves)
+    // Restore starport prices and stock (reset first for backward-compatible saves)
     this.starportPrices.clear();
+    this.starportStock.clear();
     this.starportTick = 0;
+    this.starportStockTick = 0;
     if (state.starportPrices) {
       for (const [name, price] of Object.entries(state.starportPrices)) {
         this.starportPrices.set(name, price as number);
       }
     }
+    if (state.starportStock) {
+      for (const [name, stock] of Object.entries(state.starportStock)) {
+        this.starportStock.set(name, stock as number);
+      }
+    }
     if (state.starportTick !== undefined) {
       this.starportTick = state.starportTick;
+    }
+    if (state.starportStockTick !== undefined) {
+      this.starportStockTick = state.starportStockTick;
     }
   }
 

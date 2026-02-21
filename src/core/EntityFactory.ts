@@ -128,6 +128,9 @@ export function createEntityFactory(deps: EntityFactoryDeps) {
       Combat.attackRange[eid] = bullet ? bullet.maxRange * 2 : 8;
       Combat.fireTimer[eid] = 0;
       Combat.rof[eid] = turret?.reloadCount ?? 30;
+      if (bullet?.continuous) {
+        Combat.rof[eid] = 1; // Continuous weapons fire every tick
+      }
     }
 
     addComponent(world, Armour, eid);
@@ -247,6 +250,9 @@ export function createEntityFactory(deps: EntityFactoryDeps) {
       Combat.fireTimer[eid] = 0;
       Combat.attackRange[eid] = bullet ? bullet.maxRange * 2 : 12;
       Combat.rof[eid] = turret?.reloadCount ?? 45;
+      if (bullet?.continuous) {
+        Combat.rof[eid] = 1; // Continuous weapons fire every tick
+      }
       combatSystem.registerUnit(eid, typeName);
     }
 

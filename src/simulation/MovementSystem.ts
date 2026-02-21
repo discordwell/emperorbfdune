@@ -8,7 +8,7 @@ import { PathfindingSystem } from './PathfindingSystem';
 import type { AsyncPathfinder } from './AsyncPathfinder';
 import { SpatialGrid } from '../utils/SpatialGrid';
 import { worldToTile, angleBetween, lerpAngle, distance2D } from '../utils/MathUtils';
-import { TerrainType, type TerrainRenderer } from '../rendering/TerrainRenderer';
+import type { TerrainRenderer } from '../rendering/TerrainRenderer';
 
 const ARRIVAL_THRESHOLD = 1.0;
 const SEPARATION_RADIUS = 2.0;
@@ -302,13 +302,6 @@ export class MovementSystem implements GameSystem {
       // Move at speed (with hit slowdown and terrain modifiers)
       let speed = Speed.max[eid];
       if (this.speedModifierFn) speed *= this.speedModifierFn(eid);
-      if (this.terrain) {
-        const tile = worldToTile(px, pz);
-        const tType = this.terrain.getTerrainType(tile.tx, tile.tz);
-        if (tType === TerrainType.Dunes) speed *= 0.7;
-        else if (tType === TerrainType.Rock || tType === TerrainType.InfantryRock) speed *= 1.15;
-        else if (tType === TerrainType.ConcreteSlab) speed *= 1.25;
-      }
 
       // Separation from nearby units (spatial grid lookup)
       let sepX = 0;

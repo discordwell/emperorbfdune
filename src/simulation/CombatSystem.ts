@@ -8,7 +8,7 @@ import {
 } from '../core/ECS';
 import type { GameRules } from '../config/RulesParser';
 import type { BulletDef } from '../config/WeaponDefs';
-import { distance2D, worldToTile, angleBetween, lerpAngle } from '../utils/MathUtils';
+import { distance2D, worldToTile, angleBetween, lerpAngle, TILE_SIZE } from '../utils/MathUtils';
 import { GameConstants } from '../utils/Constants';
 import { EventBus } from '../core/EventBus';
 import type { VeterancyLevel } from '../config/UnitDefs';
@@ -16,8 +16,6 @@ import type { FogOfWar } from '../rendering/FogOfWar';
 import type { TerrainRenderer } from '../rendering/TerrainRenderer';
 import { TerrainType } from '../rendering/TerrainRenderer';
 import type { SpatialGrid } from '../utils/SpatialGrid';
-
-const TILE_SIZE = 2;
 
 export class CombatSystem implements GameSystem {
   private rules: GameRules;
@@ -60,6 +58,8 @@ export class CombatSystem implements GameSystem {
   // Uses separate set from suppressedEntities to avoid conflicts with aircraft rearming etc.
   private suppressionTimers = new Map<number, number>(); // eid -> ticksLeft
   private infantrySuppressed = new Set<number>();
+  // Lingering damage effects (gas weapons, etc.)
+  private lingerEffects = new Map<number, { ticksLeft: number; damagePerTick: number; attackerEid: number; warheadMult: number }[]>();
   // Terrain reference for height/infantry rock bonuses
   private terrain: TerrainRenderer | null = null;
   // Sandstorm active callback (reduces accuracy and auto-acquire range)
@@ -205,6 +205,7 @@ export class CombatSystem implements GameSystem {
     this.suppressedEntities.delete(eid);
     this.stealthedEntities.delete(eid);
     this.disabledBuildings.delete(eid);
+    this.lingerEffects.delete(eid);
     // Clear any units escorting this entity or tracking it as attacker
     for (const [escorter, target] of this.escortTargets) {
       if (target === eid) this.escortTargets.delete(escorter);
@@ -285,6 +286,22 @@ export class CombatSystem implements GameSystem {
       }
     }
 
+    // Tick lingering damage effects (gas weapons, etc.)
+    for (const [targetEid, effects] of this.lingerEffects) {
+      if (!hasComponent(world, Health, targetEid) || Health.current[targetEid] <= 0) {
+        this.lingerEffects.delete(targetEid);
+        continue;
+      }
+      for (let i = effects.length - 1; i >= 0; i--) {
+        const linger = effects[i];
+        const damage = Math.round(linger.damagePerTick * linger.warheadMult);
+        this.applyDamageToEntity(world, linger.attackerEid, targetEid, damage);
+        linger.ticksLeft--;
+        if (linger.ticksLeft <= 0) effects.splice(i, 1);
+      }
+      if (effects.length === 0) this.lingerEffects.delete(targetEid);
+    }
+
     // Update escort targets: follow the escorted unit
     for (const [escorter, targetEid] of this.escortTargets) {
       if (!hasComponent(world, Health, targetEid) || Health.current[targetEid] <= 0
@@ -335,7 +352,8 @@ export class CombatSystem implements GameSystem {
         const atkBullet = this.getBulletDef(eid);
         if (!hasComponent(world, Health, targetEid) || Health.current[targetEid] <= 0
           || Owner.playerId[targetEid] === Owner.playerId[eid]
-          || (tgtDef?.canFly && !atkBullet?.antiAircraft)) {
+          || (tgtDef?.canFly && !atkBullet?.antiAircraft)
+          || (!tgtDef?.canFly && atkBullet && !atkBullet.antiGround)) {
           AttackTarget.active[eid] = 0;
           targetEid = -1;
           // If attack-move unit killed its target, resume moving to destination
@@ -426,9 +444,9 @@ export class CombatSystem implements GameSystem {
           const aTile = worldToTile(Position.x[eid], Position.z[eid]);
           const tt = this.terrain.getTerrainType(aTile.tx, aTile.tz);
           if (tt === TerrainType.InfantryRock && aDef.infantry) {
-            range += 6; // +3 tiles: InfRockRangeBonus(2) + HeightRangeBonus(1) = 6 world units
+            range += (GameConstants.INF_ROCK_RANGE_BONUS + GameConstants.HEIGHT_RANGE_BONUS) * TILE_SIZE;
           } else if (tt === TerrainType.Rock || tt === TerrainType.InfantryRock) {
-            range += 2; // +1 tile (HeightRangeBonus from rules.txt)
+            range += GameConstants.HEIGHT_RANGE_BONUS * TILE_SIZE;
           }
         }
       }
@@ -496,6 +514,13 @@ export class CombatSystem implements GameSystem {
 
       // Only fire when cooldown is done
       if (Combat.fireTimer[eid] > 0) continue;
+
+      // Check minimum range (e.g., missiles can't fire at point-blank)
+      const bullet = this.getBulletDef(eid);
+      if (bullet && bullet.minRange > 0) {
+        const minRangeWorld = bullet.minRange * 2; // Same scale as maxRange
+        if (dist < minRangeWorld) continue;
+      }
 
       this.fire(world, eid, targetEid);
       this.recentlyFired.add(eid);
@@ -794,6 +819,28 @@ export class CombatSystem implements GameSystem {
     }
 
     this.applyDamageToEntity(world, attackerEid, targetEid, baseDamage);
+
+    // Register lingering damage (gas weapons, etc.)
+    if (bullet && bullet.lingerDuration > 0 && bullet.lingerDamage > 0) {
+      // Compute warhead multiplier for linger damage (uses same warhead as impact)
+      let warheadMult = 1.0;
+      if (bullet.warhead && hasComponent(world, Armour, targetEid)) {
+        const warhead = this.rules.warheads.get(bullet.warhead);
+        if (warhead) {
+          const armourIdx = Armour.type[targetEid];
+          const armourName = this.armourTypes[armourIdx] ?? 'None';
+          warheadMult = (warhead.vs[armourName] ?? 100) / 100;
+        }
+      }
+      const effects = this.lingerEffects.get(targetEid) ?? [];
+      effects.push({
+        ticksLeft: bullet.lingerDuration,
+        damagePerTick: bullet.lingerDamage,
+        attackerEid,
+        warheadMult,
+      });
+      this.lingerEffects.set(targetEid, effects);
+    }
   }
 
   private findNearestEnemy(world: World, eid: number, _entities: readonly number[]): number {
@@ -844,11 +891,12 @@ export class CombatSystem implements GameSystem {
         if (cdx * cdx + cdz * cdz > closeRange * closeRange) continue;
       }
 
-      // Anti-air targeting: skip flying units if our weapon lacks antiAircraft capability
+      // Weapon targeting filters: skip targets our weapon can't hit
       const targetTypeName = this.unitTypeMap.get(other);
       if (targetTypeName) {
         const targetDef = this.rules.units.get(targetTypeName);
         if (targetDef?.canFly && !bullet?.antiAircraft) continue;
+        if (!targetDef?.canFly && bullet && !bullet.antiGround) continue;
       }
 
       // Player units can only auto-target enemies in visible fog tiles
@@ -859,6 +907,8 @@ export class CombatSystem implements GameSystem {
 
       const dist = distance2D(px, pz, Position.x[other], Position.z[other]);
       if (dist > viewRange) continue;
+      // Skip targets too close for minimum range weapons
+      if (bullet && bullet.minRange > 0 && dist < bullet.minRange * 2) continue;
 
       // Weighted scoring: lower = better target
       let score = dist; // Base: distance
