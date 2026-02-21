@@ -438,7 +438,13 @@ export function registerEventHandlers(ctx: GameContext): void {
                   harvestSystem.addSolaris(0, -wallCostPerTile);
                 }
                 EventBus.emit('building:placed', { entityId: eid, buildingType: unitType, owner: 0 });
-                unitRenderer.startConstruction(eid, Math.max(15, Math.floor((placeDef.buildTime ?? 60) * 0.3)));
+                const duration = Math.max(15, Math.floor((placeDef.buildTime ?? 60) * 0.3));
+                unitRenderer.startConstruction(eid, duration);
+                const wallEid = eid;
+                ctx.deferAction(duration, () => {
+                  if (Health.current[wallEid] <= 0) return;
+                  EventBus.emit('building:completed', { entityId: wallEid, playerId: 0, typeName: unitType });
+                });
                 placed++;
                 // Update occupied tiles so subsequent tiles in this line don't overlap
                 buildingPlacement.updateOccupiedTiles(w2);
@@ -465,6 +471,7 @@ export function registerEventHandlers(ctx: GameContext): void {
           movement.invalidateAllPaths();
           if (aiBldgEid >= 0) {
             EventBus.emit('building:placed', { entityId: aiBldgEid, buildingType: unitType, owner });
+            EventBus.emit('building:completed', { entityId: aiBldgEid, playerId: owner, typeName: unitType });
           }
           if (bDef.getUnitWhenBuilt) {
             ctx.spawnUnit(world, bDef.getUnitWhenBuilt, owner, pos.x + 3, pos.z + 3);
@@ -589,7 +596,10 @@ export function registerEventHandlers(ctx: GameContext): void {
           const deployZ = aiBase.z + (simRng.random() - 0.5) * 10;
           Health.current[eid] = 0;
           EventBus.emit('unit:died', { entityId: eid, killerEntity: -1 });
-          ctx.spawnBuilding(world, conYardName, owner, deployX, deployZ);
+          const conYardEid = ctx.spawnBuilding(world, conYardName, owner, deployX, deployZ);
+          if (conYardEid >= 0) {
+            EventBus.emit('building:completed', { entityId: conYardEid, playerId: owner, typeName: conYardName });
+          }
           movement.invalidateAllPaths();
         }
       }

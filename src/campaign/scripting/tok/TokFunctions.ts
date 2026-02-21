@@ -86,7 +86,7 @@ export class TokFunctionDispatch {
         return 0;
 
       case FUNC.GetSecondPlayerSide:
-        return 0;
+        return 1;
 
       case FUNC.GetEnemySide:
         return 1;
@@ -146,7 +146,8 @@ export class TokFunctionDispatch {
       }
 
       case FUNC.GetSideSpice:
-        return 0;
+        // Script-side "spice" tracks available economy budget in campaign scripts.
+        return ctx.harvestSystem.getSolaris(asInt(args[0]));
 
       case FUNC.GetObjectSide: {
         const eid = asInt(args[0]);
@@ -304,16 +305,8 @@ export class TokFunctionDispatch {
         const typeIdx = asInt(args[1]);
         const side = args.length > 2 ? asInt(args[2]) : -1;
         const typeName = this.resolveString(typeIdx);
-        if (eid >= 0 && hasComponent(ctx.game.getWorld(), Position, eid)) {
-          const x = Position.x[eid];
-          const z = Position.z[eid];
-          const owner = side >= 0 ? side : (hasComponent(ctx.game.getWorld(), Owner, eid) ? Owner.playerId[eid] : 0);
-          // Remove old entity and spawn new one
-          Health.current[eid] = 0;
-          EventBus.emit('unit:died', { entityId: eid, killerEntity: -1 });
-          return this.spawnObject(ctx, typeName, owner, x, z);
-        }
-        return -1;
+        const owner = side >= 0 ? side : (hasComponent(ctx.game.getWorld(), Owner, eid) ? Owner.playerId[eid] : 0);
+        return this.replaceObject(ctx, eid, typeName, owner);
       }
 
       case FUNC.ObjectRemove: {
@@ -357,9 +350,28 @@ export class TokFunctionDispatch {
         return 0;
       }
 
-      case FUNC.ObjectInfect:
-      case FUNC.ObjectDetonate:
-        return 0;
+      case FUNC.ObjectInfect: {
+        // ObjectInfect(obj, typeName, side): convert an existing object.
+        const eid = asInt(args[0]);
+        const typeName = this.resolveString(asInt(args[1]));
+        const side = args.length > 2 ? asInt(args[2]) : (hasComponent(ctx.game.getWorld(), Owner, eid) ? Owner.playerId[eid] : 0);
+        return this.replaceObject(ctx, eid, typeName, side);
+      }
+
+      case FUNC.ObjectDetonate: {
+        // ObjectDetonate(obj, typeName): replace object with an effect/payload unit.
+        const eid = asInt(args[0]);
+        if (args.length < 2) {
+          if (eid >= 0 && hasComponent(ctx.game.getWorld(), Health, eid)) {
+            Health.current[eid] = 0;
+            EventBus.emit('unit:died', { entityId: eid, killerEntity: -1 });
+          }
+          return 0;
+        }
+        const owner = hasComponent(ctx.game.getWorld(), Owner, eid) ? Owner.playerId[eid] : 0;
+        const typeName = this.resolveString(asInt(args[1]));
+        return this.replaceObject(ctx, eid, typeName, owner);
+      }
 
       case FUNC.ObjectToolTip: {
         // Store tooltip ID on entity (cosmetic, no UI hook yet)
@@ -717,15 +729,26 @@ export class TokFunctionDispatch {
       }
 
       case FUNC.ReplaceShroud:
-      case FUNC.RemoveMapShroud:
-        // RemoveMapShroud reveals entire map
         return 0;
+
+      case FUNC.RemoveMapShroud: {
+        const worldW = ctx.terrain.getMapWidth() * TILE_SIZE;
+        const worldH = ctx.terrain.getMapHeight() * TILE_SIZE;
+        const radius = Math.max(worldW, worldH) * 2;
+        ctx.fogOfWar.revealWorldArea(worldW * 0.5, worldH * 0.5, radius);
+        return 0;
+      }
 
       // -------------------------------------------------------------------
       // Radar
       // -------------------------------------------------------------------
       case FUNC.RadarEnabled:
-        return 0;
+        // Campaign scripts can force radar on even without an outpost.
+        (ctx as any).__tokForceRadarEnabled = true;
+        if (typeof (ctx.minimapRenderer as any)?.setRadarActive === 'function') {
+          (ctx.minimapRenderer as any).setRadarActive(true);
+        }
+        return 1;
 
       case FUNC.RadarAlert: {
         const pos = asPos(args[0]);
@@ -753,8 +776,8 @@ export class TokFunctionDispatch {
         return 0;
 
       case FUNC.NormalConditionLose:
-        // Enable normal lose conditions (all buildings destroyed)
-        return 0;
+        // NormalConditionLose(side): TRUE when side has no surviving units/buildings.
+        return this.isSideDefeated(ctx, asInt(args[0])) ? 1 : 0;
 
       // -------------------------------------------------------------------
       // Events
@@ -771,20 +794,54 @@ export class TokFunctionDispatch {
       }
 
       case FUNC.EventObjectDelivered: {
+        // Native scripts pass (side, objVarOut). Support both out-param and direct checks.
+        if (args.length >= 2) {
+          const side = asInt(args[0]);
+          const outArg = argExprs[1];
+          if (outArg?.kind === 'var' && outArg.varType === VarType.Obj) {
+            const deliveredEid = ev.events.consumeDeliveredObject(side);
+            if (deliveredEid === undefined) return 0;
+            ev.setVar(outArg.slot, VarType.Obj, deliveredEid);
+            return 1;
+          }
+          const eid = asInt(args[1]);
+          return ev.events.wasObjectDeliveredForSide(side, eid) ? 1 : 0;
+        }
         const eid = asInt(args[0]);
         return ev.events.wasObjectDelivered(eid) ? 1 : 0;
       }
 
       case FUNC.EventObjectConstructed: {
         const side = asInt(args[0]);
-        const eid = asInt(args[1]);
-        return ev.events.wasObjectConstructed(side, eid) ? 1 : 0;
+        if (args.length >= 2) {
+          const outArg = argExprs[1];
+          if (outArg?.kind === 'var' && outArg.varType === VarType.Obj) {
+            const builtEid = ev.events.consumeConstructedObject(side);
+            if (builtEid === undefined) return 0;
+            ev.setVar(outArg.slot, VarType.Obj, builtEid);
+            return 1;
+          }
+          const eid = asInt(args[1]);
+          return ev.events.wasObjectConstructed(side, eid) ? 1 : 0;
+        }
+        return 0;
       }
 
       case FUNC.EventObjectTypeConstructed: {
         const side = asInt(args[0]);
         const typeIdx = asInt(args[1]);
         const typeName = this.resolveString(typeIdx);
+        if (args.length >= 3) {
+          const outArg = argExprs[2];
+          if (outArg?.kind === 'var' && outArg.varType === VarType.Obj) {
+            const builtEid = ev.events.consumeObjectTypeConstructed(side, typeName);
+            if (builtEid === undefined) return 0;
+            ev.setVar(outArg.slot, VarType.Obj, builtEid);
+            return 1;
+          }
+          const eid = asInt(args[2]);
+          return ev.events.wasObjectTypeConstructedObject(side, typeName, eid) ? 1 : 0;
+        }
         return ev.events.wasObjectTypeConstructed(side, typeName) ? 1 : 0;
       }
 
@@ -924,28 +981,43 @@ export class TokFunctionDispatch {
       // -------------------------------------------------------------------
       // Delivery / Production
       // -------------------------------------------------------------------
-      case FUNC.CarryAllDelivery:
+      case FUNC.CarryAllDelivery: {
+        // CarryAllDelivery(side, type, pos)
+        if (args.length < 3) return -1;
+        const side = asInt(args[0]);
+        const typeIdx = asInt(args[1]);
+        const pos = asPos(args[2]);
+        return this.spawnDeliveryObjects(ctx, ev, side, pos, [typeIdx]);
+      }
+
       case FUNC.Delivery:
-      case FUNC.StarportDelivery:
-        // Spawn delivery payload at the requested position.
-        if (args.length >= 3) {
-          const side = asInt(args[0]);
-          const typeIdx = asInt(args[1]);
-          const pos = asPos(args[2]);
-          const typeName = this.resolveString(typeIdx);
-          return this.spawnObject(ctx, typeName, side, pos.x, pos.z);
+      case FUNC.StarportDelivery: {
+        // Delivery/StarportDelivery(side, pos, type1, type2, ...)
+        // Keep a fallback for legacy decoded order (side, type, pos).
+        if (args.length < 3) return -1;
+        const side = asInt(args[0]);
+        const deliveryPos = isPos(args[1]) ? asPos(args[1]) : asPos(args[2]);
+        const typeStart = isPos(args[1]) ? 2 : 1;
+        const typeIndices: number[] = [];
+        for (let i = typeStart; i < args.length; i++) {
+          if (!isPos(args[i])) typeIndices.push(asInt(args[i]));
         }
-        return -1;
+        return this.spawnDeliveryObjects(ctx, ev, side, deliveryPos, typeIndices);
+      }
 
       case FUNC.BuildObject: {
-        if (args.length >= 3) {
-          const side = asInt(args[0]);
-          const typeIdx = asInt(args[1]);
-          const pos = asPos(args[2]);
-          const typeName = this.resolveString(typeIdx);
-          return this.spawnObject(ctx, typeName, side, pos.x, pos.z);
+        // BuildObject(side, type) in original scripts; optional position fallback.
+        if (args.length < 2) return -1;
+        const side = asInt(args[0]);
+        const typeIdx = asInt(args[1]);
+        const pos = args.length >= 3 ? asPos(args[2]) : this.getSidePosition(ctx, ev, side);
+        const typeName = this.resolveString(typeIdx);
+        const eid = this.spawnObject(ctx, typeName, side, pos.x, pos.z);
+        if (eid >= 0) {
+          ev.events.objectConstructed(side, eid);
+          ev.events.objectTypeConstructed(side, typeName, eid);
         }
-        return -1;
+        return eid;
       }
 
       case FUNC.SetReinforcements:
@@ -1016,6 +1088,38 @@ export class TokFunctionDispatch {
   // -----------------------------------------------------------------------
   // Helper methods
   // -----------------------------------------------------------------------
+
+  private replaceObject(ctx: GameContext, eid: number, typeName: string, side: number): number {
+    const w = ctx.game.getWorld();
+    if (eid < 0) return -1;
+    if (!hasComponent(w, Position, eid) || !hasComponent(w, Health, eid)) return -1;
+    if (Health.current[eid] <= 0) return -1;
+
+    const x = Position.x[eid];
+    const z = Position.z[eid];
+    Health.current[eid] = 0;
+    EventBus.emit('unit:died', { entityId: eid, killerEntity: -1 });
+    return this.spawnObject(ctx, typeName, side, x, z);
+  }
+
+  private spawnDeliveryObjects(
+    ctx: GameContext,
+    ev: TokEvaluator,
+    side: number,
+    pos: TokPos,
+    typeIndices: number[],
+  ): number {
+    let lastSpawned = -1;
+    for (const typeIdx of typeIndices) {
+      const typeName = this.resolveString(typeIdx);
+      const eid = this.spawnObject(ctx, typeName, side, pos.x, pos.z);
+      if (eid >= 0) {
+        ev.events.objectDelivered(side, eid);
+        lastSpawned = eid;
+      }
+    }
+    return lastSpawned;
+  }
 
   private spawnObject(ctx: GameContext, typeName: string, side: number, x: number, z: number): number {
     const world = ctx.game.getWorld();
@@ -1249,6 +1353,17 @@ export class TokFunctionDispatch {
       ctx.combatSystem.setAttackMove(units);
     }
   }
+
+  private isSideDefeated(ctx: GameContext, side: number): boolean {
+    const w = ctx.game.getWorld();
+    for (const eid of buildingQuery(w)) {
+      if (Owner.playerId[eid] === side && Health.current[eid] > 0) return false;
+    }
+    for (const eid of unitQuery(w)) {
+      if (Owner.playerId[eid] === side && Health.current[eid] > 0) return false;
+    }
+    return true;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1265,4 +1380,8 @@ function asPos(v: number | TokPos | undefined): TokPos {
   if (v === undefined) return { x: 0, z: 0 };
   if (typeof v === 'object') return v;
   return { x: 0, z: 0 };
+}
+
+function isPos(v: number | TokPos | undefined): v is TokPos {
+  return typeof v === 'object' && v !== null;
 }

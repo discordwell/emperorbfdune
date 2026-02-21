@@ -12,6 +12,7 @@ interface EventMap {
   'building:placed': { entityId: number; buildingType: string; owner: number };
   'building:destroyed': { entityId: number; owner: number; x: number; z: number };
   'building:started': { buildingType: string; owner: number };
+  'building:completed': { entityId: number; playerId: number; typeName?: string };
   'production:complete': { unitType: string; owner: number; buildingId: number; isBuilding: boolean };
   'production:started': { unitType: string; owner: number; isBuilding: boolean };
   'harvest:delivered': { amount: number; owner: number };

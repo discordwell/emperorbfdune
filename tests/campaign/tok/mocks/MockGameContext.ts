@@ -142,7 +142,9 @@ export function createMockCtx(): MockCtx {
       }),
     },
     productionSystem: {},
-    minimapRenderer: {},
+    minimapRenderer: {
+      setRadarActive: vi.fn(),
+    },
     fogOfWar: {
       isTileVisible: vi.fn(() => true),
       revealWorldArea: vi.fn(),

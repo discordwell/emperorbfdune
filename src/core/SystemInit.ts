@@ -299,10 +299,14 @@ export function initializeSystems(config: SystemInitConfig): GameContext {
       const def = gameRules.buildings.get(typeName);
       const duration = def ? Math.max(25, Math.floor(def.buildTime * 0.5)) : 75;
       unitRenderer.startConstruction(eid, duration);
+      const buildingEid = eid;
+      deferredActions.push({ tick: game.getTickCount() + duration, action: () => {
+        if (Health.current[buildingEid] <= 0) return;
+        EventBus.emit('building:completed', { entityId: buildingEid, playerId: 0, typeName });
+      }});
 
       if (def?.getUnitWhenBuilt) {
         const freeUnitName = def.getUnitWhenBuilt;
-        const buildingEid = eid;
         deferredActions.push({ tick: game.getTickCount() + duration, action: () => {
           if (Health.current[buildingEid] <= 0) return;
           const w = game.getWorld();

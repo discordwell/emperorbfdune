@@ -149,10 +149,10 @@ export class TokInterpreter {
     const onBuilt = (data: { entityId: number; playerId: number; typeName?: string }) => {
       this.evaluator.events.objectConstructed(data.playerId, data.entityId);
       if (data.typeName) {
-        this.evaluator.events.objectTypeConstructed(data.playerId, data.typeName);
+        this.evaluator.events.objectTypeConstructed(data.playerId, data.typeName, data.entityId);
       }
     };
-    EventBus.on('building:completed' as any, onBuilt);
+    EventBus.on('building:completed', onBuilt);
     this.eventListeners.push({ event: 'building:completed', callback: onBuilt });
   }
 }

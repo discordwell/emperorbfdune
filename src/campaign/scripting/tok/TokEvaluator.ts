@@ -80,6 +80,26 @@ export class SideManager {
 export class EventTracker {
   /** Tracks events that occurred: key is a compound key, value is the data. */
   private events = new Map<string, any>();
+  /** Per-side delivered object queues for out-param event queries. */
+  private deliveredBySide = new Map<number, number[]>();
+  /** Per-side constructed object queues for out-param event queries. */
+  private constructedBySide = new Map<number, number[]>();
+  /** Per-(side,type) constructed object queues for out-param type queries. */
+  private constructedTypeQueues = new Map<string, number[]>();
+
+  private pushToQueue<K>(map: Map<K, number[]>, key: K, eid: number): void {
+    const queue = map.get(key);
+    if (queue) queue.push(eid);
+    else map.set(key, [eid]);
+  }
+
+  private popFromQueue<K>(map: Map<K, number[]>, key: K): number | undefined {
+    const queue = map.get(key);
+    if (!queue || queue.length === 0) return undefined;
+    const eid = queue.shift();
+    if (queue.length === 0) map.delete(key);
+    return eid;
+  }
 
   /** Record that an object was destroyed. */
   objectDestroyed(eid: number): void {
@@ -92,18 +112,25 @@ export class EventTracker {
   }
 
   /** Record that an object was delivered. */
-  objectDelivered(eid: number): void {
+  objectDelivered(side: number, eid: number): void {
     this.events.set(`obj_delivered:${eid}`, true);
+    this.events.set(`obj_delivered_side:${side}:${eid}`, true);
+    this.pushToQueue(this.deliveredBySide, side, eid);
   }
 
   /** Record that a side constructed an object. */
   objectConstructed(side: number, eid: number): void {
     this.events.set(`obj_constructed:${side}:${eid}`, true);
+    this.pushToQueue(this.constructedBySide, side, eid);
   }
 
   /** Record that a type was constructed by a side. */
-  objectTypeConstructed(side: number, typeName: string): void {
+  objectTypeConstructed(side: number, typeName: string, eid?: number): void {
     this.events.set(`type_constructed:${side}:${typeName}`, true);
+    if (typeof eid === 'number' && eid >= 0) {
+      this.events.set(`type_constructed_obj:${side}:${typeName}:${eid}`, true);
+      this.pushToQueue(this.constructedTypeQueues, `${side}:${typeName}`, eid);
+    }
   }
 
   /** Record that an object attacks a side. */
@@ -126,14 +153,39 @@ export class EventTracker {
     return this.events.has(`obj_delivered:${eid}`);
   }
 
+  /** Query: was object delivered to side? */
+  wasObjectDeliveredForSide(side: number, eid: number): boolean {
+    return this.events.has(`obj_delivered_side:${side}:${eid}`);
+  }
+
+  /** Query + consume: next object delivered to side this tick. */
+  consumeDeliveredObject(side: number): number | undefined {
+    return this.popFromQueue(this.deliveredBySide, side);
+  }
+
   /** Query: did side construct object? */
   wasObjectConstructed(side: number, eid: number): boolean {
     return this.events.has(`obj_constructed:${side}:${eid}`);
   }
 
+  /** Query + consume: next object constructed by side this tick. */
+  consumeConstructedObject(side: number): number | undefined {
+    return this.popFromQueue(this.constructedBySide, side);
+  }
+
   /** Query: did side construct type? */
   wasObjectTypeConstructed(side: number, typeName: string): boolean {
     return this.events.has(`type_constructed:${side}:${typeName}`);
+  }
+
+  /** Query: did side construct a specific object of type? */
+  wasObjectTypeConstructedObject(side: number, typeName: string, eid: number): boolean {
+    return this.events.has(`type_constructed_obj:${side}:${typeName}:${eid}`);
+  }
+
+  /** Query + consume: next object of a type constructed by side this tick. */
+  consumeObjectTypeConstructed(side: number, typeName: string): number | undefined {
+    return this.popFromQueue(this.constructedTypeQueues, `${side}:${typeName}`);
   }
 
   /** Query: did object attack side? */
@@ -144,6 +196,9 @@ export class EventTracker {
   /** Clear all event flags (called at start of each tick). */
   clear(): void {
     this.events.clear();
+    this.deliveredBySide.clear();
+    this.constructedBySide.clear();
+    this.constructedTypeQueues.clear();
   }
 
   serialize(): Record<string, boolean> {
@@ -154,6 +209,9 @@ export class EventTracker {
 
   restore(data: Record<string, boolean>): void {
     this.events.clear();
+    this.deliveredBySide.clear();
+    this.constructedBySide.clear();
+    this.constructedTypeQueues.clear();
     for (const [k, v] of Object.entries(data)) this.events.set(k, v);
   }
 }

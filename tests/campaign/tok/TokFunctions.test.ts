@@ -10,6 +10,7 @@ import { createMockCtx, spawnMockBuilding, spawnMockUnit, type MockCtx } from '.
 
 const lit = (value: number): TokExpr => ({ kind: 'literal', value });
 const posVar = (slot: number): TokExpr => ({ kind: 'var', slot, varType: VarType.Pos });
+const objVar = (slot: number): TokExpr => ({ kind: 'var', slot, varType: VarType.Obj });
 
 function setPosVar(ev: TokEvaluator, slot: number, x: number, z: number): void {
   ev.setVar(slot, VarType.Pos, { x, z });
@@ -34,6 +35,8 @@ describe('TokFunctionDispatch', () => {
       [2, VarType.Int],
       [3, VarType.Int],
       [4, VarType.Int],
+      [5, VarType.Obj],
+      [6, VarType.Obj],
     ]), 8);
   });
 
@@ -63,6 +66,7 @@ describe('TokFunctionDispatch', () => {
 
     it('returns fixed player/enemy side IDs', () => {
       expect(call(FUNC.GetPlayerSide, [])).toBe(0);
+      expect(call(FUNC.GetSecondPlayerSide, [])).toBe(1);
       expect(call(FUNC.GetEnemySide, [])).toBe(1);
     });
   });
@@ -94,6 +98,24 @@ describe('TokFunctionDispatch', () => {
       expect(hasComponent(ctx.game.getWorld(), UnitType, eid)).toBe(true);
       expect(Position.x[eid]).toBe(30);
       expect(Position.z[eid]).toBe(45);
+    });
+  });
+
+  describe('object mutation', () => {
+    it('converts entities via ObjectInfect and ObjectDetonate', () => {
+      const original = spawnMockUnit(ctx, 'CubScout', 2, 8, 9);
+      const saboteurType = indexOfType('ORSaboteur');
+      const carryallType = indexOfType('ORADVCarryall');
+
+      const infected = call(FUNC.ObjectInfect, [lit(original), lit(saboteurType), lit(4)]);
+      expect(infected).toBeGreaterThanOrEqual(0);
+      expect(Health.current[original]).toBe(0);
+      expect(Owner.playerId[infected]).toBe(4);
+
+      const detonated = call(FUNC.ObjectDetonate, [lit(infected), lit(carryallType)]);
+      expect(detonated).toBeGreaterThanOrEqual(0);
+      expect(Health.current[infected]).toBe(0);
+      expect(Owner.playerId[detonated]).toBe(4);
     });
   });
 
@@ -169,15 +191,36 @@ describe('TokFunctionDispatch', () => {
       expect(call(FUNC.EventSideAttacksSide, [lit(2), lit(0)])).toBe(1);
       expect(call(FUNC.EventSideAttacksSide, [lit(0), lit(2)])).toBe(0);
     });
+
+    it('writes out object vars for delivered/constructed event queries', () => {
+      const typeIdx = indexOfType('FRCamp');
+      ev.events.objectDelivered(4, 121);
+      ev.events.objectConstructed(4, 122);
+      ev.events.objectTypeConstructed(4, dispatch.resolveString(typeIdx), 123);
+
+      expect(call(FUNC.EventObjectDelivered, [lit(4), objVar(5)])).toBe(1);
+      expect(ev.getVar(5, VarType.Obj)).toBe(121);
+      expect(call(FUNC.EventObjectDelivered, [lit(4), objVar(5)])).toBe(0);
+
+      expect(call(FUNC.EventObjectConstructed, [lit(4), objVar(6)])).toBe(1);
+      expect(ev.getVar(6, VarType.Obj)).toBe(122);
+      expect(call(FUNC.EventObjectConstructed, [lit(4), objVar(6)])).toBe(0);
+
+      expect(call(FUNC.EventObjectTypeConstructed, [lit(4), lit(typeIdx), objVar(6)])).toBe(1);
+      expect(ev.getVar(6, VarType.Obj)).toBe(123);
+      expect(call(FUNC.EventObjectTypeConstructed, [lit(4), lit(typeIdx), objVar(6)])).toBe(0);
+    });
   });
 
   describe('credits', () => {
     it('adds/sets/gets side cash', () => {
       call(FUNC.AddSideCash, [lit(1), lit(250)]);
       expect(call(FUNC.GetSideCash, [lit(1)])).toBe(250);
+      expect(call(FUNC.GetSideSpice, [lit(1)])).toBe(250);
 
       call(FUNC.SetSideCash, [lit(1), lit(900)]);
       expect(call(FUNC.GetSideCash, [lit(1)])).toBe(900);
+      expect(call(FUNC.GetSideSpice, [lit(1)])).toBe(900);
     });
   });
 
@@ -194,6 +237,21 @@ describe('TokFunctionDispatch', () => {
     });
   });
 
+  describe('radar', () => {
+    it('forces radar enabled when requested by script', () => {
+      expect(call(FUNC.RadarEnabled, [])).toBe(1);
+      expect((ctx.minimapRenderer as any).setRadarActive).toHaveBeenCalledWith(true);
+      expect((ctx as any).__tokForceRadarEnabled).toBe(true);
+    });
+  });
+
+  describe('fog of war', () => {
+    it('reveals the full map via RemoveMapShroud', () => {
+      call(FUNC.RemoveMapShroud, []);
+      expect(ctx.fogOfWar.revealWorldArea).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('victory', () => {
     it('dispatches mission/victory/defeat calls', () => {
       call(FUNC.MissionOutcome, [lit(1)]);
@@ -203,6 +261,20 @@ describe('TokFunctionDispatch', () => {
       expect(ctx.victorySystem.setVictoryCondition).toHaveBeenCalledWith('survival');
       expect(ctx.victorySystem.forceVictory).toHaveBeenCalledTimes(1);
       expect(ctx.victorySystem.forceDefeat).toHaveBeenCalledTimes(1);
+    });
+
+    it('evaluates NormalConditionLose based on surviving forces', () => {
+      expect(call(FUNC.NormalConditionLose, [lit(8)])).toBe(1);
+
+      const b = spawnMockBuilding(ctx, 'FRCamp', 8, 10, 10);
+      expect(call(FUNC.NormalConditionLose, [lit(8)])).toBe(0);
+      Health.current[b] = 0;
+      expect(call(FUNC.NormalConditionLose, [lit(8)])).toBe(1);
+
+      const u = spawnMockUnit(ctx, 'CubScout', 8, 12, 12);
+      expect(call(FUNC.NormalConditionLose, [lit(8)])).toBe(0);
+      Health.current[u] = 0;
+      expect(call(FUNC.NormalConditionLose, [lit(8)])).toBe(1);
     });
   });
 
@@ -238,6 +310,38 @@ describe('TokFunctionDispatch', () => {
       expect(conYard).toBeGreaterThanOrEqual(0);
       expect(Health.current[mcv]).toBe(0);
       expect(hasComponent(ctx.game.getWorld(), BuildingType, conYard)).toBe(true);
+    });
+  });
+
+  describe('delivery and production', () => {
+    it('handles Delivery(side, pos, type...) and marks EventObjectDelivered', () => {
+      setPosVar(ev, 0, 70, 90);
+      const t1 = indexOfType('CubScout');
+      const t2 = indexOfType('FRCamp');
+
+      const last = call(FUNC.Delivery, [lit(9), posVar(0), lit(t1), lit(t2)]);
+      expect(last).toBeGreaterThanOrEqual(0);
+      expect(Owner.playerId[last]).toBe(9);
+      expect(ctx.__spawns.units.length + ctx.__spawns.buildings.length).toBe(2);
+
+      expect(call(FUNC.EventObjectDelivered, [lit(9), objVar(5)])).toBe(1);
+      const firstDelivered = ev.getVar(5, VarType.Obj) as number;
+      expect(firstDelivered).toBeGreaterThanOrEqual(0);
+      expect(call(FUNC.EventObjectDelivered, [lit(9), objVar(5)])).toBe(1);
+      const secondDelivered = ev.getVar(5, VarType.Obj) as number;
+      expect(secondDelivered).not.toBe(firstDelivered);
+    });
+
+    it('supports BuildObject(side, type) and emits constructed events', () => {
+      const typeIdx = indexOfType('CubScout');
+      const built = call(FUNC.BuildObject, [lit(7), lit(typeIdx)]);
+      expect(built).toBeGreaterThanOrEqual(0);
+      expect(Owner.playerId[built]).toBe(7);
+
+      expect(call(FUNC.EventObjectConstructed, [lit(7), objVar(6)])).toBe(1);
+      expect(ev.getVar(6, VarType.Obj)).toBe(built);
+      expect(call(FUNC.EventObjectTypeConstructed, [lit(7), lit(typeIdx), objVar(6)])).toBe(1);
+      expect(ev.getVar(6, VarType.Obj)).toBe(built);
     });
   });
 

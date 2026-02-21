@@ -179,4 +179,32 @@ describe('TokInterpreter integration', () => {
 
     interpreter.dispose();
   });
+
+  it('handles BuildObject flow gated by GetSideSpice in ORP2M14IX', () => {
+    const ctx = createMockCtx();
+    const interpreter = new TokInterpreter();
+
+    interpreter.init(ctx, readTok('ORP2M14IX'), 'ORP2M14IX');
+    interpreter.tick(ctx, 0);
+
+    const initState = interpreter.serialize(new Map()).tokState!;
+    const builderSide = initState.intVars[0];
+    expect(builderSide).toBeGreaterThanOrEqual(2);
+
+    ctx.harvestSystem.addSolaris(builderSide, 4000);
+    interpreter.tick(ctx, 101);
+
+    const after = interpreter.serialize(new Map()).tokState!;
+    expect(after.intVars[6]).toBe(1); // int_6 increments after EventObjectConstructed
+    expect(after.intVars[1]).toBe(0); // int_1 reset to FALSE after handling
+
+    let playerOwnedUnits = 0;
+    const world = ctx.game.getWorld();
+    for (const eid of unitQuery(world)) {
+      if (Owner.playerId[eid] === 0) playerOwnedUnits++;
+    }
+    expect(playerOwnedUnits).toBeGreaterThan(0);
+
+    interpreter.dispose();
+  });
 });

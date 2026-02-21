@@ -174,16 +174,21 @@ export function registerTickHandler(ctx: GameContext): void {
 
     // Check radar state
     if (currentTick % 50 === 0) {
-      let hasOutpost = false;
-      const blds = buildingQuery(world);
-      for (const bid of blds) {
-        if (Owner.playerId[bid] !== 0 || Health.current[bid] <= 0) continue;
-        const bTypeId = BuildingType.id[bid];
-        const bName = buildingTypeNames[bTypeId];
-        const bDef = bName ? gameRules.buildings.get(bName) : null;
-        if (bDef?.outpost) { hasOutpost = true; break; }
+      const scriptForcedRadar = (ctx as any).__tokForceRadarEnabled === true;
+      if (scriptForcedRadar) {
+        minimapRenderer.setRadarActive(true);
+      } else {
+        let hasOutpost = false;
+        const blds = buildingQuery(world);
+        for (const bid of blds) {
+          if (Owner.playerId[bid] !== 0 || Health.current[bid] <= 0) continue;
+          const bTypeId = BuildingType.id[bid];
+          const bName = buildingTypeNames[bTypeId];
+          const bDef = bName ? gameRules.buildings.get(bName) : null;
+          if (bDef?.outpost) { hasOutpost = true; break; }
+        }
+        minimapRenderer.setRadarActive(hasOutpost);
       }
-      minimapRenderer.setRadarActive(hasOutpost);
     }
     minimapRenderer.update(world);
     effectsManager.update(40);
