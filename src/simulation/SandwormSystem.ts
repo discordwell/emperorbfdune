@@ -62,8 +62,9 @@ export class SandwormSystem implements GameSystem {
   update(world: World, _dt: number): void {
     this.tickCounter++;
 
-    // Try to spawn new worm
-    if (this.worms.length < this.maxWorms && this.tickCounter % 100 === 0) {
+    // Try to spawn new worm (not before MinimumTicksWormCanAppear)
+    if (this.worms.length < this.maxWorms && this.tickCounter % 100 === 0 &&
+        this.tickCounter >= GameConstants.MIN_TICKS_WORM_CAN_APPEAR) {
       // spawnChance is per-tick rate; scale by check interval (100 ticks)
       if (simRng.random() * this.spawnChance < 100) {
         this.spawnWorm();
@@ -145,8 +146,9 @@ export class SandwormSystem implements GameSystem {
       }
     }
 
-    // Thumpers also increase worm spawn chance
-    if (this.thumpers.length > 0 && this.worms.length < this.maxWorms && this.tickCounter % 50 === 25) {
+    // Thumpers also increase worm spawn chance (still respects minimum appearance delay)
+    if (this.thumpers.length > 0 && this.worms.length < this.maxWorms && this.tickCounter % 50 === 25 &&
+        this.tickCounter >= GameConstants.MIN_TICKS_WORM_CAN_APPEAR) {
       this.spawnWorm();
     }
   }

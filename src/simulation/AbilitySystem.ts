@@ -12,6 +12,7 @@ import type { SelectionManager } from '../input/SelectionManager';
 import type { SelectionPanel } from '../ui/SelectionPanel';
 import { EventBus } from '../core/EventBus';
 import { simRng } from '../utils/DeterministicRNG';
+import { TILE_SIZE } from '../utils/MathUtils';
 import {
   Position, Health, Combat, Owner, UnitType, AttackTarget, MoveTarget,
   BuildingType, Veterancy, Shield,
@@ -251,7 +252,7 @@ export class AbilitySystem {
         const typeName = this.deps.unitTypeNames[UnitType.id[attackerEntity]];
         const def = typeName ? this.deps.rules.units.get(typeName) : null;
         if (def?.stealth) {
-          const delayAfterFiring = def.stealthDelayAfterFiring || 125; // default 5 seconds
+          const delayAfterFiring = def.stealthDelayAfterFiring || GameConstants.STEALTH_DELAY_AFTER_FIRING;
           timer.fireCooldown = delayAfterFiring;
           timer.idleTicks = 0;
           if (timer.active) {
@@ -405,7 +406,7 @@ export class AbilitySystem {
       }
 
       // Determine stealth delay (with defaults)
-      const stealthDelay = def.stealthDelay || 75; // default 3 seconds at 25 tps
+      const stealthDelay = def.stealthDelay || GameConstants.STEALTH_DELAY;
 
       // Update idle tracking
       if (moved || isRevealed || inUnstealthZone) {
@@ -777,8 +778,13 @@ export class AbilitySystem {
         this.projectorHolograms.delete(hEid);
       } else {
         this.projectorHolograms.set(hEid, remaining);
-        // Holograms flicker at low life
-        if (remaining < 500) {
+        // Holograms flicker at low life (based on ReplicaVanishTime and flicker chances)
+        const vanishTicks = GameConstants.REPLICA_VANISH_TIME * 25;
+        const isMoving = MoveTarget.active[hEid] === 1;
+        const flickerChance = isMoving
+          ? GameConstants.REPLICA_FLICKER_CHANCE_MOVING
+          : GameConstants.REPLICA_FLICKER_CHANCE_STILL;
+        if (remaining < vanishTicks && flickerChance > 0 && simRng.random() * 100 < flickerChance) {
           const obj = unitRenderer.getEntityObject(hEid);
           if (obj) {
             const alpha = 0.3 + 0.4 * Math.sin(tickCount * 0.2);
@@ -872,14 +878,16 @@ export class AbilitySystem {
       const ux = Position.x[eid];
       const uz = Position.z[eid];
 
-      // Check if near a friendly building (within 15 units)
+      // Check if near a friendly building (within RepairTileRange)
+      const repairRange = GameConstants.REPAIR_TILE_RANGE * TILE_SIZE;
+      const repairRange2 = repairRange * repairRange;
       let nearBase = false;
       for (const bid of allBuildings) {
         if (Owner.playerId[bid] !== owner) continue;
         if (Health.current[bid] <= 0) continue;
         const dx = Position.x[bid] - ux;
         const dz = Position.z[bid] - uz;
-        if (dx * dx + dz * dz < 225) { nearBase = true; break; }
+        if (dx * dx + dz * dz < repairRange2) { nearBase = true; break; }
       }
       if (nearBase) {
         Health.current[eid] = Math.min(Health.max[eid], Health.current[eid] + Health.max[eid] * 0.02);
@@ -903,7 +911,9 @@ export class AbilitySystem {
       const rx = Position.x[eid];
       const rz = Position.z[eid];
 
-      // Heal all friendly units within 8 units, 3% max HP per tick
+      // Heal all friendly units within RepairTileRange, 3% max HP per tick
+      const repRange = GameConstants.REPAIR_TILE_RANGE * TILE_SIZE;
+      const repRange2 = repRange * repRange;
       for (const other of allUnits) {
         if (other === eid) continue;
         if (Owner.playerId[other] !== owner) continue;
@@ -911,7 +921,7 @@ export class AbilitySystem {
         if (Health.current[other] >= Health.max[other]) continue;
         const dx = Position.x[other] - rx;
         const dz = Position.z[other] - rz;
-        if (dx * dx + dz * dz < 64) { // 8 unit radius
+        if (dx * dx + dz * dz < repRange2) {
           Health.current[other] = Math.min(Health.max[other],
             Health.current[other] + Health.max[other] * 0.03);
           // Green repair sparkle on healed unit
@@ -930,7 +940,7 @@ export class AbilitySystem {
         if (Health.current[bid] <= 0 || Health.current[bid] >= Health.max[bid]) continue;
         const dx = Position.x[bid] - rx;
         const dz = Position.z[bid] - rz;
-        if (dx * dx + dz * dz < 64) {
+        if (dx * dx + dz * dz < repRange2) {
           Health.current[bid] = Math.min(Health.max[bid],
             Health.current[bid] + Health.max[bid] * 0.02);
           // Green repair sparkle on healed building
@@ -1159,11 +1169,13 @@ export class AbilitySystem {
             const hz = Position.z[eid] + (simRng.random() - 0.5) * 4;
             const holoEid = spawnUnit(world, copyTypeName, 0, hx, hz);
             if (holoEid >= 0) {
-              // Hologram: 1 HP, no damage, lasts 6000 ticks (~4 minutes)
+              // Hologram: 1 HP, lasts ReplicaProjectionTime seconds
               Health.max[holoEid] = 1;
               Health.current[holoEid] = 1;
-              this.deps.combatSystem.setSuppressed(holoEid, true); // Holograms can't attack
-              this.projectorHolograms.set(holoEid, 6000);
+              if (!GameConstants.REPLICA_SHOULD_FIRE) {
+                this.deps.combatSystem.setSuppressed(holoEid, true);
+              }
+              this.projectorHolograms.set(holoEid, GameConstants.REPLICA_PROJECTION_TIME * 25);
               // Make hologram slightly transparent
               const obj = unitRenderer.getEntityObject(holoEid);
               if (obj) {

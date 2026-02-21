@@ -541,12 +541,13 @@ export class ProductionSystem {
   /** Update starport prices (call periodically) */
   updateStarportPrices(): void {
     this.starportTick++;
-    if (this.starportTick % 250 !== 0 && this.starportPrices.size > 0) return; // Update every ~10 seconds
+    if (this.starportTick % GameConstants.STARPORT_COST_UPDATE_DELAY !== 0 && this.starportPrices.size > 0) return;
 
+    const pct = GameConstants.STARPORT_COST_VARIATION_PCT / 100;
     for (const [name, def] of this.rules.units) {
       if (!def.starportable) continue;
-      // Price fluctuates between 50% and 150% of base cost
-      const variance = 0.5 + simRng.random();
+      // Price fluctuates within ±StarportCostVariationPercent of base cost
+      const variance = (1 - pct) + simRng.random() * (2 * pct);
       this.starportPrices.set(name, Math.floor(def.cost * variance));
     }
   }
@@ -607,7 +608,7 @@ export class ProductionSystem {
     queue.push({
       typeName: unitName,
       isBuilding: false,
-      totalTime: Math.floor(def.buildTime * 0.3), // Starport units arrive faster
+      totalTime: GameConstants.FRIGATE_COUNTDOWN, // Fixed delivery time from rules.txt
       elapsed: 0,
       cost: price,
     });

@@ -77,6 +77,25 @@ export const GameConstants = {
   STEALTH_DELAY_AFTER_FIRING: 10,
   HAWK_STRIKE_DURATION: 500,
   LIGHTNING_DURATION: 300,
+  // Starport
+  STARPORT_COST_UPDATE_DELAY: 1500,
+  STARPORT_COST_VARIATION_PCT: 40,
+  STARPORT_MAX_DELIVERY_SINGLE: 6,
+  FRIGATE_COUNTDOWN: 2500,
+  FRIGATE_TIMEOUT: 1000,
+  // Worm (additional)
+  SURFACE_WORM_DISAPPEAR_HEALTH: 25,
+  MIN_TICKS_WORM_CAN_APPEAR: 1000,
+  // Repair
+  REPAIR_TILE_RANGE: 10,
+  // Carryall
+  ADV_CARRYALL_PICKUP_ENEMY_DELAY: 60,
+  // Replica/Hologram
+  REPLICA_SHOULD_FIRE: true as boolean,
+  REPLICA_PROJECTION_TIME: 20,
+  REPLICA_VANISH_TIME: 5,
+  REPLICA_FLICKER_CHANCE_MOVING: 0,
+  REPLICA_FLICKER_CHANCE_STILL: 0,
   // Fog
   DEFAULT_UNIT_VIEW_RANGE: 10,
   DEFAULT_BUILDING_VIEW_RANGE: 20,
@@ -89,6 +108,10 @@ export function loadConstants(general: Record<string, string>): void {
   const g = (key: string, fallback: number): number => {
     const v = general[key];
     return v !== undefined ? parseFloat(v) : fallback;
+  };
+  const gb = (key: string, fallback: boolean): boolean => {
+    const v = general[key];
+    return v !== undefined ? (v.toLowerCase() === 'true' || v === '1') : fallback;
   };
 
   GameConstants.SPICE_VALUE = g('SpiceValue', 200);
@@ -142,4 +165,23 @@ export function loadConstants(general: Record<string, string>): void {
   // Campaign
   GameConstants.CAMPAIGN_ATTACK_MONEY = g('CampaignAttackMoney', 5000);
   GameConstants.CAMPAIGN_DEFEND_MONEY = g('CampaignDefendMoney', 2500);
+  // Starport
+  GameConstants.STARPORT_COST_UPDATE_DELAY = g('StarportCostUpdateDelay', 1500);
+  GameConstants.STARPORT_COST_VARIATION_PCT = g('StarportCostVariationPercent', 40);
+  GameConstants.STARPORT_MAX_DELIVERY_SINGLE = g('StarportMaxDeliverySingle', 6);
+  GameConstants.FRIGATE_COUNTDOWN = g('FrigateCountdown', 2500);
+  GameConstants.FRIGATE_TIMEOUT = g('FrigateTimeout', 1000);
+  // Worm (additional)
+  GameConstants.SURFACE_WORM_DISAPPEAR_HEALTH = g('SurfaceWormDisappearHealth', 25);
+  GameConstants.MIN_TICKS_WORM_CAN_APPEAR = g('MinimumTicksWormCanAppear', 1000);
+  // Repair
+  GameConstants.REPAIR_TILE_RANGE = g('RepairTileRange', 10);
+  // Carryall
+  GameConstants.ADV_CARRYALL_PICKUP_ENEMY_DELAY = g('AdvCarryallPickupEnemyDelay', 60);
+  // Replica/Hologram
+  GameConstants.REPLICA_SHOULD_FIRE = gb('ReplicaShouldFire', true);
+  GameConstants.REPLICA_PROJECTION_TIME = g('ReplicaProjectionTime', 20);
+  GameConstants.REPLICA_VANISH_TIME = g('ReplicaVanishTime', 5);
+  GameConstants.REPLICA_FLICKER_CHANCE_MOVING = g('ReplicaFlickerChanceWhenMoving', 0);
+  GameConstants.REPLICA_FLICKER_CHANCE_STILL = g('ReplicaFlickerChanceWhenStill', 0);
 }
