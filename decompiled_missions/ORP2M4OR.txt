@@ -25,7 +25,7 @@ if (ModelTick () == 0)
   Message (111)
 endif;
 if (ModelTick () == int_7)
-  obj_4 = NewObject (int_0, STR[67], pos_5)
+  obj_4 = NewObject (int_0, "ATRepairUnit", pos_5)
   pos_6 = GetEntrancePoint (GetEnemySide ())
   SideAIMove (int_0, pos_6)
   SideAIEncounterIgnore (int_0)
@@ -73,7 +73,7 @@ if ((ObjectNearToSideBase (obj_4, GetEnemySide ()) == TRUE) && (ObjectVisibleToS
 endif;
 if ((int_2 == TRUE) && (int_1 == TRUE))
   if (SideAIDone (int_0) == TRUE)
-    ObjectDetonate (obj_4, STR[84])
+    ObjectDetonate (obj_4, "ORADVCarryall")
     int_12 = TRUE
     Message (126)
   endif;

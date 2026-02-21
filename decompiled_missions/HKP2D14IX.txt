@@ -47,11 +47,11 @@ if (ModelTick () == 0)
 endif;
 if ((ModelTick () == int_8) && (int_7 == FALSE))
   int_7 = TRUE
-  obj_2 = NewObject (int_0, STR[69], GetNeutralEntrancePoint ())
-  obj_3 = NewObject (int_0, STR[69], GetNeutralEntrancePoint ())
-  obj_4 = NewObject (int_0, STR[69], GetNeutralEntrancePoint ())
-  obj_5 = NewObject (int_0, STR[69], GetNeutralEntrancePoint ())
-  obj_6 = NewObject (int_0, STR[69], GetNeutralEntrancePoint ())
+  obj_2 = NewObject (int_0, "ATSonicTank", GetNeutralEntrancePoint ())
+  obj_3 = NewObject (int_0, "ATSonicTank", GetNeutralEntrancePoint ())
+  obj_4 = NewObject (int_0, "ATSonicTank", GetNeutralEntrancePoint ())
+  obj_5 = NewObject (int_0, "ATSonicTank", GetNeutralEntrancePoint ())
+  obj_6 = NewObject (int_0, "ATSonicTank", GetNeutralEntrancePoint ())
   int_9 = PIPRelease () + 800
   SideAIMove (int_0, GetSidePosition (GetPlayerSide ()))
 endif;
@@ -63,15 +63,15 @@ if ((ModelTick () == int_8 + 250) && (int_7 == TRUE))
   PIPRelease ()
 endif;
 if ((ModelTick () == int_9) && (int_7 == TRUE) && (int_19 == FALSE) && (SideUnitCount (int_0) > 0))
-  NewObject (int_1, STR[49], GetNeutralEntrancePoint ())
-  NewObject (int_1, STR[49], GetNeutralEntrancePoint ())
-  NewObject (int_1, STR[49], GetNeutralEntrancePoint ())
-  NewObject (int_1, STR[49], GetNeutralEntrancePoint ())
-  NewObject (int_1, STR[49], GetNeutralEntrancePoint ())
-  NewObject (int_1, STR[49], GetNeutralEntrancePoint ())
-  NewObject (int_1, STR[48], GetNeutralEntrancePoint ())
-  NewObject (int_1, STR[49], GetNeutralEntrancePoint ())
-  obj_20 = NewObject (int_1, STR[49], GetNeutralEntrancePoint ())
+  NewObject (int_1, "IMGeneral", GetNeutralEntrancePoint ())
+  NewObject (int_1, "IMGeneral", GetNeutralEntrancePoint ())
+  NewObject (int_1, "IMGeneral", GetNeutralEntrancePoint ())
+  NewObject (int_1, "IMGeneral", GetNeutralEntrancePoint ())
+  NewObject (int_1, "IMGeneral", GetNeutralEntrancePoint ())
+  NewObject (int_1, "IMGeneral", GetNeutralEntrancePoint ())
+  NewObject (int_1, "ORSaboteur", GetNeutralEntrancePoint ())
+  NewObject (int_1, "IMGeneral", GetNeutralEntrancePoint ())
+  obj_20 = NewObject (int_1, "IMGeneral", GetNeutralEntrancePoint ())
   RadarAlert (GetSidePosition (int_1))
   SideAIAggressive (int_1)
   int_21 = TRUE
@@ -100,7 +100,7 @@ if ((ObjectNearToSideBase (obj_2, GetPlayerSide ()) == TRUE) && (int_10 == FALSE
     Message (30)
     int_26 = TRUE
   endif;
-  NewObject (GetPlayerSide (), STR[46], GetObjectPosition (obj_2))
+  NewObject (GetPlayerSide (), "OREngineer", GetObjectPosition (obj_2))
 endif;
 if ((ObjectNearToSideBase (obj_3, GetPlayerSide ()) == TRUE) && (int_11 == FALSE))
   int_11 = TRUE
@@ -110,7 +110,7 @@ if ((ObjectNearToSideBase (obj_3, GetPlayerSide ()) == TRUE) && (int_11 == FALSE
     Message (30)
     int_26 = TRUE
   endif;
-  NewObject (GetPlayerSide (), STR[46], GetObjectPosition (obj_3))
+  NewObject (GetPlayerSide (), "OREngineer", GetObjectPosition (obj_3))
 endif;
 if ((ObjectNearToSideBase (obj_4, GetPlayerSide ()) == TRUE) && (int_12 == FALSE))
   int_12 = TRUE
@@ -120,7 +120,7 @@ if ((ObjectNearToSideBase (obj_4, GetPlayerSide ()) == TRUE) && (int_12 == FALSE
     Message (23)
     int_27 = TRUE
   endif;
-  NewObject (GetPlayerSide (), STR[46], GetObjectPosition (obj_4))
+  NewObject (GetPlayerSide (), "OREngineer", GetObjectPosition (obj_4))
 endif;
 if ((ObjectNearToSideBase (obj_5, GetPlayerSide ()) == TRUE) && (int_13 == FALSE))
   int_13 = TRUE
@@ -130,7 +130,7 @@ if ((ObjectNearToSideBase (obj_5, GetPlayerSide ()) == TRUE) && (int_13 == FALSE
     Message (26)
     int_27 = TRUE
   endif;
-  NewObject (GetPlayerSide (), STR[46], GetObjectPosition (obj_5))
+  NewObject (GetPlayerSide (), "OREngineer", GetObjectPosition (obj_5))
 endif;
 if ((ObjectNearToSideBase (obj_6, GetPlayerSide ()) == TRUE) && (int_14 == FALSE))
   int_14 = TRUE
@@ -140,7 +140,7 @@ if ((ObjectNearToSideBase (obj_6, GetPlayerSide ()) == TRUE) && (int_14 == FALSE
     Message (26)
     int_27 = TRUE
   endif;
-  NewObject (GetPlayerSide (), STR[46], GetObjectPosition (obj_6))
+  NewObject (GetPlayerSide (), "OREngineer", GetObjectPosition (obj_6))
 endif;
 if ((SideUnitCount (int_0) == int_15) && (int_16 == FALSE) && (SideUnitCount (int_0) > 0))
   int_16 = TRUE
@@ -175,33 +175,33 @@ if ((int_16 == TRUE) && (int_22 == FALSE))
 endif;
 if ((ModelTick () == int_23 + 4000) && (int_22 == TRUE))
   RadarAlert (GetNeutralEntrancePoint ())
-  obj_25 = NewObject (int_1, STR[49], GetNeutralEntrancePoint ())
+  obj_25 = NewObject (int_1, "IMGeneral", GetNeutralEntrancePoint ())
   SetVeterancy (obj_25, 3)
-  NewObject (int_1, STR[49], GetNeutralEntrancePoint ())
-  NewObject (int_1, STR[49], GetNeutralEntrancePoint ())
-  obj_25 = NewObject (int_1, STR[49], GetNeutralEntrancePoint ())
+  NewObject (int_1, "IMGeneral", GetNeutralEntrancePoint ())
+  NewObject (int_1, "IMGeneral", GetNeutralEntrancePoint ())
+  obj_25 = NewObject (int_1, "IMGeneral", GetNeutralEntrancePoint ())
   SetVeterancy (obj_25, 2)
-  NewObject (int_1, STR[49], GetNeutralEntrancePoint ())
-  NewObject (int_1, STR[49], GetNeutralEntrancePoint ())
-  obj_25 = NewObject (int_1, STR[49], GetNeutralEntrancePoint ())
+  NewObject (int_1, "IMGeneral", GetNeutralEntrancePoint ())
+  NewObject (int_1, "IMGeneral", GetNeutralEntrancePoint ())
+  obj_25 = NewObject (int_1, "IMGeneral", GetNeutralEntrancePoint ())
   SetVeterancy (obj_25, 1)
-  NewObject (int_1, STR[49], GetNeutralEntrancePoint ())
-  NewObject (int_1, STR[49], GetNeutralEntrancePoint ())
-  NewObject (int_1, STR[48], GetNeutralEntrancePoint ())
-  obj_24 = NewObject (int_1, STR[48], GetNeutralEntrancePoint ())
-  NewObject (int_1, STR[48], GetNeutralEntrancePoint ())
-  NewObject (int_1, STR[48], GetNeutralEntrancePoint ())
-  obj_25 = NewObject (int_1, STR[48], GetNeutralEntrancePoint ())
+  NewObject (int_1, "IMGeneral", GetNeutralEntrancePoint ())
+  NewObject (int_1, "IMGeneral", GetNeutralEntrancePoint ())
+  NewObject (int_1, "ORSaboteur", GetNeutralEntrancePoint ())
+  obj_24 = NewObject (int_1, "ORSaboteur", GetNeutralEntrancePoint ())
+  NewObject (int_1, "ORSaboteur", GetNeutralEntrancePoint ())
+  NewObject (int_1, "ORSaboteur", GetNeutralEntrancePoint ())
+  obj_25 = NewObject (int_1, "ORSaboteur", GetNeutralEntrancePoint ())
   SetVeterancy (obj_25, 2)
-  NewObject (int_1, STR[48], GetNeutralEntrancePoint ())
-  NewObject (int_1, STR[48], GetNeutralEntrancePoint ())
-  obj_25 = NewObject (int_1, STR[48], GetNeutralEntrancePoint ())
+  NewObject (int_1, "ORSaboteur", GetNeutralEntrancePoint ())
+  NewObject (int_1, "ORSaboteur", GetNeutralEntrancePoint ())
+  obj_25 = NewObject (int_1, "ORSaboteur", GetNeutralEntrancePoint ())
   SetVeterancy (obj_25, 1)
-  NewObject (int_1, STR[48], GetNeutralEntrancePoint ())
-  NewObject (int_1, STR[48], GetNeutralEntrancePoint ())
-  obj_25 = NewObject (int_1, STR[48], GetNeutralEntrancePoint ())
+  NewObject (int_1, "ORSaboteur", GetNeutralEntrancePoint ())
+  NewObject (int_1, "ORSaboteur", GetNeutralEntrancePoint ())
+  obj_25 = NewObject (int_1, "ORSaboteur", GetNeutralEntrancePoint ())
   SetVeterancy (obj_25, 1)
-  NewObject (int_1, STR[48], GetNeutralEntrancePoint ())
+  NewObject (int_1, "ORSaboteur", GetNeutralEntrancePoint ())
   SideEnemyTo (int_1, GetPlayerSide ())
   SideAIAggressive (int_1)
   int_29 = TRUE

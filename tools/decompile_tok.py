@@ -112,6 +112,142 @@ FUNC_TABLE = {
 # Keyword/operator tokens start at 162
 KEYWORD_THRESHOLD = 162
 
+# .tok string table: STR[N] -> type name mapping (128 entries)
+# Buildings: HK(111-124), AT(125-127,0-10), OR(11-23), subhouse(24-32)
+# Units: 33-110 in rules.txt [UnitTypes] order
+# Note: The game uses runtime type substitution - the same STR[N] resolves
+# to different house variants based on the spawning side.
+STRING_TABLE = [
+    'ATRefinery',       # 0
+    'ATFactory',        # 1
+    'ATFactoryFrigate', # 2
+    'ATOutpost',        # 3
+    'ATPillbox',        # 4
+    'ATRocketTurret',   # 5
+    'ATHanger',         # 6
+    'ATHelipad',        # 7
+    'ATStarport',       # 8
+    'ATPalace',         # 9
+    'ATConYard',        # 10
+    'ORSmWindtrap',     # 11
+    'ORBarracks',       # 12
+    'ORWall',           # 13
+    'ORRefinery',       # 14
+    'ORFactory',        # 15
+    'ORFactoryFrigate', # 16
+    'OROutpost',        # 17
+    'ORGasTurret',      # 18
+    'ORPopUpTurret',    # 19
+    'ORHanger',         # 20
+    'ORStarport',       # 21
+    'ORPalace',         # 22
+    'ORConYard',        # 23
+    'TLFleshVat',       # 24
+    'GUPalace',         # 25
+    'IXResCentre',      # 26
+    'IMBarracks',       # 27
+    'FRCamp',           # 28
+    'HKRefineryDock',   # 29
+    'ATRefineryDock',   # 30
+    'ORRefineryDock',   # 31
+    'BeaconFlare',      # 32
+    'HKScout',          # 33
+    'HKLightInf',       # 34
+    'HKTrooper',        # 35
+    'HKEngineer',       # 36
+    'HKFlamer',         # 37
+    'ATScout',          # 38
+    'ATInfantry',       # 39
+    'ATSniper',         # 40
+    'ATEngineer',       # 41
+    'ATKindjal',        # 42
+    'ORScout',          # 43
+    'ORChemical',       # 44
+    'ORAATrooper',      # 45
+    'OREngineer',       # 46
+    'ORMortar',         # 47
+    'ORSaboteur',       # 48
+    'IMGeneral',        # 49
+    'ATGeneral',        # 50
+    'HKGeneral',        # 51
+    'ORGeneral',        # 52
+    'IXScientist',      # 53
+    'TLScientist',      # 54
+    'IXSlave',          # 55
+    'CubScout',         # 56
+    'ATMilitia',        # 57
+    'HKBuzzsaw',        # 58
+    'HKAssault',        # 59
+    'HKFlame',          # 60
+    'HKInkVine',        # 61
+    'HKMissile',        # 62
+    'HKDevastator',     # 63
+    'ATTrike',          # 64
+    'ATMongoose',       # 65
+    'ATAPC',            # 66
+    'ATRepairUnit',     # 67
+    'ATMinotaurus',     # 68
+    'ATSonicTank',      # 69
+    'ORDustScout',      # 70
+    'ORLaserTank',      # 71
+    'ORAPC',            # 72
+    'ORKobra',          # 73
+    'ORDeviator',       # 74
+    'HKGunship',        # 75
+    'HKADVCarryall',    # 76
+    'HKDeathHand',      # 77
+    'HKADP',            # 78
+    'ATOrni',           # 79
+    'ATADVCarryall',    # 80
+    'ATHawkWeapon',     # 81
+    'ATADP',            # 82
+    'OREITS',           # 83
+    'ORADVCarryall',    # 84
+    'ORBeamWeapon',     # 85
+    'ORADP',            # 86
+    'Harvester',        # 87
+    'MCV',              # 88
+    'Carryall',         # 89
+    'IXInfiltrator',    # 90
+    'IXProjector',      # 91
+    'TLContaminator',   # 92
+    'TLLeech',          # 93
+    'IMSardaukar',      # 94
+    'IMADVSardaukar',   # 95
+    'IMDropShip',       # 96
+    'FRFremen',         # 97
+    'FRADVFremen',      # 98
+    'StoryFRFremen',    # 99
+    'StoryFRADVFremen', # 100
+    'WormRider',        # 101
+    'GUMaker',          # 102
+    'GUNIABTank',       # 103
+    'INYak',            # 104
+    'INYakHauder',      # 105
+    'INYakRider',       # 106
+    'INSandCrawler',    # 107
+    'INBuggy',          # 108
+    'INMedicalVehicle', # 109
+    'INFemaleCiv',      # 110
+    'HKSmWindtrap',     # 111
+    'HKBarracks',       # 112
+    'HKWall',           # 113
+    'HKRefinery',       # 114
+    'HKFactory',        # 115
+    'HKFactoryFrigate', # 116
+    'HKOutpost',        # 117
+    'HKFlameTurret',    # 118
+    'HKGunTurret',      # 119
+    'HKHanger',         # 120
+    'HKHelipad',        # 121
+    'HKStarport',       # 122
+    'HKPalace',         # 123
+    'HKConYard',        # 124
+    'ATSmWindtrap',     # 125
+    'ATBarracks',       # 126
+    'ATWall',           # 127
+]
+
 
 def decode_segment(seg, var_names=None):
     """Decode a single bytecode segment into tokens.
@@ -379,7 +515,7 @@ def main():
             if fname.endswith('.tok') and fname != 'header.tok':
                 path = os.path.join(tok_dir, fname)
                 try:
-                    result = decompile_tok(path)
+                    result = decompile_tok(path, string_table=STRING_TABLE)
                     out_path = os.path.join(out_dir, fname.replace('.tok', '.txt'))
                     with open(out_path, 'w') as f:
                         f.write(result)
@@ -391,7 +527,7 @@ def main():
         print(f"\nDone: {count} files decompiled, {errors} errors")
     else:
         filepath = sys.argv[1]
-        result = decompile_tok(filepath)
+        result = decompile_tok(filepath, string_table=STRING_TABLE)
         print(result)
 
 

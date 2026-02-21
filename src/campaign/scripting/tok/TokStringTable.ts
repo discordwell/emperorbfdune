@@ -1,26 +1,157 @@
 /**
- * Builds the STR[N] string table used by .tok scripts.
+ * The STR[N] string table used by .tok mission scripts.
  *
- * The .tok bytecode uses a single-byte index (0-127) to reference type names.
- * Based on cross-referencing decompiled missions with known game behavior:
- *   - Indices 0-99 map to units (in rules.txt [UnitTypes] merged order)
- *   - Indices 100-127 map to buildings (first 28 from [BuildingTypes])
+ * The .tok bytecode uses prefix 0x82 + (index + 0x80) to reference type names,
+ * giving a 128-entry table (indices 0-127).
  *
- * The building mapping for 100+ is provisional — the exact ordering
- * hasn't been fully verified from GAME.EXE. Type resolution failures
- * are logged to help identify mapping issues during testing.
+ * Layout (verified by cross-referencing HKStart/ATStart/ORStart missions):
+ *   Buildings (wrapping at 128):
+ *     111-124: HK military buildings (14 entries)
+ *     125-127, 0-10: AT military buildings (14 entries)
+ *     11-23: OR military buildings (13 entries)
+ *     24-32: Subhouse + utility buildings (9 entries)
+ *   Units:
+ *     33-110: Units in rules.txt [UnitTypes] order (78 entries)
+ *
+ * Note: The game uses runtime type substitution - the same STR[N] index
+ * resolves to different house variants based on the spawning side.
+ * For example, STR[3]="ATOutpost" becomes OROutpost when spawned for Ordos.
  */
 
 import type { TypeRegistry } from '../../../core/TypeRegistry';
 
-/** Build the string table: units first (0-99), then buildings (100-127). */
-export function buildStringTable(typeRegistry: TypeRegistry): string[] {
-  const table: string[] = [];
-  for (const name of typeRegistry.unitTypeNames) {
-    table.push(name);
-  }
-  for (const name of typeRegistry.buildingTypeNames) {
-    table.push(name);
-  }
-  return table;
+const TOK_STRING_TABLE: string[] = [
+  'ATRefinery',       // 0   (building)
+  'ATFactory',        // 1   (building)
+  'ATFactoryFrigate', // 2   (building)
+  'ATOutpost',        // 3   (building)
+  'ATPillbox',        // 4   (building)
+  'ATRocketTurret',   // 5   (building)
+  'ATHanger',         // 6   (building)
+  'ATHelipad',        // 7   (building)
+  'ATStarport',       // 8   (building)
+  'ATPalace',         // 9   (building)
+  'ATConYard',        // 10  (building)
+  'ORSmWindtrap',     // 11  (building)
+  'ORBarracks',       // 12  (building)
+  'ORWall',           // 13  (building)
+  'ORRefinery',       // 14  (building)
+  'ORFactory',        // 15  (building)
+  'ORFactoryFrigate', // 16  (building)
+  'OROutpost',        // 17  (building)
+  'ORGasTurret',      // 18  (building)
+  'ORPopUpTurret',    // 19  (building)
+  'ORHanger',         // 20  (building)
+  'ORStarport',       // 21  (building)
+  'ORPalace',         // 22  (building)
+  'ORConYard',        // 23  (building)
+  'TLFleshVat',       // 24  (building)
+  'GUPalace',         // 25  (building)
+  'IXResCentre',      // 26  (building)
+  'IMBarracks',       // 27  (building)
+  'FRCamp',           // 28  (building)
+  'HKRefineryDock',   // 29  (building)
+  'ATRefineryDock',   // 30  (building)
+  'ORRefineryDock',   // 31  (building)
+  'BeaconFlare',      // 32  (building)
+  'HKScout',          // 33  (unit)
+  'HKLightInf',       // 34  (unit)
+  'HKTrooper',        // 35  (unit)
+  'HKEngineer',       // 36  (unit)
+  'HKFlamer',         // 37  (unit)
+  'ATScout',          // 38  (unit)
+  'ATInfantry',       // 39  (unit)
+  'ATSniper',         // 40  (unit)
+  'ATEngineer',       // 41  (unit)
+  'ATKindjal',        // 42  (unit)
+  'ORScout',          // 43  (unit)
+  'ORChemical',       // 44  (unit)
+  'ORAATrooper',      // 45  (unit)
+  'OREngineer',       // 46  (unit)
+  'ORMortar',         // 47  (unit)
+  'ORSaboteur',       // 48  (unit)
+  'IMGeneral',        // 49  (unit)
+  'ATGeneral',        // 50  (unit)
+  'HKGeneral',        // 51  (unit)
+  'ORGeneral',        // 52  (unit)
+  'IXScientist',      // 53  (unit)
+  'TLScientist',      // 54  (unit)
+  'IXSlave',          // 55  (unit)
+  'CubScout',         // 56  (unit)
+  'ATMilitia',        // 57  (unit)
+  'HKBuzzsaw',        // 58  (unit)
+  'HKAssault',        // 59  (unit)
+  'HKFlame',          // 60  (unit)
+  'HKInkVine',        // 61  (unit)
+  'HKMissile',        // 62  (unit)
+  'HKDevastator',     // 63  (unit)
+  'ATTrike',          // 64  (unit)
+  'ATMongoose',       // 65  (unit)
+  'ATAPC',            // 66  (unit)
+  'ATRepairUnit',     // 67  (unit)
+  'ATMinotaurus',     // 68  (unit)
+  'ATSonicTank',      // 69  (unit)
+  'ORDustScout',      // 70  (unit)
+  'ORLaserTank',      // 71  (unit)
+  'ORAPC',            // 72  (unit)
+  'ORKobra',          // 73  (unit)
+  'ORDeviator',       // 74  (unit)
+  'HKGunship',        // 75  (unit)
+  'HKADVCarryall',    // 76  (unit)
+  'HKDeathHand',      // 77  (unit)
+  'HKADP',            // 78  (unit)
+  'ATOrni',           // 79  (unit)
+  'ATADVCarryall',    // 80  (unit)
+  'ATHawkWeapon',     // 81  (unit)
+  'ATADP',            // 82  (unit)
+  'OREITS',           // 83  (unit)
+  'ORADVCarryall',    // 84  (unit)
+  'ORBeamWeapon',     // 85  (unit)
+  'ORADP',            // 86  (unit)
+  'Harvester',        // 87  (unit)
+  'MCV',              // 88  (unit)
+  'Carryall',         // 89  (unit)
+  'IXInfiltrator',    // 90  (unit)
+  'IXProjector',      // 91  (unit)
+  'TLContaminator',   // 92  (unit)
+  'TLLeech',          // 93  (unit)
+  'IMSardaukar',      // 94  (unit)
+  'IMADVSardaukar',   // 95  (unit)
+  'IMDropShip',       // 96  (unit)
+  'FRFremen',         // 97  (unit)
+  'FRADVFremen',      // 98  (unit)
+  'StoryFRFremen',    // 99  (unit)
+  'StoryFRADVFremen', // 100 (unit)
+  'WormRider',        // 101 (unit)
+  'GUMaker',          // 102 (unit)
+  'GUNIABTank',       // 103 (unit)
+  'INYak',            // 104 (unit)
+  'INYakHauder',      // 105 (unit)
+  'INYakRider',       // 106 (unit)
+  'INSandCrawler',    // 107 (unit)
+  'INBuggy',          // 108 (unit)
+  'INMedicalVehicle', // 109 (unit)
+  'INFemaleCiv',      // 110 (unit)
+  'HKSmWindtrap',     // 111 (building)
+  'HKBarracks',       // 112 (building)
+  'HKWall',           // 113 (building)
+  'HKRefinery',       // 114 (building)
+  'HKFactory',        // 115 (building)
+  'HKFactoryFrigate', // 116 (building)
+  'HKOutpost',        // 117 (building)
+  'HKFlameTurret',    // 118 (building)
+  'HKGunTurret',      // 119 (building)
+  'HKHanger',         // 120 (building)
+  'HKHelipad',        // 121 (building)
+  'HKStarport',       // 122 (building)
+  'HKPalace',         // 123 (building)
+  'HKConYard',        // 124 (building)
+  'ATSmWindtrap',     // 125 (building)
+  'ATBarracks',       // 126 (building)
+  'ATWall',           // 127 (building)
+];
+
+/** Build the string table from the hardcoded GAME.EXE-derived mapping. */
+export function buildStringTable(_typeRegistry: TypeRegistry): string[] {
+  return TOK_STRING_TABLE;
 }

@@ -19,7 +19,7 @@ if (ModelTick () == 0)
   Message (79)
 endif;
 if ((ModelTick () == int_9) && (int_2 == FALSE))
-  obj_5 = NewObject (int_0, STR[74], pos_1)
+  obj_5 = NewObject (int_0, "ORDeviator", pos_1)
   SideAIMove (int_0, GetSidePosition (GetPlayerSide ()))
   int_2 = TRUE
   RemoveShroud (pos_1, 10)
@@ -47,7 +47,7 @@ if ((ModelTick () == int_8 + 25) && (int_4 == TRUE))
   PIPCameraZoomTo (50, 20)
 endif;
 if ((ModelTick () == int_8 + 200) && (int_4 == TRUE))
-  ObjectDetonate (obj_5, STR[84])
+  ObjectDetonate (obj_5, "ORADVCarryall")
   Message (81)
 endif;
 if ((ModelTick () == int_8 + 250) && (int_4 == TRUE))
@@ -70,7 +70,7 @@ if ((EventObjectDestroyed (obj_5) == TRUE) && (int_4 == FALSE))
 endif;
 if (int_2 == TRUE)
   if ((ObjectGetHealth (obj_5) < 300) && (int_4 == FALSE))
-    ObjectDetonate (obj_5, STR[84])
+    ObjectDetonate (obj_5, "ORADVCarryall")
     Message (84)
     int_4 = TRUE
   endif;

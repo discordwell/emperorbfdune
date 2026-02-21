@@ -21,14 +21,14 @@ int (v16)
 int (v17)
 int (v18)
 if (ModelTick () == 0)
-  obj_6 = NewObject (GetPlayerSide (), STR[25], GetSidePosition (GetPlayerSide ()))
+  obj_6 = NewObject (GetPlayerSide (), "GUPalace", GetSidePosition (GetPlayerSide ()))
   ObjectToolTip (obj_6, 47)
-  obj_7 = NewObject (GetPlayerSide (), STR[25], GetSidePosition (GetPlayerSide ()))
+  obj_7 = NewObject (GetPlayerSide (), "GUPalace", GetSidePosition (GetPlayerSide ()))
   ObjectToolTip (obj_7, 47)
-  obj_8 = NewObject (GetPlayerSide (), STR[25], GetSidePosition (GetPlayerSide ()))
+  obj_8 = NewObject (GetPlayerSide (), "GUPalace", GetSidePosition (GetPlayerSide ()))
   ObjectToolTip (obj_8, 47)
   Message (9)
-  NewObject (GetPlayerSide (), STR[18], GetSidePosition (GetPlayerSide ()))
+  NewObject (GetPlayerSide (), "ORGasTurret", GetSidePosition (GetPlayerSide ()))
   int_0 = 3500
   int_1 = 4000
   int_2 = CreateSide ()
@@ -39,7 +39,7 @@ if (ModelTick () == 2550)
   Message (13)
 endif;
 if ((ModelTick () == int_1) && (int_3 < 4))
-  AirStrike (int_2, GetNeutralEntrancePoint (), GetPlayerSide (), STR[35], STR[35], STR[35], STR[35], STR[35], STR[35])
+  AirStrike (int_2, GetNeutralEntrancePoint (), GetPlayerSide (), "HKTrooper", "HKTrooper", "HKTrooper", "HKTrooper", "HKTrooper", "HKTrooper")
   int_3 = int_3 + 1
   int_18 = TRUE
   int_14 = FALSE
@@ -50,17 +50,17 @@ if ((ModelTick () >= int_1) && (int_14 == FALSE) && (AirStrikeDone (int_2) == TR
   int_14 = TRUE
 endif;
 if (ModelTick () == int_1)
-  obj_9 = CarryAllDelivery (GetPlayerSide (), STR[25], GetSidePosition (GetPlayerSide ()))
+  obj_9 = CarryAllDelivery (GetPlayerSide (), "GUPalace", GetSidePosition (GetPlayerSide ()))
   SetVeterancy (obj_9, 3)
   ObjectToolTip (obj_9, 47)
-  obj_10 = CarryAllDelivery (GetPlayerSide (), STR[25], GetSidePosition (GetPlayerSide ()))
+  obj_10 = CarryAllDelivery (GetPlayerSide (), "GUPalace", GetSidePosition (GetPlayerSide ()))
   SetVeterancy (obj_10, 3)
   ObjectToolTip (obj_10, 47)
-  obj_11 = CarryAllDelivery (GetPlayerSide (), STR[25], GetSidePosition (GetPlayerSide ()))
+  obj_11 = CarryAllDelivery (GetPlayerSide (), "GUPalace", GetSidePosition (GetPlayerSide ()))
   ObjectToolTip (obj_11, 47)
-  obj_12 = CarryAllDelivery (GetPlayerSide (), STR[25], GetSidePosition (GetPlayerSide ()))
+  obj_12 = CarryAllDelivery (GetPlayerSide (), "GUPalace", GetSidePosition (GetPlayerSide ()))
   ObjectToolTip (obj_12, 47)
-  obj_13 = CarryAllDelivery (GetPlayerSide (), STR[25], GetSidePosition (GetPlayerSide ()))
+  obj_13 = CarryAllDelivery (GetPlayerSide (), "GUPalace", GetSidePosition (GetPlayerSide ()))
   ObjectToolTip (obj_13, 47)
   int_16 = TRUE
 endif;
