@@ -75,6 +75,7 @@ export class TokInterpreter {
    */
   serialize(eidToIndex: Map<number, number>): MissionScriptState {
     const tokState = this.evaluator.serialize(eidToIndex);
+    tokState.dispatchState = this.functions.serialize(eidToIndex);
     return {
       firedRuleIds: [],
       flags: {},
@@ -92,6 +93,7 @@ export class TokInterpreter {
   restore(state: MissionScriptState, indexToEid: Map<number, number>): void {
     if (state.tokState) {
       this.evaluator.restore(state.tokState, indexToEid);
+      this.functions.restore(state.tokState.dispatchState, indexToEid);
     }
   }
 

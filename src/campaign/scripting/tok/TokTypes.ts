@@ -278,4 +278,19 @@ export interface TokSaveState {
   nextSideId: number;
   relationships: Array<{ a: number; b: number; rel: string }>;
   eventFlags: Record<string, boolean>;
+  dispatchState?: TokDispatchSaveState;
+}
+
+export interface TokDispatchSaveState {
+  airStrikes: Array<{ strikeId: number; units: number[]; targetX: number; targetZ: number }>;
+  tooltipMap: Array<{ entity: number; tooltipId: number }>;
+  sideColors: Array<{ side: number; color: number }>;
+  typeThreatLevels: Array<{ typeName: string; level: number }>;
+  lastCameraTick: number;
+  mainCameraTrackEid: number;
+  pipCameraTrackEid: number;
+  mainCameraSpin: { active: boolean; speed: number; direction: number };
+  pipCameraSpin: { active: boolean; speed: number; direction: number };
+  mainCameraStored: { x: number; z: number; zoom: number; rotation: number } | null;
+  pipCameraStored: { x: number; z: number; zoom: number; rotation: number } | null;
 }

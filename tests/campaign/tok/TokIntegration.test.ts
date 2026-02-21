@@ -4,8 +4,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { TokInterpreter } from '../../../src/campaign/scripting/tok/TokInterpreter';
+import { buildStringTable } from '../../../src/campaign/scripting/tok/TokStringTable';
+import { FUNC, type TokExpr } from '../../../src/campaign/scripting/tok/TokTypes';
 import { EventBus } from '../../../src/core/EventBus';
-import { Owner, unitQuery } from '../../../src/core/ECS';
+import { MoveTarget, Owner, buildingQuery, unitQuery } from '../../../src/core/ECS';
 
 import { createMockCtx, spawnMockUnit, type MockCtx } from './mocks/MockGameContext';
 
@@ -39,6 +41,14 @@ function countUnitsForSide(ctx: MockCtx, side: number): number {
     if (Owner.playerId[eid] === side) count++;
   }
   return count;
+}
+
+function buildIdentityEntityMap(ctx: MockCtx): Map<number, number> {
+  const world = ctx.game.getWorld();
+  const map = new Map<number, number>();
+  for (const eid of unitQuery(world)) map.set(eid, eid);
+  for (const eid of buildingQuery(world)) map.set(eid, eid);
+  return map;
 }
 
 describe('TokInterpreter integration', () => {
@@ -141,6 +151,61 @@ describe('TokInterpreter integration', () => {
     // Enemy count still >= 5, but wave-1 guard should remain TRUE after restore.
     b.tick(ctx, 2);
     expect(countUnitsForSide(ctx, 2)).toBe(side2Before);
+
+    b.dispose();
+  });
+
+  it('restores dispatch runtime state for AirStrikeDone continuity', () => {
+    const ctx = createMockCtx();
+    const tokBuffer = readTok('ATP1D1FRFail');
+    const table = buildStringTable(ctx.typeRegistry);
+    const strikeType = table.indexOf('ATOrni');
+    expect(strikeType).toBeGreaterThanOrEqual(0);
+
+    const lit = (value: number): TokExpr => ({ kind: 'literal', value });
+    const strikePos: TokExpr = {
+      kind: 'callExpr',
+      funcId: FUNC.SetTilePos,
+      args: [lit(20), lit(20)],
+    };
+
+    const a = new TokInterpreter();
+    a.init(ctx, tokBuffer, 'ATP1D1FRFail');
+
+    const dispatchA = (a as any).functions;
+    const evaluatorA = (a as any).evaluator;
+
+    dispatchA.call(FUNC.AirStrike, [
+      lit(7),
+      strikePos,
+      lit(0),
+      lit(strikeType),
+      lit(strikeType),
+    ], ctx, evaluatorA, 0);
+
+    expect(ctx.__spawns.units.length).toBeGreaterThan(0);
+    expect(dispatchA.call(FUNC.AirStrikeDone, [lit(7)], ctx, evaluatorA, 0)).toBe(0);
+
+    const identity = buildIdentityEntityMap(ctx);
+    const saved = a.serialize(identity);
+    a.dispose();
+
+    const b = new TokInterpreter();
+    b.init(ctx, tokBuffer, 'ATP1D1FRFail');
+    b.restore(saved, identity);
+
+    const dispatchB = (b as any).functions;
+    const evaluatorB = (b as any).evaluator;
+
+    expect(dispatchB.call(FUNC.AirStrikeDone, [lit(7)], ctx, evaluatorB, 1)).toBe(0);
+
+    const world = ctx.game.getWorld();
+    for (const eid of unitQuery(world)) {
+      if (Owner.playerId[eid] === 0) {
+        MoveTarget.active[eid] = 0;
+      }
+    }
+    expect(dispatchB.call(FUNC.AirStrikeDone, [lit(7)], ctx, evaluatorB, 2)).toBe(1);
 
     b.dispose();
   });

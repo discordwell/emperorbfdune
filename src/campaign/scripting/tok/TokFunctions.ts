@@ -8,7 +8,7 @@
  *   - Less common: stubbed with console.warn
  */
 
-import type { TokExpr, TokPos } from './TokTypes';
+import type { TokDispatchSaveState, TokExpr, TokPos } from './TokTypes';
 import { FUNC, FUNC_NAMES, VarType } from './TokTypes';
 import type { TokEvaluator } from './TokEvaluator';
 import type { GameContext } from '../../../core/GameContext';
@@ -46,6 +46,91 @@ export class TokFunctionDispatch {
 
   setStringTable(table: string[]): void {
     this.stringTable = table;
+  }
+
+  serialize(eidToIndex: Map<number, number>): TokDispatchSaveState {
+    const mapEntity = (eid: number): number =>
+      eid >= 0 ? (eidToIndex.get(eid) ?? -1) : -1;
+
+    return {
+      airStrikes: Array.from(this.airStrikes.entries()).map(([strikeId, strike]) => ({
+        strikeId,
+        units: strike.units.map(mapEntity),
+        targetX: strike.targetX,
+        targetZ: strike.targetZ,
+      })),
+      tooltipMap: Array.from(this.tooltipMap.entries()).map(([entity, tooltipId]) => ({
+        entity: mapEntity(entity),
+        tooltipId,
+      })),
+      sideColors: Array.from(this.sideColors.entries()).map(([side, color]) => ({ side, color })),
+      typeThreatLevels: Array.from(this.typeThreatLevels.entries()).map(([typeName, level]) => ({ typeName, level })),
+      lastCameraTick: this.lastCameraTick,
+      mainCameraTrackEid: mapEntity(this.mainCameraTrackEid ?? -1),
+      pipCameraTrackEid: mapEntity(this.pipCameraTrackEid ?? -1),
+      mainCameraSpin: { ...this.mainCameraSpin },
+      pipCameraSpin: { ...this.pipCameraSpin },
+      mainCameraStored: this.mainCameraStored ? { ...this.mainCameraStored } : null,
+      pipCameraStored: this.pipCameraStored ? { ...this.pipCameraStored } : null,
+    };
+  }
+
+  restore(state: TokDispatchSaveState | undefined, indexToEid: Map<number, number>): void {
+    const mapEntity = (idx: number): number =>
+      idx >= 0 ? (indexToEid.get(idx) ?? -1) : -1;
+
+    this.airStrikes.clear();
+    this.tooltipMap.clear();
+    this.sideColors.clear();
+    this.typeThreatLevels.clear();
+    this.lastCameraTick = -1;
+    this.mainCameraTrackEid = null;
+    this.pipCameraTrackEid = null;
+    this.mainCameraSpin = { active: false, speed: 0, direction: 1 };
+    this.pipCameraSpin = { active: false, speed: 0, direction: 1 };
+    this.mainCameraStored = null;
+    this.pipCameraStored = null;
+
+    if (!state) return;
+
+    for (const strike of state.airStrikes ?? []) {
+      this.airStrikes.set(strike.strikeId, {
+        units: strike.units.map(mapEntity).filter((eid) => eid >= 0),
+        targetX: strike.targetX,
+        targetZ: strike.targetZ,
+      });
+    }
+
+    for (const entry of state.tooltipMap ?? []) {
+      const entity = mapEntity(entry.entity);
+      if (entity >= 0) {
+        this.tooltipMap.set(entity, entry.tooltipId);
+      }
+    }
+
+    for (const entry of state.sideColors ?? []) {
+      this.sideColors.set(entry.side, entry.color);
+    }
+
+    for (const entry of state.typeThreatLevels ?? []) {
+      this.typeThreatLevels.set(entry.typeName, entry.level);
+    }
+
+    this.lastCameraTick = typeof state.lastCameraTick === 'number' ? state.lastCameraTick : -1;
+    const mainTrack = mapEntity(state.mainCameraTrackEid ?? -1);
+    const pipTrack = mapEntity(state.pipCameraTrackEid ?? -1);
+    this.mainCameraTrackEid = mainTrack >= 0 ? mainTrack : null;
+    this.pipCameraTrackEid = pipTrack >= 0 ? pipTrack : null;
+
+    this.mainCameraSpin = state.mainCameraSpin
+      ? { ...state.mainCameraSpin }
+      : { active: false, speed: 0, direction: 1 };
+    this.pipCameraSpin = state.pipCameraSpin
+      ? { ...state.pipCameraSpin }
+      : { active: false, speed: 0, direction: 1 };
+
+    this.mainCameraStored = state.mainCameraStored ? { ...state.mainCameraStored } : null;
+    this.pipCameraStored = state.pipCameraStored ? { ...state.pipCameraStored } : null;
   }
 
   /** Resolve a string table index to a type name. */
