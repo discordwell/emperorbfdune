@@ -23,6 +23,16 @@ export interface MapData {
   textureIndices: Uint8Array;  // W*H texture palette refs
 }
 
+export interface MapPoint { x: number; z: number; }
+export interface MapEntrance { marker: number; x: number; z: number; }
+export interface MapMetadata {
+  spawnPoints: MapPoint[];
+  scriptPoints: (MapPoint | null)[];  // 0-23 indexed, ScriptN → index N-1
+  entrances: MapEntrance[];
+  spiceFields: MapPoint[];
+  aiWaypoints: MapPoint[];
+}
+
 export interface MapManifestEntry {
   name: string;
   w: number;
@@ -31,9 +41,42 @@ export interface MapManifestEntry {
   type: string;
   binSize: number;
   hasThumb: boolean;
+  // Optional metadata from test.xbf FXData (tile coordinates)
+  spawnPoints?: number[][];      // [[x, z], ...]
+  scriptPoints?: (number[] | null)[];  // indexed 0-23
+  entrances?: number[][];        // [[marker, x, z], ...]
+  spiceFields?: number[][];      // [[x, z], ...]
+  aiWaypoints?: number[][];      // [[x, z], ...]
 }
 
 export type MapManifest = Record<string, MapManifestEntry>;
+
+/** Parse compact manifest arrays into typed MapMetadata objects */
+export function getMapMetadata(entry: MapManifestEntry): MapMetadata {
+  const spawnPoints: MapPoint[] = (entry.spawnPoints ?? []).map(
+    ([x, z]) => ({ x, z })
+  );
+
+  const scriptPoints: (MapPoint | null)[] = (entry.scriptPoints ?? []).map(
+    pt => pt ? { x: pt[0], z: pt[1] } : null
+  );
+  // Pad to 24 slots
+  while (scriptPoints.length < 24) scriptPoints.push(null);
+
+  const entrances: MapEntrance[] = (entry.entrances ?? []).map(
+    ([marker, x, z]) => ({ marker, x, z })
+  );
+
+  const spiceFields: MapPoint[] = (entry.spiceFields ?? []).map(
+    ([x, z]) => ({ x, z })
+  );
+
+  const aiWaypoints: MapPoint[] = (entry.aiWaypoints ?? []).map(
+    ([x, z]) => ({ x, z })
+  );
+
+  return { spawnPoints, scriptPoints, entrances, spiceFields, aiWaypoints };
+}
 
 const HEADER_SIZE = 12; // 2 + 2 + 4 + 4 bytes
 

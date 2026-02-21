@@ -37,6 +37,7 @@ import type { TypeRegistry } from './TypeRegistry';
 import type { SimulationHashTracker } from './SimulationHash';
 import type { ReplayRecorder, ReplayPlayer } from './ReplaySystem';
 import type { MissionScriptRunnerInterface } from '../campaign/scripting/MissionScriptTypes';
+import type { MapMetadata } from '../config/MapLoader';
 
 // Save/Load types
 export interface SavedEntity {
@@ -113,6 +114,7 @@ export interface GameContext {
   totalPlayers: number;
   activeMissionConfig: MissionConfigData | null;
   activeMapId: string | null;
+  mapMetadata: MapMetadata | null;
   missionRuntime: MissionRuntimeSettings | null;
 
   // Systems

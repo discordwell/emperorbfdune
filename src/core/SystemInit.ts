@@ -446,7 +446,7 @@ export function initializeSystems(config: SystemInitConfig): GameContext {
   const ctx: GameContext = {
     game, gameRules, artMap, typeRegistry, house,
     opponents, totalPlayers,
-    activeMissionConfig, activeMapId, missionRuntime,
+    activeMissionConfig, activeMapId, mapMetadata: null, missionRuntime,
 
     scene, terrain, input, modelManager, unitRenderer,
     selectionManager, commandManager, pathfinder, asyncPathfinder, movement,

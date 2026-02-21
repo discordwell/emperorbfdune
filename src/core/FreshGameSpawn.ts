@@ -1,6 +1,7 @@
 import type { GameContext } from './GameContext';
 import { createSeededRng, getSpawnPositions } from '../utils/GameHelpers';
 import { simRng } from '../utils/DeterministicRNG';
+import { TILE_SIZE } from '../utils/MathUtils';
 import {
   addComponent,
   Harvester,
@@ -9,22 +10,34 @@ import {
 export function spawnFreshGame(ctx: GameContext): void {
   const {
     game, gameRules, typeRegistry, terrain, aiPlayers, opponents, house,
-    totalPlayers, activeMapId, scene,
+    totalPlayers, activeMapId, scene, mapMetadata,
   } = ctx;
   const { unitTypeNames } = typeRegistry;
   const world = game.getWorld();
 
   // Distribute spawn positions for all players
-  let spawnRandom = () => simRng.random();
-  if (activeMapId) {
-    spawnRandom = createSeededRng(`${activeMapId}|${house.prefix}|${house.enemyPrefix}|${totalPlayers}`);
-  } else if (house.mapChoice) {
-    spawnRandom = createSeededRng(`${house.mapChoice.seed}|${house.prefix}|${house.enemyPrefix}|${totalPlayers}`);
-  }
   const isObserver = house.gameMode === 'observer';
-  // In observer mode, don't waste a spawn slot on the phantom player 0
   const spawnCount = isObserver ? aiPlayers.length : totalPlayers;
-  const spawnPositions = getSpawnPositions(terrain.getMapWidth(), terrain.getMapHeight(), spawnCount, spawnRandom);
+
+  let spawnPositions: { x: number; z: number }[];
+
+  // Use real spawn points from map metadata when available
+  if (mapMetadata && mapMetadata.spawnPoints.length >= spawnCount) {
+    spawnPositions = mapMetadata.spawnPoints.slice(0, spawnCount).map(pt => ({
+      x: pt.x * TILE_SIZE,
+      z: pt.z * TILE_SIZE,
+    }));
+    console.log(`Using ${spawnCount} real spawn points from map metadata`);
+  } else {
+    // Fall back to procedural ellipse placement
+    let spawnRandom = () => simRng.random();
+    if (activeMapId) {
+      spawnRandom = createSeededRng(`${activeMapId}|${house.prefix}|${house.enemyPrefix}|${totalPlayers}`);
+    } else if (house.mapChoice) {
+      spawnRandom = createSeededRng(`${house.mapChoice.seed}|${house.prefix}|${house.enemyPrefix}|${totalPlayers}`);
+    }
+    spawnPositions = getSpawnPositions(terrain.getMapWidth(), terrain.getMapHeight(), spawnCount, spawnRandom);
+  }
   const playerBase = spawnPositions[0];
   const aiOffset = isObserver ? 0 : 1; // AI positions start at index 0 in observer, 1 otherwise
 

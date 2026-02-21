@@ -23,11 +23,14 @@ Scale relationships:
 """
 
 import json
+import math
 import os
 import re
 import struct
 import sys
 import numpy as np
+
+from parse_xbf_map import parse_map as parse_xbf_map
 
 try:
     from PIL import Image
@@ -233,6 +236,76 @@ def write_bin(output_path: str, w: int, h: int, ambient_r: float, ambient_g: flo
         f.write(texture_idx.tobytes())
 
 
+GAME_UNITS_PER_TILE = 32  # Original game uses ~32 units per tile
+
+
+def to_tile(coord: float) -> float:
+    """Convert original game coordinate to tile coordinate."""
+    return round(coord / GAME_UNITS_PER_TILE, 2)
+
+
+def extract_metadata(map_dir: str) -> dict | None:
+    """Extract spawn/script/entrance/spice/AI metadata from test.xbf FXData."""
+    xbf_path = os.path.join(map_dir, 'test.xbf')
+    if not os.path.exists(xbf_path):
+        return None
+
+    try:
+        data = parse_xbf_map(xbf_path)
+    except Exception as e:
+        print(f'    metadata: xbf parse error: {e}')
+        return None
+
+    meta = {}
+
+    # Spawn points: [[x, z], ...] in tile coords
+    if 'spawn_points' in data and data['spawn_points']:
+        meta['spawnPoints'] = [
+            [to_tile(sp['x']), to_tile(sp['z'])]
+            for sp in data['spawn_points']
+        ]
+
+    # Script points: array indexed 0-23, ScriptN → index N-1
+    # null for unused slots
+    if 'script_points' in data and data['script_points']:
+        scripts = [None] * 24
+        for name, pt in data['script_points'].items():
+            # Extract number from "Script1", "Script12", etc.
+            m = re.match(r'Script(\d+)', name)
+            if m:
+                idx = int(m.group(1)) - 1  # Script1 → index 0
+                if 0 <= idx < 24:
+                    scripts[idx] = [to_tile(pt['x']), to_tile(pt['z'])]
+        # Trim trailing nulls
+        while scripts and scripts[-1] is None:
+            scripts.pop()
+        if scripts:
+            meta['scriptPoints'] = scripts
+
+    # Entrances: [[marker, x, z], ...] in tile coords
+    if 'entrances' in data and data['entrances']:
+        meta['entrances'] = [
+            [e['marker'], to_tile(e['x']), to_tile(e['z'])]
+            for e in data['entrances']
+        ]
+
+    # Spice fields: [[x, z], ...] in tile coords
+    if 'spice_fields' in data and data['spice_fields']:
+        meta['spiceFields'] = [
+            [to_tile(sf['x']), to_tile(sf['z'])]
+            for sf in data['spice_fields']
+        ]
+
+    # AI waypoints: [[x, z], ...] in tile coords
+    if 'ai_waypoints' in data and data['ai_waypoints']:
+        meta['aiWaypoints'] = [
+            [to_tile(wp['x']), to_tile(wp['z'])]
+            for wp in data['ai_waypoints']
+        ]
+
+    return meta if meta else None
+
+
 def convert_map(map_dir: str, dirname: str, output_dir: str) -> dict | None:
     """Convert a single map. Returns manifest entry or None."""
     inf_path = os.path.join(map_dir, 'map.inf')
@@ -277,7 +350,10 @@ def convert_map(map_dir: str, dirname: str, output_dir: str) -> dict | None:
     # Calculate file size
     bin_size = os.path.getsize(bin_path)
 
-    return {
+    # Extract metadata from test.xbf FXData
+    metadata = extract_metadata(map_dir)
+
+    entry = {
         'name': name,
         'w': w,
         'h': h,
@@ -286,6 +362,21 @@ def convert_map(map_dir: str, dirname: str, output_dir: str) -> dict | None:
         'binSize': bin_size,
         'hasThumb': has_thumb,
     }
+
+    if metadata:
+        entry.update(metadata)
+        parts = []
+        if 'spawnPoints' in metadata:
+            parts.append(f'{len(metadata["spawnPoints"])}sp')
+        if 'scriptPoints' in metadata:
+            count = sum(1 for s in metadata['scriptPoints'] if s is not None)
+            parts.append(f'{count}sc')
+        if 'entrances' in metadata:
+            parts.append(f'{len(metadata["entrances"])}en')
+        if parts:
+            print(f'    metadata: {", ".join(parts)}')
+
+    return entry
 
 
 def main():

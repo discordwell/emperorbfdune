@@ -4,7 +4,7 @@ import { parseArtIni } from './config/ArtIniParser';
 import { loadConstants } from './utils/Constants';
 import { AudioManager } from './audio/AudioManager';
 import { HouseSelect, type HouseChoice, type GameMode, type Difficulty } from './ui/HouseSelect';
-import { loadMap, getCampaignMapId, getSpecialMissionMapId } from './config/MapLoader';
+import { loadMap, loadMapManifest, getMapMetadata, getCampaignMapId, getSpecialMissionMapId } from './config/MapLoader';
 import { CampaignMap } from './ui/CampaignMap';
 import { loadCampaignStrings, type HousePrefix, JUMP_POINTS } from './campaign/CampaignData';
 import { CampaignPhaseManager } from './campaign/CampaignPhaseManager';
@@ -432,6 +432,17 @@ async function main() {
       await ctx.terrain.loadFromMapData(mapData);
       mapLoaded = true;
       console.log(`Loaded real map: ${realMapId} (${mapData.width}×${mapData.height})`);
+
+      // Load map metadata (spawn points, script points, entrances, etc.)
+      const manifest = await loadMapManifest();
+      const manifestEntry = manifest[realMapId];
+      if (manifestEntry) {
+        ctx.mapMetadata = getMapMetadata(manifestEntry);
+        const sp = ctx.mapMetadata.spawnPoints.length;
+        const sc = ctx.mapMetadata.scriptPoints.filter(p => p !== null).length;
+        const en = ctx.mapMetadata.entrances.length;
+        console.log(`Map metadata: ${sp} spawns, ${sc} scripts, ${en} entrances`);
+      }
     }
   }
   if (!mapLoaded) {

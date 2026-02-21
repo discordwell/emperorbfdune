@@ -20,6 +20,7 @@ import {
 import { getCampaignString } from '../../CampaignData';
 import { EventBus } from '../../../core/EventBus';
 import { simRng } from '../../../utils/DeterministicRNG';
+import { TILE_SIZE } from '../../../utils/MathUtils';
 
 export class TokFunctionDispatch {
   private stringTable: string[] = [];
@@ -881,12 +882,24 @@ export class TokFunctionDispatch {
   }
 
   private getEntrancePoint(ctx: GameContext, side: number): TokPos {
+    const meta = ctx.mapMetadata;
+    if (meta && meta.entrances.length > 0) {
+      // Find entrance matching the side marker, or closest to side's base
+      const match = meta.entrances.find(e => e.marker === side);
+      if (match) {
+        return { x: match.x * TILE_SIZE, z: match.z * TILE_SIZE };
+      }
+      // Fall back to any non-generic entrance, or first available
+      const nonGeneric = meta.entrances.filter(e => e.marker !== 99);
+      const pick = nonGeneric.length > side ? nonGeneric[side] : meta.entrances[side % meta.entrances.length];
+      return { x: pick.x * TILE_SIZE, z: pick.z * TILE_SIZE };
+    }
+
+    // Fallback: map edge positions
     const mapW = ctx.terrain.getMapWidth() * 2;
     const mapH = ctx.terrain.getMapHeight() * 2;
-    // Entrance points are map edges near the side's base
     if (side === 0) return { x: 5, z: mapH * 0.7 };
     if (side === 1) return { x: mapW - 5, z: mapH * 0.3 };
-    // Random edge for other sides
     const edge = simRng.int(0, 3);
     switch (edge) {
       case 0: return { x: simRng.int(5, mapW - 5), z: 5 };
@@ -897,9 +910,22 @@ export class TokFunctionDispatch {
   }
 
   private getNeutralEntrancePoint(ctx: GameContext): TokPos {
+    const meta = ctx.mapMetadata;
+    if (meta && meta.entrances.length > 0) {
+      // Pick a random generic entrance (marker === 99)
+      const generic = meta.entrances.filter(e => e.marker === 99);
+      if (generic.length > 0) {
+        const pick = generic[simRng.int(0, generic.length - 1)];
+        return { x: pick.x * TILE_SIZE, z: pick.z * TILE_SIZE };
+      }
+      // Fall back to any entrance
+      const pick = meta.entrances[simRng.int(0, meta.entrances.length - 1)];
+      return { x: pick.x * TILE_SIZE, z: pick.z * TILE_SIZE };
+    }
+
+    // Fallback: random map edge
     const mapW = ctx.terrain.getMapWidth() * 2;
     const mapH = ctx.terrain.getMapHeight() * 2;
-    // Pick a random map edge point
     const edge = simRng.int(0, 3);
     switch (edge) {
       case 0: return { x: simRng.int(5, mapW - 5), z: 5 };
@@ -910,15 +936,50 @@ export class TokFunctionDispatch {
   }
 
   private getUnusedBasePoint(ctx: GameContext): TokPos {
+    const meta = ctx.mapMetadata;
+    if (meta && meta.spawnPoints.length > 0) {
+      // Find a spawn point not currently assigned to any active player
+      const usedPositions = new Set<string>();
+      for (const ai of ctx.aiPlayers) {
+        const bx = (ai as any).baseX;
+        const bz = (ai as any).baseZ;
+        if (bx !== undefined) usedPositions.add(`${Math.round(bx)},${Math.round(bz)}`);
+      }
+      for (const sp of meta.spawnPoints) {
+        const wx = sp.x * TILE_SIZE;
+        const wz = sp.z * TILE_SIZE;
+        if (!usedPositions.has(`${Math.round(wx)},${Math.round(wz)}`)) {
+          return { x: wx, z: wz };
+        }
+      }
+      // All used — pick last spawn point as best guess
+      const last = meta.spawnPoints[meta.spawnPoints.length - 1];
+      return { x: last.x * TILE_SIZE, z: last.z * TILE_SIZE };
+    }
+
+    // Fallback: random position in center area
     const mapW = ctx.terrain.getMapWidth() * 2;
     const mapH = ctx.terrain.getMapHeight() * 2;
     return { x: mapW * (0.3 + simRng.int(0, 40) / 100), z: mapH * (0.3 + simRng.int(0, 40) / 100) };
   }
 
-  private getScriptPoint(_ctx: GameContext, _idx: number): TokPos {
-    // Script points are embedded in map data (.dme) which we can't parse yet
-    // Return a reasonable default
-    return { x: 50, z: 50 };
+  private getScriptPoint(ctx: GameContext, idx: number): TokPos {
+    const meta = ctx.mapMetadata;
+    if (meta) {
+      // Script1 → index 0, Script24 → index 23
+      const scriptIdx = idx - 1;
+      if (scriptIdx >= 0 && scriptIdx < meta.scriptPoints.length) {
+        const pt = meta.scriptPoints[scriptIdx];
+        if (pt) {
+          return { x: pt.x * TILE_SIZE, z: pt.z * TILE_SIZE };
+        }
+      }
+    }
+
+    // Fallback: map center
+    const mapW = ctx.terrain.getMapWidth() * 2;
+    const mapH = ctx.terrain.getMapHeight() * 2;
+    return { x: mapW * 0.5, z: mapH * 0.5 };
   }
 
   private aiMoveUnits(ctx: GameContext, side: number, x: number, z: number, attackMove: boolean): void {
