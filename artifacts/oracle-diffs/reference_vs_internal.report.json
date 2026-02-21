@@ -1,0 +1,7 @@
+{
+  "status": "missing-reference",
+  "internalFile": "/Users/discordwell/Projects/emperorbfdune/tests/campaign/tok/oracles/tok_mission_oracle.v1.json",
+  "referenceFile": "/Users/discordwell/Projects/emperorbfdune/tools/oracles/reference/tok_mission_oracle.reference.v1.json",
+  "strict": false,
+  "requireReference": false
+}

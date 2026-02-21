@@ -9,7 +9,16 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "manifest": "node tools/generate-manifest.js"
+    "manifest": "node tools/generate-manifest.js",
+    "oracle:fast": "vitest run tests/campaign/tok/TokMissionOracle.test.ts tests/campaign/tok/TokBranchOracle.test.ts tests/campaign/tok/TokSimulationHashOracle.test.ts",
+    "oracle:full": "TOK_ORACLE_FULL=1 vitest run tests/campaign/tok/TokMissionOracle.test.ts tests/campaign/tok/TokBranchOracle.test.ts tests/campaign/tok/TokSimulationHashOracle.test.ts",
+    "oracle:update": "TOK_UPDATE_ORACLES=1 TOK_ORACLE_FULL=1 vitest run tests/campaign/tok/TokMissionOracle.test.ts tests/campaign/tok/TokBranchOracle.test.ts tests/campaign/tok/TokSimulationHashOracle.test.ts",
+    "oracle:reference:manifest": "node tools/oracles/build-capture-manifest.mjs",
+    "oracle:reference:extract": "node tools/oracles/extract-reference-log-lines.mjs",
+    "oracle:reference:merge": "node tools/oracles/merge-reference-jsonl.mjs",
+    "oracle:reference:validate": "node tools/oracles/validate-reference-jsonl.mjs",
+    "oracle:reference:compare": "node tools/oracles/compare-reference.mjs --report-out artifacts/oracle-diffs/reference_vs_internal.report.json",
+    "oracle:reference:strict": "node tools/oracles/compare-reference.mjs --strict --require-reference --require-all-missions --min-coverage 1 --report-out artifacts/oracle-diffs/reference_vs_internal.report.json"
   },
   "dependencies": {
     "bitecs": "^0.3.40",

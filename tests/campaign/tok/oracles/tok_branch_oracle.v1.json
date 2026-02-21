@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "generator": "tok-branch-oracle-v1",
+  "generatedAt": "2026-02-21T20:40:49.538Z",
+  "scenarios": {
+    "atp1d1frfail_cash_once": {
+      "id": "atp1d1frfail_cash_once",
+      "description": "ATP1D1FRFail grants 10000 credits exactly once on startup.",
+      "signals": {
+        "addSolarisCallCount": 1,
+        "addSolarisCalls": [
+          1,
+          10000
+        ],
+        "finalIntVar1": 0
+      }
+    },
+    "atp1d1fr_wave_progression": {
+      "id": "atp1d1fr_wave_progression",
+      "description": "ATP1D1FR wave triggers fire once at expected SideUnitCount thresholds.",
+      "signals": {
+        "setupSides": [
+          2,
+          3,
+          4
+        ],
+        "side2AfterWave1": 7,
+        "side2AfterGuardTick": 7,
+        "side3AfterWave2": 10,
+        "side4AfterWave3": 10,
+        "guardInts": [
+          1,
+          1,
+          1
+        ],
+        "messageCount": 1
+      }
+    },
+    "atp1d1fr_restore_wave_guard": {
+      "id": "atp1d1fr_restore_wave_guard",
+      "description": "Wave guard survives save/restore and prevents duplicate wave spawn.",
+      "signals": {
+        "side2Before": 7,
+        "side2After": 7,
+        "wave1GuardInt4": 1
+      }
+    },
+    "house_start_matrix": {
+      "id": "house_start_matrix",
+      "description": "House start scripts remain deterministic with stable startup side state.",
+      "signals": {
+        "seed": 4242,
+        "maxTick": 120,
+        "signatures": [
+          "ATStart:120:0,2,3,4,6,5",
+          "HKStart:120:0,2,3,4,6,5",
+          "ORStart:120:0,2,3,4,6,5"
+        ]
+      }
+    },
+    "event_side_attacks_side": {
+      "id": "event_side_attacks_side",
+      "description": "unit:attacked events set EventSideAttacksSide flags in the same tick.",
+      "signals": {
+        "intVar1": 1,
+        "eventFlags": []
+      }
+    },
+    "tutorial_save_restore": {
+      "id": "tutorial_save_restore",
+      "description": "ATTutorial final VM state remains identical after save/restore continuation.",
+      "signals": {
+        "scriptId": "ATTutorial",
+        "maxTick": 220,
+        "saveTick": 70,
+        "freshFinalTick": 220,
+        "freshFinalHash": "1c50fe4d2a56c973cd4544318a728dca747baed9182b166ff5ccf30fe306c84f",
+        "restoredFinalHash": "1c50fe4d2a56c973cd4544318a728dca747baed9182b166ff5ccf30fe306c84f",
+        "matchesAfterRestore": true
+      }
+    }
+  }
+}

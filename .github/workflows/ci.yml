@@ -5,9 +5,13 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
 
 jobs:
-  check:
+  check-fast:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,8 +26,59 @@ jobs:
       - name: Typecheck
         run: npx tsc --noEmit
 
-      - name: Test
-        run: npx vitest run
+      - name: Oracle Fast Gate
+        run: npm run oracle:fast
+
+      - name: Tok Fast Regression Suite
+        run: npx vitest run tests/campaign/tok/TokParser.test.ts tests/campaign/tok/TokFunctions.test.ts tests/campaign/tok/TokIntegration.test.ts
 
       - name: Build
         run: npx esbuild src/index.ts --bundle --outfile=dist/game.js --format=esm
+
+      - name: Upload Oracle Diff Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oracle-diffs-fast
+          path: artifacts/oracle-diffs/**
+          if-no-files-found: ignore
+
+  check-full-nightly:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Oracle Full Corpus Gate
+        run: npm run oracle:full
+
+      - name: Full Test Suite
+        run: npx vitest run
+
+      - name: Reference Oracle Compare
+        run: npm run oracle:reference:compare
+
+      - name: Reference Oracle Strict Gate
+        if: ${{ vars.TOK_REQUIRE_EXTERNAL_REFERENCE == '1' }}
+        run: npm run oracle:reference:strict
+
+      - name: Build
+        run: npx esbuild src/index.ts --bundle --outfile=dist/game.js --format=esm
+
+      - name: Upload Oracle Diff Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oracle-diffs-full
+          path: artifacts/oracle-diffs/**
+          if-no-files-found: ignore
