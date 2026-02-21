@@ -5,6 +5,7 @@ interface EventMap {
   'unit:deselected': {};
   'unit:move': { entityIds: number[]; x: number; z: number };
   'unit:attack': { attackerIds: number[]; targetId: number };
+  'unit:attacked': { attackerEid: number; targetEid: number };
   'unit:spawned': { entityId: number; unitType: string; owner: number };
   'unit:died': { entityId: number; killerEntity: number };
   'unit:promoted': { entityId: number; rank: number };

@@ -127,7 +127,7 @@ export class TokInterpreter {
         }
       }
     };
-    EventBus.on('unit:died' as any, onDied);
+    EventBus.on('unit:died', onDied);
     this.eventListeners.push({ event: 'unit:died', callback: onDied });
 
     // Track attacks for EventSideAttacksSide
@@ -142,7 +142,7 @@ export class TokInterpreter {
         }
       }
     };
-    EventBus.on('unit:attacked' as any, onAttack);
+    EventBus.on('unit:attacked', onAttack);
     this.eventListeners.push({ event: 'unit:attacked', callback: onAttack });
 
     // Track building construction for EventObjectConstructed

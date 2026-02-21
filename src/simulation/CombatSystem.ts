@@ -795,6 +795,10 @@ export class CombatSystem implements GameSystem {
       attackerEntity: attackerEid,
       targetEntity: targetEid,
     });
+    EventBus.emit('unit:attacked', {
+      attackerEid,
+      targetEid,
+    });
 
     // Re-check ownership after event (Deviator may have converted target to our team)
     if (Owner.playerId[targetEid] === Owner.playerId[attackerEid]) return;

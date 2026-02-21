@@ -14,8 +14,8 @@ import type { TokEvaluator } from './TokEvaluator';
 import type { GameContext } from '../../../core/GameContext';
 import {
   Health, Owner, Position, MoveTarget,
-  unitQuery, buildingQuery, UnitType, BuildingType,
-  hasComponent,
+  unitQuery, buildingQuery, UnitType, BuildingType, Veterancy,
+  hasComponent, addComponent,
 } from '../../../core/ECS';
 import { getCampaignString } from '../../CampaignData';
 import { EventBus } from '../../../core/EventBus';
@@ -402,8 +402,21 @@ export class TokFunctionDispatch {
       case FUNC.SideVisibleToSide: {
         const sideA = asInt(args[0]);
         const sideB = asInt(args[1]);
-        // Simplified: return true if side A has units
-        return this.countSideUnits(ctx, sideA) > 0 ? 1 : 0;
+        const w = ctx.game.getWorld();
+        const isVisibleToSideB = (eid: number): boolean => {
+          if (Owner.playerId[eid] !== sideA || Health.current[eid] <= 0) return false;
+          if (sideB !== 0) return true;
+          const tile = worldToTile(Position.x[eid], Position.z[eid]);
+          return ctx.fogOfWar.isTileVisible(tile.tx, tile.tz);
+        };
+
+        for (const eid of unitQuery(w)) {
+          if (isVisibleToSideB(eid)) return 1;
+        }
+        for (const eid of buildingQuery(w)) {
+          if (isVisibleToSideB(eid)) return 1;
+        }
+        return 0;
       }
 
       case FUNC.SideNearToSide:
@@ -565,11 +578,33 @@ export class TokFunctionDispatch {
         return 0;
       }
 
-      case FUNC.SideAIEncounterIgnore:
+      case FUNC.SideAIEncounterIgnore: {
+        const side = asInt(args[0]);
+        this.setAIBehavior(ctx, side, 'defensive');
+        return 0;
+      }
+
+      case FUNC.SideAIHeadlessChicken: {
+        const side = asInt(args[0]);
+        const mapW = ctx.terrain.getMapWidth() * 2;
+        const mapH = ctx.terrain.getMapHeight() * 2;
+        const targetX = simRng.int(0, Math.max(1, Math.floor(mapW)));
+        const targetZ = simRng.int(0, Math.max(1, Math.floor(mapH)));
+        this.aiMoveUnits(ctx, side, targetX, targetZ, false);
+        return 0;
+      }
+
+      case FUNC.SideAIShuffle: {
+        const side = asInt(args[0]);
+        const sidePos = this.getSidePosition(ctx, ev, side);
+        const offsetX = simRng.int(-10, 10);
+        const offsetZ = simRng.int(-10, 10);
+        this.aiMoveUnits(ctx, side, sidePos.x + offsetX, sidePos.z + offsetZ, false);
+        return 0;
+      }
+
       case FUNC.SideAIEnterBuilding:
-      case FUNC.SideAIHeadlessChicken:
-      case FUNC.SideAIShuffle:
-        return 0; // Niche AI modifiers — no-op for now
+        return 0;
 
       // -------------------------------------------------------------------
       // Dialog / Messages
@@ -892,7 +927,7 @@ export class TokFunctionDispatch {
       case FUNC.CarryAllDelivery:
       case FUNC.Delivery:
       case FUNC.StarportDelivery:
-        // These spawn units via carryall — use direct spawn for now
+        // Spawn delivery payload at the requested position.
         if (args.length >= 3) {
           const side = asInt(args[0]);
           const typeIdx = asInt(args[1]);
@@ -947,7 +982,22 @@ export class TokFunctionDispatch {
 
       case FUNC.SetVeterancy: {
         // SetVeterancy(obj, rank)
-        // Vet system stores xp/rank in ECS — simplified to no-op for now
+        const eid = asInt(args[0]);
+        const rank = Math.max(0, Math.min(3, asInt(args[1])));
+        const w = ctx.game.getWorld();
+        if (eid >= 0 && hasComponent(w, Health, eid)) {
+          if (!hasComponent(w, Veterancy, eid)) {
+            addComponent(w, Veterancy, eid);
+          }
+          Veterancy.rank[eid] = rank;
+          // Preserve current XP when possible, otherwise seed rank threshold if known.
+          if (Veterancy.xp[eid] === 0 && hasComponent(w, UnitType, eid)) {
+            const typeName = ctx.typeRegistry.unitTypeNames[UnitType.id[eid]];
+            const def = typeName ? ctx.gameRules.units.get(typeName) : null;
+            const threshold = rank > 0 ? def?.veterancy?.[rank - 1]?.scoreThreshold ?? 0 : 0;
+            Veterancy.xp[eid] = Math.max(0, threshold);
+          }
+        }
         return 0;
       }
 

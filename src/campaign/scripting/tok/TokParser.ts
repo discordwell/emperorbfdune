@@ -16,8 +16,7 @@
 import {
   type TokProgram, type TokBlock, type TokStatement,
   type TokExpr, type TokFuncCall, type TokAssignment,
-  type VarDecl,
-  VarType, KEYWORD_THRESHOLD, FUNC_NAMES, KW,
+  VarType, KEYWORD_THRESHOLD, KW,
 } from './TokTypes';
 
 // ---------------------------------------------------------------------------
@@ -130,7 +129,7 @@ function decodeSegment(seg: Uint8Array): Token[] {
         } else {
           // Variable reference or keyword
           const rawTok = b;
-          if (rawTok >= KEYWORD_THRESHOLD && FUNC_NAMES[rawTok] !== undefined) {
+          if (rawTok >= KEYWORD_THRESHOLD) {
             tokens.push({ kind: TokKind.Keyword, value: rawTok });
           } else {
             tokens.push({ kind: TokKind.Var, value: b - 0x80 });
@@ -141,7 +140,7 @@ function decodeSegment(seg: Uint8Array): Token[] {
       } else {
         // S > 0x80: keyword, high function call, or integer literal
         const rawTok = b;
-        if (rawTok >= KEYWORD_THRESHOLD && FUNC_NAMES[rawTok] !== undefined) {
+        if (rawTok >= KEYWORD_THRESHOLD) {
           tokens.push({ kind: TokKind.Keyword, value: rawTok });
         } else if (second === 0x81 && i + 2 < seg.length && seg[i + 2] === 0x28) {
           // Bug 1 fix: high function call (IDs 131-161)
@@ -390,47 +389,64 @@ class Parser {
   }
 
   private parseExpression(): TokExpr {
-    // Handle outer parens
-    if (this.isAscii(0x28)) { // '('
-      this.pos++;
-      const inner = this.parseExpression();
-      this.matchAscii(0x29); // ')'
-
-      // Check for binary operator after closing paren
-      return this.maybeBinaryRight(inner);
-    }
-
-    let left = this.parsePrimary();
-    return this.maybeBinaryRight(left);
+    return this.parseLogicalOr();
   }
 
-  private maybeBinaryRight(left: TokExpr): TokExpr {
-    // Check for binary operator
-    while (this.pos < this.tokens.length) {
-      const t = this.tokens[this.pos];
-      if (t.kind !== TokKind.Keyword) break;
-
-      const op = this.keywordToOp(t.value);
-      if (!op) break;
-
-      this.pos++; // consume operator
-
-      // Skip accumulator references
+  private parseLogicalOr(): TokExpr {
+    let left = this.parseLogicalAnd();
+    while (this.matchKeyword(KW.or)) {
       this.skipAccumulator();
+      const right = this.parseLogicalAnd();
+      left = { kind: 'binary', op: '||', left, right };
+    }
+    return left;
+  }
 
-      // Right side might be wrapped in parens
-      let right: TokExpr;
-      if (this.isAscii(0x28)) {
-        this.pos++;
-        right = this.parseExpression();
-        this.matchAscii(0x29);
-      } else {
-        right = this.parsePrimary();
+  private parseLogicalAnd(): TokExpr {
+    let left = this.parseComparison();
+    while (this.matchKeyword(KW.and)) {
+      this.skipAccumulator();
+      const right = this.parseComparison();
+      left = { kind: 'binary', op: '&&', left, right };
+    }
+    return left;
+  }
+
+  private parseComparison(): TokExpr {
+    let left = this.parseAddSub();
+    while (this.pos < this.tokens.length && this.tokens[this.pos].kind === TokKind.Keyword) {
+      const kw = this.tokens[this.pos].value;
+      let op: '==' | '!=' | '>=' | '<=' | '>' | '<' | null = null;
+      switch (kw) {
+        case KW.eq: op = '=='; break;
+        case KW.neq: op = '!='; break;
+        case KW.gte: op = '>='; break;
+        case KW.lte: op = '<='; break;
+        case KW.gt: op = '>'; break;
+        case KW.lt: op = '<'; break;
       }
-
+      if (!op) break;
+      this.pos++;
+      this.skipAccumulator();
+      const right = this.parseAddSub();
       left = { kind: 'binary', op, left, right };
     }
+    return left;
+  }
 
+  private parseAddSub(): TokExpr {
+    let left = this.parsePrimary();
+    while (this.pos < this.tokens.length && this.tokens[this.pos].kind === TokKind.Keyword) {
+      const kw = this.tokens[this.pos].value;
+      let op: '+' | '-' | null = null;
+      if (kw === KW.plus) op = '+';
+      else if (kw === KW.minus) op = '-';
+      if (!op) break;
+      this.pos++;
+      this.skipAccumulator();
+      const right = this.parsePrimary();
+      left = { kind: 'binary', op, left, right };
+    }
     return left;
   }
 
@@ -521,26 +537,16 @@ class Parser {
     }
   }
 
-  private keywordToOp(kw: number): '==' | '!=' | '>=' | '<=' | '>' | '<' | '&&' | '||' | '+' | '-' | null {
-    switch (kw) {
-      case KW.eq: return '==';
-      case KW.neq: return '!=';
-      case KW.gte: return '>=';
-      case KW.lte: return '<=';
-      case KW.gt: return '>';
-      case KW.lt: return '<';
-      case KW.and: return '&&';
-      case KW.or: return '||';
-      case KW.plus: return '+';
-      case KW.minus: return '-';
-      default: return null;
-    }
-  }
-
   private isKeyword(kw: number): boolean {
     return this.pos < this.tokens.length
       && this.tokens[this.pos].kind === TokKind.Keyword
       && this.tokens[this.pos].value === kw;
+  }
+
+  private matchKeyword(kw: number): boolean {
+    if (!this.isKeyword(kw)) return false;
+    this.pos++;
+    return true;
   }
 
   private isAscii(ch: number): boolean {
