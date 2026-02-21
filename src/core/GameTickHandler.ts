@@ -540,10 +540,10 @@ export function registerTickHandler(ctx: GameContext): void {
           if (dx * dx + dz * dz < 4.0) {
             const owner = Owner.playerId[eid];
             if (crate.type === 'credits') {
-              harvestSystem.addSolaris(owner, 500);
-              if (owner === 0) selectionPanel.addMessage('+500 Solaris!', '#ffd700');
+              harvestSystem.addSolaris(owner, GameConstants.CRATE_CREDITS);
+              if (owner === 0) selectionPanel.addMessage(`+${GameConstants.CRATE_CREDITS} Solaris!`, '#ffd700');
             } else if (crate.type === 'veterancy') {
-              combatSystem.addXp(eid, 100);
+              combatSystem.addXp(eid, GameConstants.CRATE_XP_BOOST);
               if (owner === 0) selectionPanel.addMessage('Unit experience boost!', '#44ff44');
             } else if (crate.type === 'heal') {
               for (const other of allUnits) {
@@ -551,8 +551,8 @@ export function registerTickHandler(ctx: GameContext): void {
                 if (Health.current[other] <= 0) continue;
                 const ox = Position.x[other] - crate.x;
                 const oz = Position.z[other] - crate.z;
-                if (ox * ox + oz * oz < 100) {
-                  Health.current[other] = Math.min(Health.max[other], Health.current[other] + Health.max[other] * 0.25);
+                if (ox * ox + oz * oz < GameConstants.CRATE_HEAL_RADIUS_SQ) {
+                  Health.current[other] = Math.min(Health.max[other], Health.current[other] + Health.max[other] * GameConstants.CRATE_HEAL_PCT);
                 }
               }
               if (owner === 0) selectionPanel.addMessage('Area heal!', '#4488ff');

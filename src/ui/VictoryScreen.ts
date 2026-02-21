@@ -1,5 +1,6 @@
-import { Owner, Health, BuildingType, buildingQuery, unitQuery, type World } from '../core/ECS';
+import { Owner, Health, BuildingType, UnitType, buildingQuery, unitQuery, type World } from '../core/ECS';
 import type { AudioManager } from '../audio/AudioManager';
+import type { GameRules } from '../config/RulesParser';
 
 export type VictoryCondition = 'annihilate' | 'conyard' | 'survival' | 'protect';
 export type GameOutcome = 'playing' | 'victory' | 'defeat';
@@ -94,6 +95,9 @@ export class VictorySystem {
   private victoryCondition: VictoryCondition = 'annihilate';
   // Building type names for ConYard check (set externally)
   private buildingTypeNames: string[] = [];
+  private unitTypeNames: string[] = [];
+  private gameRules: GameRules | null = null;
+  private isCampaign = false;
   private survivalTicks = 0; // Ticks to survive (0 = disabled)
   private objectiveLabel = '';
   private protectedBuildingToken = 'ConYard';
@@ -111,6 +115,9 @@ export class VictorySystem {
   setVictoryCondition(cond: VictoryCondition): void { this.victoryCondition = cond; }
   setCampaignContinue(cb: () => void): void { this.onCampaignContinue = cb; }
   setBuildingTypeNames(names: string[]): void { this.buildingTypeNames = names; }
+  setUnitTypeNames(names: string[]): void { this.unitTypeNames = names; }
+  setGameRules(rules: GameRules): void { this.gameRules = rules; }
+  setIsCampaign(v: boolean): void { this.isCampaign = v; }
   setSurvivalTicks(ticks: number): void { this.survivalTicks = ticks; }
   setObjectiveLabel(label: string): void { this.objectiveLabel = label; }
   setProtectedBuildingToken(token: string): void { this.protectedBuildingToken = token; }
@@ -167,14 +174,21 @@ export class VictorySystem {
     }
 
     if (this.victoryCondition === 'annihilate' || this.victoryCondition === 'survival' || this.victoryCondition === 'protect') {
+      const excludeKey: 'excludeFromCampaignLose' | 'excludeFromSkirmishLose' = this.isCampaign ? 'excludeFromCampaignLose' : 'excludeFromSkirmishLose';
       // Annihilate: check both buildings and units
       for (const eid of buildings) {
         if (Health.current[eid] <= 0) continue;
+        const bTypeName = this.buildingTypeNames[BuildingType.id[eid]] ?? '';
+        const bDef = this.gameRules?.buildings.get(bTypeName);
+        if (bDef?.[excludeKey]) continue;
         if (Owner.playerId[eid] === this.localPlayerId) playerAlive = true;
         else enemyAlive = true;
       }
       for (const eid of units) {
         if (Health.current[eid] <= 0) continue;
+        const uTypeName = this.unitTypeNames[UnitType.id[eid]] ?? '';
+        const uDef = this.gameRules?.units.get(uTypeName);
+        if (uDef?.[excludeKey]) continue;
         if (Owner.playerId[eid] === this.localPlayerId) playerAlive = true;
         else enemyAlive = true;
       }

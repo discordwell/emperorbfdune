@@ -219,6 +219,8 @@ export function initializeSystems(config: SystemInitConfig): GameContext {
   const victorySystem = new VictorySystem(audioManager, 0);
   victorySystem.setStats(gameStats);
   victorySystem.setBuildingTypeNames(buildingTypeNames);
+  victorySystem.setUnitTypeNames(unitTypeNames);
+  victorySystem.setGameRules(gameRules);
   if (house.skirmishOptions?.victoryCondition) {
     victorySystem.setVictoryCondition(house.skirmishOptions.victoryCondition);
   }

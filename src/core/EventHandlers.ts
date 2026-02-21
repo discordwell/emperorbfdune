@@ -57,8 +57,16 @@ export function registerEventHandlers(ctx: GameContext): void {
     const z = Position.z[entityId];
     const deadOwner = Owner.playerId[entityId];
 
-    if (isBuilding) gameStats.recordBuildingLost(deadOwner);
-    else gameStats.recordUnitLost(deadOwner);
+    const deadTypeName = isBuilding
+      ? buildingTypeNames[BuildingType.id[entityId]]
+      : unitTypeNames[UnitType.id[entityId]];
+    const deadDef = isBuilding
+      ? gameRules.buildings.get(deadTypeName ?? '')
+      : gameRules.units.get(deadTypeName ?? '');
+    if (deadDef?.countsForStats !== false) {
+      if (isBuilding) gameStats.recordBuildingLost(deadOwner);
+      else gameStats.recordUnitLost(deadOwner);
+    }
 
     combatSystem.unregisterUnit(entityId);
     movement.unregisterEntity(entityId);
@@ -391,8 +399,13 @@ export function registerEventHandlers(ctx: GameContext): void {
 
     const isBuildingType = gameRules.buildings.has(unitType);
 
-    if (isBuildingType) gameStats.recordBuildingBuilt(owner);
-    else gameStats.recordUnitBuilt(owner);
+    const prodDef = isBuildingType
+      ? gameRules.buildings.get(unitType)
+      : gameRules.units.get(unitType);
+    if (prodDef?.countsForStats !== false) {
+      if (isBuildingType) gameStats.recordBuildingBuilt(owner);
+      else gameStats.recordUnitBuilt(owner);
+    }
 
     if (owner === 0) {
       const displayName = unitType.replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, '');

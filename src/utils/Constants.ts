@@ -104,6 +104,20 @@ export const GameConstants = {
   // Campaign
   CAMPAIGN_ATTACK_MONEY: 5000,
   CAMPAIGN_DEFEND_MONEY: 2500,
+  // Campaign reinforcement constants
+  UNIT_VALUE_ATTACKER: 20,
+  UNIT_VALUE_DEFENDER: 5,
+  UNIT_VALUE_RESERVES: 20,
+  UNIT_VALUE_INITIAL_REINFORCEMENTS: 20,
+  UNIT_VALUE_SUBSEQUENT_REINFORCEMENTS: 10,
+  TICKS_BETWEEN_REINFORCEMENTS: 6600,
+  TICKS_BETWEEN_REINFORCEMENTS_VARIATION: 600,
+  TICKS_BEFORE_REINFORCEMENTS_MESSAGE: 100,
+  // Crate values
+  CRATE_CREDITS: 500,
+  CRATE_XP_BOOST: 100,
+  CRATE_HEAL_PCT: 0.25,
+  CRATE_HEAL_RADIUS_SQ: 100,
 };
 
 export function loadConstants(general: Record<string, string>): void {
@@ -167,6 +181,14 @@ export function loadConstants(general: Record<string, string>): void {
   // Campaign
   GameConstants.CAMPAIGN_ATTACK_MONEY = g('CampaignAttackMoney', 5000);
   GameConstants.CAMPAIGN_DEFEND_MONEY = g('CampaignDefendMoney', 2500);
+  GameConstants.UNIT_VALUE_ATTACKER = g('UnitValueAttacker', 20);
+  GameConstants.UNIT_VALUE_DEFENDER = g('UnitValueDefender', 5);
+  GameConstants.UNIT_VALUE_RESERVES = g('UnitValueReserves', 20);
+  GameConstants.UNIT_VALUE_INITIAL_REINFORCEMENTS = g('UnitValueInitialReinforcements', 20);
+  GameConstants.UNIT_VALUE_SUBSEQUENT_REINFORCEMENTS = g('UnitValueSubsequentReinforcements', 10);
+  GameConstants.TICKS_BETWEEN_REINFORCEMENTS = g('TicksBetweenReinforcements', 6600);
+  GameConstants.TICKS_BETWEEN_REINFORCEMENTS_VARIATION = g('TicksBetweenReinforcementsVariation', 600);
+  GameConstants.TICKS_BEFORE_REINFORCEMENTS_MESSAGE = g('TicksBeforeReinforcementsForMessage', 100);
   // Starport
   GameConstants.STARPORT_COST_UPDATE_DELAY = g('StarportCostUpdateDelay', 1500);
   GameConstants.STARPORT_COST_VARIATION_PCT = g('StarportCostVariationPercent', 40);

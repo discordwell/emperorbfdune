@@ -893,11 +893,9 @@ export class CombatSystem implements GameSystem {
 
       // Weapon targeting filters: skip targets our weapon can't hit
       const targetTypeName = this.unitTypeMap.get(other);
-      if (targetTypeName) {
-        const targetDef = this.rules.units.get(targetTypeName);
-        if (targetDef?.canFly && !bullet?.antiAircraft) continue;
-        if (!targetDef?.canFly && bullet && !bullet.antiGround) continue;
-      }
+      const targetDef = targetTypeName ? this.rules.units.get(targetTypeName) : undefined;
+      if (targetDef?.canFly && !bullet?.antiAircraft) continue;
+      if (!targetDef?.canFly && bullet && !bullet.antiGround) continue;
 
       // Player units can only auto-target enemies in visible fog tiles
       if (myOwner === this.localPlayerId && this.fogOfWar && this.fogOfWar.isEnabled()) {
@@ -926,6 +924,11 @@ export class CombatSystem implements GameSystem {
           const mult = (warhead.vs[armourName] ?? 100) / 100;
           score -= (mult - 1) * 6; // Bonus for targets we're effective against
         }
+      }
+
+      // Bonus: prefer high-threat targets (from rules.txt AIThreat)
+      if (targetDef && targetDef.aiThreat > 0) {
+        score -= targetDef.aiThreat * 0.5;
       }
 
       // Bonus: prefer the entity that last attacked us (threat response)

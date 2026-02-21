@@ -94,6 +94,13 @@ export interface UnitDef {
   beamWeapon: boolean; // Chaos Lightning beam unit
   resource: string; // Resource field (bullet/FX name for superweapons)
 
+  // Loss condition exclusions
+  excludeFromSkirmishLose: boolean;
+  excludeFromCampaignLose: boolean;
+
+  // Statistics
+  countsForStats: boolean;
+
   // Production
   upgradedPrimaryRequired: boolean; // Requires primary building to be upgraded
 
@@ -173,6 +180,9 @@ export function createDefaultUnitDef(name: string): UnitDef {
     hitSlowDownAmount: 0,
     hitSlowDownDuration: 0,
     getsHeightAdvantage: true, // Default: most units get height advantage
+    excludeFromSkirmishLose: false,
+    excludeFromCampaignLose: false,
+    countsForStats: true,
     upgradedPrimaryRequired: false,
     spiceCapacity: 700,
   };

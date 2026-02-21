@@ -45,6 +45,13 @@ export interface BuildingDef {
   outpost: boolean; // Enables minimap/radar when owned
   hideOnRadar: boolean; // Don't show this building on minimap (decorations)
 
+  // Loss condition exclusions
+  excludeFromSkirmishLose: boolean;
+  excludeFromCampaignLose: boolean;
+
+  // Statistics
+  countsForStats: boolean;
+
   // AI
   aiResource: boolean;
   aiDefence: boolean;
@@ -88,6 +95,9 @@ export function createDefaultBuildingDef(name: string): BuildingDef {
     unstealthRange: 0,
     outpost: false,
     hideOnRadar: false,
+    excludeFromSkirmishLose: false,
+    excludeFromCampaignLose: false,
+    countsForStats: true,
     aiResource: false,
     aiDefence: false,
     aiCritical: false,
