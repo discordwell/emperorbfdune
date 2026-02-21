@@ -7,6 +7,7 @@ import {
 
 export interface GameRules {
   general: Record<string, string>;
+  spiceMound: Record<string, string>;
   houseTypes: string[];
   terrainTypes: string[];
   armourTypes: string[];
@@ -99,6 +100,15 @@ export function parseRules(text: string): GameRules {
     }
   }
 
+  // SpiceMound section
+  const spiceMoundSection = sectionMap.get('SpiceMound');
+  const spiceMound: Record<string, string> = {};
+  if (spiceMoundSection) {
+    for (const [k, v] of spiceMoundSection.entries) {
+      if (k) spiceMound[k] = v;
+    }
+  }
+
   // Declaration sections
   const houseTypes = getListValues(sectionMap.get('HouseTypes') ?? { name: '', entries: [] });
   const terrainTypes = getListValues(sectionMap.get('TerrainTypes') ?? { name: '', entries: [] });
@@ -163,7 +173,7 @@ export function parseRules(text: string): GameRules {
     warheads.set(name, parseWarheadDef(name, section));
   }
 
-  return { general, houseTypes, terrainTypes, armourTypes, units, buildings, turrets, bullets, warheads };
+  return { general, spiceMound, houseTypes, terrainTypes, armourTypes, units, buildings, turrets, bullets, warheads };
 }
 
 function parseUnitDef(name: string, section: Section): UnitDef {

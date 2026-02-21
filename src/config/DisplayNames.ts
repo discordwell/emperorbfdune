@@ -1,6 +1,7 @@
 /** Shared display name mapping for unit/building internal names → friendly names */
 
-export const DISPLAY_NAMES: Record<string, string> = {
+// Hardcoded fallback (used if JSON fetch fails)
+const FALLBACK_NAMES: Record<string, string> = {
   // Buildings
   'SmWindtrap': 'Wind Trap',
   'ConYard': 'Con. Yard',
@@ -41,15 +42,34 @@ export const DISPLAY_NAMES: Record<string, string> = {
   'NIABTank': 'NIAB Tank',
 };
 
+// Loaded from extracted game data (populated by loadDisplayNames)
+let loadedNames: Record<string, string> = {};
+
+/** Load display names from extracted game data JSON. Call during init. */
+export async function loadDisplayNames(): Promise<void> {
+  try {
+    const resp = await fetch('/assets/data/display-names.json');
+    if (resp.ok) {
+      loadedNames = await resp.json();
+      console.log(`[DisplayNames] Loaded ${Object.keys(loadedNames).length} names from game data`);
+    }
+  } catch {
+    console.warn('[DisplayNames] Failed to load display-names.json, using fallback');
+  }
+}
+
 const FACTION_PREFIX = /^(AT|HK|OR|GU|IX|FR|IM|TL)/;
 
 /** Get a human-friendly display name for an internal unit/building name */
 export function getDisplayName(internalName: string): string {
-  // Check full name first (e.g., 'FremenWarrior', 'ImpSardaukar')
-  if (DISPLAY_NAMES[internalName]) return DISPLAY_NAMES[internalName];
+  // Check loaded data first (full name, e.g. 'ATSonicTank')
+  if (loadedNames[internalName]) return loadedNames[internalName];
+  // Check hardcoded fallback (full name)
+  if (FALLBACK_NAMES[internalName]) return FALLBACK_NAMES[internalName];
   // Strip faction prefix and check again (e.g., 'ATSonicTank' -> 'SonicTank')
   const stripped = internalName.replace(FACTION_PREFIX, '');
-  return DISPLAY_NAMES[stripped] ?? stripped.replace(/([a-z])([A-Z])/g, '$1 $2');
+  if (loadedNames[stripped]) return loadedNames[stripped];
+  return FALLBACK_NAMES[stripped] ?? stripped.replace(/([a-z])([A-Z])/g, '$1 $2');
 }
 
 /** Strip faction prefix from an internal name */

@@ -3,7 +3,7 @@ import type { ProductionSystem } from '../simulation/ProductionSystem';
 import type { ArtEntry } from '../config/ArtIniParser';
 import type { UnitDef } from '../config/UnitDefs';
 import type { BuildingDef } from '../config/BuildingDefs';
-import { DISPLAY_NAMES, getDisplayName } from '../config/DisplayNames';
+import { getDisplayName } from '../config/DisplayNames';
 
 type BuildCallback = (typeName: string, isBuilding: boolean) => void;
 type ConcreteCallback = () => void;
@@ -445,7 +445,7 @@ export class Sidebar {
 
     // Lock icon for prereq/tech blocks
     const lockIcon = isPrereqBlock ? '<span style="font-size:10px;color:#f44;margin-right:2px;">&#x1F512;</span>' : '';
-    const blockDetailName = blockReason?.detail ? (DISPLAY_NAMES[blockReason.detail] ?? blockReason.detail) : '';
+    const blockDetailName = blockReason?.detail ? getDisplayName(blockReason.detail) : '';
     const blockDetail = (isPrereqBlock && blockDetailName)
       ? `<div style="font-size:8px;color:#a44;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Need: ${blockDetailName}</div>` : '';
 

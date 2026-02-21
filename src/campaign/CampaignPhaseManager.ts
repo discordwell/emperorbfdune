@@ -23,8 +23,14 @@ interface PhaseRule {
   type: PhaseType;
 }
 
-// Phase rules from PhaseRules.txt
-const PHASE_RULES: Record<number, PhaseRule> = {
+// Phase type mapping by phase ID (for assigning type from loaded data)
+const PHASE_TYPE_MAP: Record<number, PhaseType> = {
+  0: 'tutorial', 1: 'act', 10: 'heighliner', 2: 'act', 11: 'homeDefense',
+  14: 'civilWar', 15: 'civilWar', 3: 'act', 12: 'homeAttack', 13: 'final',
+};
+
+// Hardcoded fallback — replaced at runtime if phase-rules.json loads successfully
+let PHASE_RULES: Record<number, PhaseRule> = {
   0:  { battles: 0, captured: 0, maxBattles: 0, jumpToChoice1: 0, jumpPoint: false, warning: 0, lose: 0, type: 'tutorial' },
   1:  { battles: 2, captured: 1, maxBattles: 2, jumpToChoice1: 10, jumpPoint: false, warning: 0, lose: 0, type: 'act' },
   10: { battles: 1, captured: 0, maxBattles: 0, jumpToChoice1: 2, jumpPoint: false, warning: 0, lose: 0, type: 'heighliner' },
@@ -43,7 +49,7 @@ interface TechLevelRule {
   captured?: number;  // Advance after N captures in current phase
 }
 
-const TECH_LEVEL_RULES: Record<number, TechLevelRule> = {
+let TECH_LEVEL_RULES: Record<number, TechLevelRule> = {
   1: { phase: 1 },
   2: { captured: 1 },
   3: { phase: 2 },
@@ -53,6 +59,50 @@ const TECH_LEVEL_RULES: Record<number, TechLevelRule> = {
   7: { captured: 2 },
   8: { phase: 12 },
 };
+
+/** Load phase rules from extracted game data JSON. Call during campaign init. */
+export async function loadPhaseRules(): Promise<void> {
+  try {
+    const resp = await fetch('/assets/data/phase-rules.json');
+    if (!resp.ok) return;
+    const data = await resp.json() as {
+      phases: Record<string, Record<string, number>>;
+      techLevels: Record<string, Record<string, number>>;
+    };
+
+    // Build phase rules from loaded data
+    const newPhaseRules: Record<number, PhaseRule> = {};
+    for (const [idStr, entry] of Object.entries(data.phases)) {
+      const id = parseInt(idStr);
+      newPhaseRules[id] = {
+        battles: entry.battles ?? 0,
+        captured: entry.captured ?? 0,
+        maxBattles: entry.maxBattles ?? 0,
+        jumpToChoice1: entry.jumpToChoice1 ?? 0,
+        jumpPoint: !!(entry.jumpPoint),
+        warning: entry.warning ?? 0,
+        lose: entry.lose ?? 0,
+        type: PHASE_TYPE_MAP[id] ?? 'act',
+      };
+    }
+    PHASE_RULES = newPhaseRules;
+
+    // Build tech level rules from loaded data
+    const newTechRules: Record<number, TechLevelRule> = {};
+    for (const [levelStr, entry] of Object.entries(data.techLevels)) {
+      const level = parseInt(levelStr);
+      const rule: TechLevelRule = {};
+      if (entry.phase !== undefined) rule.phase = entry.phase;
+      if (entry.captured !== undefined) rule.captured = entry.captured;
+      newTechRules[level] = rule;
+    }
+    TECH_LEVEL_RULES = newTechRules;
+
+    console.log(`[PhaseRules] Loaded ${Object.keys(newPhaseRules).length} phases, ${Object.keys(newTechRules).length} tech levels from game data`);
+  } catch {
+    console.warn('[PhaseRules] Failed to load phase-rules.json, using hardcoded fallback');
+  }
+}
 
 // ── Phase State ────────────────────────────────────────────────────
 

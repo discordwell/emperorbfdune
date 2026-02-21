@@ -51,9 +51,9 @@ const DIALOG_PATH = '/assets/audio/dialog/';
 /**
  * Maps UISPOKEN.TXT string key -> UI-G file number.
  * Formula: entry index (1-based) -> (index - 1) * 2 + 4
- * Only entries with existing audio files are included.
+ * Loaded from extracted game data at runtime, with hardcoded fallback.
  */
-const STRING_KEY_TO_FILE: Record<string, number> = {
+let STRING_KEY_TO_FILE: Record<string, number> = {
   // Harvester under attack (faction-specific)
   ATHarvAttack: 4,
   HKHarvAttack: 6,
@@ -309,6 +309,21 @@ export class DialogManager {
 
   setVolume(vol: number): void {
     this.volume = Math.max(0, Math.min(1, vol));
+  }
+
+  /** Load dialog key→file mapping from extracted game data. */
+  async loadDialogIndex(): Promise<void> {
+    try {
+      const resp = await fetch('/assets/data/dialog-index.json');
+      if (resp.ok) {
+        const data: Record<string, number> = await resp.json();
+        // Merge loaded data over hardcoded fallback
+        STRING_KEY_TO_FILE = { ...STRING_KEY_TO_FILE, ...data };
+        console.log(`[DialogManager] Loaded ${Object.keys(data).length} dialog entries from game data`);
+      }
+    } catch {
+      console.warn('[DialogManager] Failed to load dialog-index.json, using hardcoded fallback');
+    }
   }
 
   /**

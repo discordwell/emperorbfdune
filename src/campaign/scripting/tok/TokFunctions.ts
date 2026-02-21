@@ -20,10 +20,14 @@ import {
 import { getCampaignString } from '../../CampaignData';
 import { EventBus } from '../../../core/EventBus';
 import { simRng } from '../../../utils/DeterministicRNG';
-import { TILE_SIZE } from '../../../utils/MathUtils';
+import { TILE_SIZE, worldToTile } from '../../../utils/MathUtils';
 
 export class TokFunctionDispatch {
   private stringTable: string[] = [];
+  // Air strike tracking: strikeId → { units, targetX, targetZ }
+  private airStrikes = new Map<number, { units: number[]; targetX: number; targetZ: number }>();
+  // Tooltip storage (cosmetic, no UI hook yet)
+  private tooltipMap = new Map<number, number>();
 
   setStringTable(table: string[]): void {
     this.stringTable = table;
@@ -240,10 +244,35 @@ export class TokFunctionDispatch {
         return Math.sqrt(dx * dx + dz * dz) < 20 ? 1 : 0;
       }
 
-      case FUNC.ObjectVisibleToSide:
-      case FUNC.ObjectTypeVisibleToSide:
-        // Simplified: return true if object exists
-        return asInt(args[0]) >= 0 ? 1 : 0;
+      case FUNC.ObjectVisibleToSide: {
+        // Check if object is visible to a given side via fog of war
+        const visEid = asInt(args[0]);
+        const visSide = asInt(args[1]);
+        if (visEid < 0 || !hasComponent(ctx.game.getWorld(), Position, visEid)) return 0;
+        if (Health.current[visEid] <= 0) return 0;
+        // FogOfWar only tracks player 0 — non-player sides assume visible
+        if (visSide !== 0) return 1;
+        const visTile = worldToTile(Position.x[visEid], Position.z[visEid]);
+        return ctx.fogOfWar.isTileVisible(visTile.tx, visTile.tz) ? 1 : 0;
+      }
+
+      case FUNC.ObjectTypeVisibleToSide: {
+        // Check if any unit of a given type is visible to a side
+        const typeIdx = asInt(args[0]);
+        const typeSide = asInt(args[1]);
+        const searchType = this.resolveString(typeIdx);
+        const w = ctx.game.getWorld();
+        for (const eid of unitQuery(w)) {
+          if (Health.current[eid] <= 0) continue;
+          const typeId = UnitType.id[eid];
+          const typeName = ctx.typeRegistry.unitTypeNames[typeId];
+          if (typeName !== searchType) continue;
+          if (typeSide !== 0) return 1; // Non-player sides always see
+          const tile = worldToTile(Position.x[eid], Position.z[eid]);
+          if (ctx.fogOfWar.isTileVisible(tile.tx, tile.tz)) return 1;
+        }
+        return 0;
+      }
 
       case FUNC.ObjectIsCarried:
         return 0; // Not implemented
@@ -296,9 +325,29 @@ export class TokFunctionDispatch {
         return 0;
       }
 
-      case FUNC.ObjectDeploy:
+      case FUNC.ObjectDeploy: {
+        // Deploy a unit (MCV→ConYard conversion)
+        const deployEid = asInt(args[0]);
+        const dw = ctx.game.getWorld();
+        if (deployEid < 0 || !hasComponent(dw, Position, deployEid)) return 0;
+        if (Health.current[deployEid] <= 0) return 0;
+        if (!hasComponent(dw, UnitType, deployEid)) return 0;
+        const deployTypeId = UnitType.id[deployEid];
+        const deployTypeName = ctx.typeRegistry.unitTypeNames[deployTypeId];
+        if (deployTypeName?.endsWith('MCV')) {
+          const deployOwner = Owner.playerId[deployEid];
+          const deployDef = ctx.gameRules.units.get(deployTypeName);
+          const conYardName = deployDef?.deploysTo ?? `${deployTypeName.substring(0, 2)}ConYard`;
+          const dx = Position.x[deployEid], dz = Position.z[deployEid];
+          Health.current[deployEid] = 0;
+          EventBus.emit('unit:died', { entityId: deployEid, killerEntity: -1 });
+          return ctx.spawnBuilding(ctx.game.getWorld(), conYardName, deployOwner, dx, dz);
+        }
+        return 0;
+      }
+
       case FUNC.ObjectUndeploy:
-        return 0; // Stub
+        return 0; // No missions use this
 
       case FUNC.ObjectSell: {
         const eid = asInt(args[0]);
@@ -310,8 +359,15 @@ export class TokFunctionDispatch {
 
       case FUNC.ObjectInfect:
       case FUNC.ObjectDetonate:
-      case FUNC.ObjectToolTip:
         return 0;
+
+      case FUNC.ObjectToolTip: {
+        // Store tooltip ID on entity (cosmetic, no UI hook yet)
+        const ttEid = asInt(args[0]);
+        const ttId = asInt(args[1]);
+        if (ttEid >= 0) this.tooltipMap.set(ttEid, ttId);
+        return 0;
+      }
 
       // -------------------------------------------------------------------
       // Side queries
@@ -333,7 +389,13 @@ export class TokFunctionDispatch {
 
       case FUNC.SideAIDone: {
         // Returns TRUE when the AI side has no pending move orders
-        // Simplified: return true after a delay
+        const aiSide = asInt(args[0]);
+        const w = ctx.game.getWorld();
+        for (const eid of unitQuery(w)) {
+          if (Owner.playerId[eid] !== aiSide) continue;
+          if (Health.current[eid] <= 0) continue;
+          if (MoveTarget.active[eid] === 1) return 0;
+        }
         return 1;
       }
 
@@ -473,16 +535,41 @@ export class TokFunctionDispatch {
         return 0;
       }
 
-      case FUNC.SideAIControl:
-      case FUNC.SideAIBehaviourAggressive:
-      case FUNC.SideAIBehaviourRetreat:
-      case FUNC.SideAIBehaviourNormal:
-      case FUNC.SideAIBehaviourDefensive:
+      case FUNC.SideAIControl: {
+        const ctrlSide = asInt(args[0]);
+        this.setAIBehavior(ctx, ctrlSide, 'normal');
+        return 0;
+      }
+
+      case FUNC.SideAIBehaviourAggressive: {
+        const aggSide = asInt(args[0]);
+        this.setAIBehavior(ctx, aggSide, 'aggressive');
+        return 0;
+      }
+
+      case FUNC.SideAIBehaviourRetreat: {
+        const retSide = asInt(args[0]);
+        this.setAIBehavior(ctx, retSide, 'retreat');
+        return 0;
+      }
+
+      case FUNC.SideAIBehaviourNormal: {
+        const normSide = asInt(args[0]);
+        this.setAIBehavior(ctx, normSide, 'normal');
+        return 0;
+      }
+
+      case FUNC.SideAIBehaviourDefensive: {
+        const defSide = asInt(args[0]);
+        this.setAIBehavior(ctx, defSide, 'defensive');
+        return 0;
+      }
+
       case FUNC.SideAIEncounterIgnore:
       case FUNC.SideAIEnterBuilding:
       case FUNC.SideAIHeadlessChicken:
       case FUNC.SideAIShuffle:
-        return 0; // AI behavior modifiers — simplified to no-op
+        return 0; // Niche AI modifiers — no-op for now
 
       // -------------------------------------------------------------------
       // Dialog / Messages
@@ -682,12 +769,75 @@ export class TokFunctionDispatch {
         return 0;
       }
 
-      case FUNC.SideNuke:
-      case FUNC.SideNukeAll:
-      case FUNC.AirStrike:
-      case FUNC.AirStrikeDone:
+      case FUNC.SideNuke: {
+        // SideNuke(side, pos) — fire superweapon at position
+        const nukeSide = asInt(args[0]);
+        const nukePos = asPos(args[1]);
+        ctx.superweaponSystem.fire(nukeSide, nukePos.x, nukePos.z);
+        return 0;
+      }
+
+      case FUNC.SideNukeAll: {
+        // SideNukeAll() — fire at each side's centroid
+        for (let s = 0; s < ev.sides.nextSideId; s++) {
+          const sPos = this.getSidePosition(ctx, ev, s);
+          if (this.countSideUnits(ctx, s) + this.countSideBuildings(ctx, s) > 0) {
+            ctx.superweaponSystem.fire(255, sPos.x, sPos.z); // 255 = neutral/scripted
+          }
+        }
+        return 0;
+      }
+
+      case FUNC.AirStrike: {
+        // AirStrike(strikeId, targetPos, side, unitType1, unitType2, ...)
+        const strikeId = asInt(args[0]);
+        const strikeTarget = asPos(args[1]);
+        const strikeSide = asInt(args[2]);
+        // Spawn strike units at entrance point and move toward target
+        const strikeUnits: number[] = [];
+        const strikeEntrance = this.getEntrancePoint(ctx, strikeSide);
+        for (let i = 3; i < args.length; i++) {
+          const typeIdx = asInt(args[i]);
+          const typeName = this.resolveString(typeIdx);
+          const eid = this.spawnObject(ctx, typeName, strikeSide, strikeEntrance.x, strikeEntrance.z);
+          if (eid >= 0) {
+            MoveTarget.x[eid] = strikeTarget.x;
+            MoveTarget.z[eid] = strikeTarget.z;
+            MoveTarget.active[eid] = 1;
+            strikeUnits.push(eid);
+          }
+        }
+        if (strikeUnits.length > 0) {
+          ctx.combatSystem.setAttackMove(strikeUnits);
+        }
+        this.airStrikes.set(strikeId, { units: strikeUnits, targetX: strikeTarget.x, targetZ: strikeTarget.z });
+        return 0;
+      }
+
+      case FUNC.AirStrikeDone: {
+        // AirStrikeDone(strikeId) — returns 1 when all strike units dead or reached target
+        const doneId = asInt(args[0]);
+        const strike = this.airStrikes.get(doneId);
+        if (!strike) return 1;
+        const w = ctx.game.getWorld();
+        const alive = strike.units.filter(eid =>
+          hasComponent(w, Health, eid) && Health.current[eid] > 0
+        );
+        if (alive.length === 0) {
+          this.airStrikes.delete(doneId);
+          return 1;
+        }
+        // Check if any alive units still have active move orders
+        const moving = alive.some(eid => MoveTarget.active[eid] === 1);
+        if (!moving) {
+          this.airStrikes.delete(doneId);
+          return 1;
+        }
+        return 0;
+      }
+
       case FUNC.FireSpecialWeapon:
-        return 0; // Stub
+        return 0; // Not used in campaign missions
 
       case FUNC.SideAttractsWorms:
       case FUNC.SideRepelsWorms:
@@ -1028,6 +1178,13 @@ export class TokFunctionDispatch {
     }
 
     this.aiMoveUnits(ctx, side, bestPos.x, bestPos.z, true);
+  }
+
+  private setAIBehavior(ctx: GameContext, side: number, behavior: string): void {
+    const ai = ctx.aiPlayers.find(a => (a as any).playerId === side);
+    if (ai && typeof (ai as any).setBehaviorOverride === 'function') {
+      (ai as any).setBehaviorOverride(behavior);
+    }
   }
 
   private setAttackMoveForSide(ctx: GameContext, side: number): void {

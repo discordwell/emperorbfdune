@@ -1,0 +1,70 @@
+{
+  "phases": {
+    "0": {
+      "jumpToChoice1": 0
+    },
+    "1": {
+      "battles": 2,
+      "captured": 1,
+      "maxBattles": 2,
+      "jumpToChoice1": 10
+    },
+    "10": {
+      "battles": 1
+    },
+    "2": {
+      "battles": 2,
+      "captured": 1,
+      "maxBattles": 2,
+      "jumpToChoice1": 11
+    },
+    "11": {
+      "battles": 1
+    },
+    "3": {
+      "jumpPoint": 1,
+      "jumpToChoice1": 12,
+      "warning": 3,
+      "lose": 5
+    },
+    "12": {
+      "battles": 1,
+      "jumpToChoice1": 13
+    },
+    "13": {
+      "battles": 1
+    },
+    "14": {
+      "battles": 1
+    },
+    "15": {
+      "battles": 1
+    }
+  },
+  "techLevels": {
+    "1": {
+      "phase": 1
+    },
+    "2": {
+      "captured": 1
+    },
+    "3": {
+      "phase": 2
+    },
+    "4": {
+      "captured": 1
+    },
+    "5": {
+      "phase": 3
+    },
+    "6": {
+      "captured": 1
+    },
+    "7": {
+      "captured": 2
+    },
+    "8": {
+      "phase": 12
+    }
+  }
+}

@@ -1,5 +1,6 @@
 // Constants extracted from rules.txt [General] section at startup
 // These are set once during initialization and treated as immutable
+import { TILE_SIZE } from './MathUtils';
 
 export const GameConstants = {
   SPICE_VALUE: 200,
@@ -119,6 +120,21 @@ export const GameConstants = {
   CRATE_HEAL_PCT: 0.25,
   CRATE_HEAL_RADIUS_SQ: 100,
 };
+
+/** Load spice mound constants from rules.txt [SpiceMound] section */
+export function loadSpiceMoundConfig(cfg: Record<string, string>): void {
+  const g = (key: string, fallback: number): number => {
+    const v = cfg[key];
+    return v !== undefined ? parseFloat(v) : fallback;
+  };
+  GameConstants.SPICE_MOUND_MIN_DURATION = g('Size', 1000);
+  GameConstants.SPICE_MOUND_RANDOM_DURATION = g('Cost', 500);
+  GameConstants.SPICE_BLOOM_RADIUS = g('BlastRadius', 6);
+  GameConstants.SPICE_MOUND_REGROW_MIN = g('MinRange', 200);
+  GameConstants.SPICE_MOUND_REGROW_MAX = g('MaxRange', 2000);
+  // Derive damage radius from bloom radius in world units
+  GameConstants.SPICE_BLOOM_DAMAGE_RADIUS = GameConstants.SPICE_BLOOM_RADIUS * TILE_SIZE;
+}
 
 export function loadConstants(general: Record<string, string>): void {
   const g = (key: string, fallback: number): number => {

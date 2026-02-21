@@ -165,6 +165,7 @@ export class AudioManager {
    */
   async preloadDialog(factionPrefix: string): Promise<void> {
     if (this.dialogManager) {
+      await this.dialogManager.loadDialogIndex();
       this.dialogManager.setPlayerFaction(factionPrefix);
       await this.dialogManager.preload();
     }

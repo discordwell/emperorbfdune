@@ -108,6 +108,19 @@ export class AIPlayer implements GameSystem {
   // Cached world reference for methods that need it (set each update tick)
   private currentWorld: World | null = null;
 
+  // Script-controlled behavior override (set by tok SideAIBehaviour* functions)
+  private behaviorOverride: string | null = null;
+
+  /** Set a temporary behavior override from mission scripts. */
+  setBehaviorOverride(behavior: string): void {
+    this.behaviorOverride = behavior === 'normal' ? null : behavior;
+  }
+
+  /** Get the current behavior override (if any). */
+  getBehaviorOverride(): string | null {
+    return this.behaviorOverride;
+  }
+
   setDifficulty(level: 'easy' | 'normal' | 'hard'): void {
     this.difficultyLevel = level;
     if (level === 'easy') {
@@ -1800,9 +1813,26 @@ export class AIPlayer implements GameSystem {
       }
     }
 
+    // Apply behavior override from mission scripts
+    let behaviorAggMult = 1.0;
+    if (this.behaviorOverride === 'aggressive') {
+      behaviorAggMult = 2.0; // Lower threshold, shorter cooldown
+    } else if (this.behaviorOverride === 'defensive') {
+      // Defensive: keep units near base, skip attack waves entirely
+      return;
+    } else if (this.behaviorOverride === 'retreat') {
+      // Move all units toward base
+      for (const eid of nearBaseUnits) {
+        MoveTarget.x[eid] = this.baseX;
+        MoveTarget.z[eid] = this.baseZ;
+        MoveTarget.active[eid] = 1;
+      }
+      return; // Skip attack logic entirely
+    }
+
     // Dynamic attack threshold: higher difficulty = attack sooner with fewer units
-    const attackThreshold = Math.max(3, Math.floor(this.attackGroupSize / (this.difficulty * this.aggressionBias)));
-    const effectiveAttackCooldown = Math.max(150, Math.floor(this.attackCooldown / this.aggressionBias));
+    const attackThreshold = Math.max(2, Math.floor(this.attackGroupSize / (this.difficulty * this.aggressionBias * behaviorAggMult)));
+    const effectiveAttackCooldown = Math.max(150, Math.floor(this.attackCooldown / (this.aggressionBias * behaviorAggMult)));
     const canAttack = this.tickCounter - this.lastAttackTick > effectiveAttackCooldown;
 
     // Filter out designated defenders from attack group

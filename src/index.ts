@@ -1,13 +1,13 @@
 import * as THREE from 'three';
 import { parseRules, type GameRules } from './config/RulesParser';
 import { parseArtIni } from './config/ArtIniParser';
-import { loadConstants } from './utils/Constants';
+import { loadConstants, loadSpiceMoundConfig } from './utils/Constants';
 import { AudioManager } from './audio/AudioManager';
 import { HouseSelect, type HouseChoice, type GameMode, type Difficulty } from './ui/HouseSelect';
 import { loadMap, loadMapManifest, getMapMetadata, getCampaignMapId, getSpecialMissionMapId } from './config/MapLoader';
 import { CampaignMap } from './ui/CampaignMap';
 import { loadCampaignStrings, type HousePrefix, JUMP_POINTS } from './campaign/CampaignData';
-import { CampaignPhaseManager } from './campaign/CampaignPhaseManager';
+import { CampaignPhaseManager, loadPhaseRules } from './campaign/CampaignPhaseManager';
 import { SubHouseSystem, type AllianceSubHouse } from './campaign/SubHouseSystem';
 import { showMissionBriefing } from './ui/MissionBriefing';
 import { generateMissionConfig, type MissionConfigData } from './campaign/MissionConfig';
@@ -26,6 +26,7 @@ import { spawnFreshGame } from './core/FreshGameSpawn';
 import { simRng } from './utils/DeterministicRNG';
 import { restoreFromSave } from './core/SaveLoadSystem';
 import { hasComponent, Harvester, Owner } from './core/ECS';
+import { loadDisplayNames } from './config/DisplayNames';
 
 async function main() {
   console.log('Emperor: Battle for Dune - Initializing...');
@@ -42,6 +43,10 @@ async function main() {
   const gameRules = parseRules(rulesText);
   const artMap = parseArtIni(artText);
   loadConstants(gameRules.general);
+  loadSpiceMoundConfig(gameRules.spiceMound);
+
+  // Load extracted game data (display names, etc.) — non-blocking
+  loadDisplayNames();
 
   // Build type registries
   const typeRegistry = buildTypeRegistries(gameRules);
@@ -105,7 +110,7 @@ async function main() {
       subhouse: savedGame.subhouse,
     };
 
-    if (house.gameMode === 'campaign') await loadCampaignStrings();
+    if (house.gameMode === 'campaign') { await loadCampaignStrings(); await loadPhaseRules(); }
     const loadScreen = document.getElementById('loading-screen');
     if (loadScreen) loadScreen.style.display = 'flex';
   } else {
@@ -117,7 +122,7 @@ async function main() {
     house = await houseSelect.show();
     if (uiOverlay) uiOverlay.style.display = '';
 
-    if (house.gameMode === 'campaign') await loadCampaignStrings();
+    if (house.gameMode === 'campaign') { await loadCampaignStrings(); await loadPhaseRules(); }
 
     // Show mission briefing for campaign mode
     if (house.gameMode === 'campaign' && house.campaignTerritoryId !== undefined) {
