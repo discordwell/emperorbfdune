@@ -117,6 +117,15 @@ describe('TokFunctionDispatch', () => {
       expect(Health.current[infected]).toBe(0);
       expect(Owner.playerId[detonated]).toBe(4);
     });
+
+    it('undeploys conyards back into MCVs', () => {
+      const conYard = spawnMockBuilding(ctx, 'ATConYard', 2, 14, 18);
+      const undeployed = call(FUNC.ObjectUndeploy, [lit(conYard)]);
+      expect(undeployed).toBeGreaterThanOrEqual(0);
+      expect(Health.current[conYard]).toBe(0);
+      expect(hasComponent(ctx.game.getWorld(), UnitType, undeployed)).toBe(true);
+      expect(Owner.playerId[undeployed]).toBe(2);
+    });
   });
 
   describe('queries', () => {
@@ -146,6 +155,13 @@ describe('TokFunctionDispatch', () => {
       Health.current[eid] = 0;
       expect(call(FUNC.ObjectValid, [lit(eid)])).toBe(0);
       expect(call(FUNC.ObjectDestroyed, [lit(eid)])).toBe(1);
+    });
+
+    it('checks whether a unit is carried by transport', () => {
+      const passenger = spawnMockUnit(ctx, 'CubScout', 1, 5, 5);
+      (ctx.abilitySystem as any).getTransportPassengers = vi.fn(() => new Map([[55, [passenger]]]));
+      expect(call(FUNC.ObjectIsCarried, [lit(passenger)])).toBe(1);
+      expect(call(FUNC.ObjectIsCarried, [lit(passenger + 1)])).toBe(0);
     });
   });
 
@@ -248,6 +264,27 @@ describe('TokFunctionDispatch', () => {
       call(FUNC.PIPCameraTrackObject, [lit(eid)]);
       expect(ctx.scene.panTo).toHaveBeenCalledWith(33, 44);
     });
+
+    it('stores/restores camera state and tracks spin flags', () => {
+      (ctx.scene as any).snapTo(9, 10);
+      (ctx.scene as any).setZoom(42);
+      (ctx.scene as any).setRotation(0.3);
+
+      call(FUNC.CameraStore, []);
+      call(FUNC.CameraZoomTo, [lit(0), lit(70)]);
+      call(FUNC.CameraStartRotate, [lit(2), lit(1)]);
+      call(FUNC.ModelTick, [], 40);
+      expect(call(FUNC.CameraIsSpinning, [])).toBe(1);
+      expect((ctx.scene as any).rotateCamera).toHaveBeenCalled();
+
+      call(FUNC.CameraStopRotate, []);
+      expect(call(FUNC.CameraIsSpinning, [])).toBe(0);
+
+      call(FUNC.CameraRestore, [lit(80)]);
+      expect((ctx.scene as any).snapTo).toHaveBeenCalledWith(9, 10);
+      expect((ctx.scene as any).setZoom).toHaveBeenCalledWith(42);
+      expect((ctx.scene as any).setRotation).toHaveBeenCalledWith(0.3);
+    });
   });
 
   describe('radar', () => {
@@ -262,6 +299,12 @@ describe('TokFunctionDispatch', () => {
     it('reveals the full map via RemoveMapShroud', () => {
       call(FUNC.RemoveMapShroud, []);
       expect(ctx.fogOfWar.revealWorldArea).toHaveBeenCalledTimes(1);
+    });
+
+    it('re-covers an area via ReplaceShroud', () => {
+      setPosVar(ev, 0, 20, 30);
+      call(FUNC.ReplaceShroud, [posVar(0), lit(12)]);
+      expect((ctx.fogOfWar as any).coverWorldArea).toHaveBeenCalledWith(20, 30, 12);
     });
   });
 
@@ -361,6 +404,13 @@ describe('TokFunctionDispatch', () => {
       expect(Health.current[mcv]).toBe(0);
       expect(hasComponent(ctx.game.getWorld(), BuildingType, conYard)).toBe(true);
     });
+
+    it('supports side worm attract/repel directives', () => {
+      spawnMockUnit(ctx, 'CubScout', 2, 20, 25);
+      call(FUNC.SideAttractsWorms, [lit(2)]);
+      call(FUNC.SideRepelsWorms, [lit(2)]);
+      expect(ctx.sandwormSystem.deployThumper).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe('delivery and production', () => {
@@ -393,6 +443,14 @@ describe('TokFunctionDispatch', () => {
       expect(call(FUNC.EventObjectTypeConstructed, [lit(7), lit(typeIdx), objVar(6)])).toBe(1);
       expect(ev.getVar(6, VarType.Obj)).toBe(built);
     });
+
+    it('applies SetReinforcements to matching AI side', () => {
+      const ai = { playerId: 4, waveInterval: 750, attackCooldown: 500 } as any;
+      ctx.aiPlayers = [ai];
+      call(FUNC.SetReinforcements, [lit(4), lit(120)]);
+      expect(ai.waveInterval).toBe(600);
+      expect(ai.attackCooldown).toBe(480);
+    });
   });
 
   it('routes EventObjectAttacksSide from tracker', () => {
@@ -407,5 +465,17 @@ describe('TokFunctionDispatch', () => {
     call(FUNC.GiftingMessage, [lit(62)]);
     call(FUNC.TimerMessage, [lit(63)]);
     expect(ctx.selectionPanel.addMessage).toHaveBeenCalledTimes(3);
+  });
+
+  it('removes timer messages and can trigger script sounds/superweapons', () => {
+    call(FUNC.TimerMessageRemove, []);
+    expect((ctx.selectionPanel as any).removeTimerMessage).toHaveBeenCalledTimes(1);
+
+    call(FUNC.PlaySound, [lit(3)]);
+    expect((ctx.audioManager as any).playSfx).toHaveBeenCalled();
+
+    setPosVar(ev, 0, 77, 99);
+    call(FUNC.FireSpecialWeapon, [lit(1), posVar(0)]);
+    expect(ctx.superweaponSystem.fire).toHaveBeenCalledWith(1, 77, 99);
   });
 });

@@ -90,6 +90,12 @@ export function createMockCtx(): MockCtx {
     });
   }
 
+  let cameraX = 0;
+  let cameraZ = 0;
+  let cameraZoom = 50;
+  let cameraRotation = 0;
+  let isPanning = false;
+
   const ctx = {
     game: {
       getWorld: () => world,
@@ -117,7 +123,32 @@ export function createMockCtx(): MockCtx {
     missionRuntime: null,
 
     scene: {
-      panTo: vi.fn(),
+      panTo: vi.fn((x: number, z: number) => {
+        cameraX = x;
+        cameraZ = z;
+        isPanning = true;
+      }),
+      snapTo: vi.fn((x: number, z: number) => {
+        cameraX = x;
+        cameraZ = z;
+        isPanning = false;
+      }),
+      rotateCamera: vi.fn((delta: number) => {
+        cameraRotation += delta;
+      }),
+      setRotation: vi.fn((rotation: number) => {
+        cameraRotation = rotation;
+      }),
+      getCameraRotation: vi.fn(() => cameraRotation),
+      zoom: vi.fn((delta: number) => {
+        cameraZoom += delta;
+      }),
+      setZoom: vi.fn((zoom: number) => {
+        cameraZoom = zoom;
+      }),
+      getZoom: vi.fn(() => cameraZoom),
+      getCameraTarget: vi.fn(() => ({ x: cameraX, z: cameraZ })),
+      isPanning: vi.fn(() => isPanning),
     },
     terrain: {
       getMapWidth: () => 64,
@@ -154,6 +185,7 @@ export function createMockCtx(): MockCtx {
     fogOfWar: {
       isTileVisible: vi.fn(() => true),
       revealWorldArea: vi.fn(),
+      coverWorldArea: vi.fn(),
     },
     effectsManager: {
       spawnCrate: vi.fn(),
@@ -162,12 +194,16 @@ export function createMockCtx(): MockCtx {
     sandwormSystem: {
       deployThumper: vi.fn(),
     },
-    abilitySystem: {},
+    abilitySystem: {
+      getTransportPassengers: vi.fn(() => new Map<number, number[]>()),
+    },
     superweaponSystem: {
       fire: vi.fn(),
     },
     wallSystem: {},
-    audioManager: {},
+    audioManager: {
+      playSfx: vi.fn(),
+    },
     buildingPlacement: {},
     victorySystem: {
       forceVictory: vi.fn(),
@@ -177,6 +213,7 @@ export function createMockCtx(): MockCtx {
     gameStats: {},
     selectionPanel: {
       addMessage: vi.fn(),
+      removeTimerMessage: vi.fn(),
     },
     sidebar: {},
     iconRenderer: {},

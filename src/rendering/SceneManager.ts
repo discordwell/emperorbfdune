@@ -245,6 +245,21 @@ export class SceneManager implements RenderSystem {
     return this.cameraDistance;
   }
 
+  setZoom(zoom: number): void {
+    this.cameraDistance = Math.max(this.MIN_ZOOM, Math.min(this.MAX_ZOOM, zoom));
+    this.updateCameraPosition();
+  }
+
+  setRotation(rotation: number): void {
+    const TWO_PI = Math.PI * 2;
+    this.cameraRotation = ((rotation % TWO_PI) + TWO_PI) % TWO_PI;
+    this.updateCameraPosition();
+  }
+
+  isPanning(): boolean {
+    return this.panTarget !== null;
+  }
+
   screenToWorld(screenX: number, screenY: number): THREE.Vector3 | null {
     const ndc = new THREE.Vector2(
       (screenX / window.innerWidth) * 2 - 1,

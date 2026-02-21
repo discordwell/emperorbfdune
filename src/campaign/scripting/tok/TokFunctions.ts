@@ -22,6 +22,9 @@ import { EventBus } from '../../../core/EventBus';
 import { simRng } from '../../../utils/DeterministicRNG';
 import { TILE_SIZE, tileToWorld, worldToTile } from '../../../utils/MathUtils';
 
+type CameraSnapshot = { x: number; z: number; zoom: number; rotation: number };
+type CameraSpinState = { active: boolean; speed: number; direction: number };
+
 export class TokFunctionDispatch {
   private stringTable: string[] = [];
   // Air strike tracking: strikeId → { units, targetX, targetZ }
@@ -32,6 +35,14 @@ export class TokFunctionDispatch {
   private sideColors = new Map<number, number>();
   // Script-assigned threat levels by type name.
   private typeThreatLevels = new Map<string, number>();
+  // Script camera state.
+  private lastCameraTick = -1;
+  private mainCameraTrackEid: number | null = null;
+  private pipCameraTrackEid: number | null = null;
+  private mainCameraSpin: CameraSpinState = { active: false, speed: 0, direction: 1 };
+  private pipCameraSpin: CameraSpinState = { active: false, speed: 0, direction: 1 };
+  private mainCameraStored: CameraSnapshot | null = null;
+  private pipCameraStored: CameraSnapshot | null = null;
 
   setStringTable(table: string[]): void {
     this.stringTable = table;
@@ -63,6 +74,8 @@ export class TokFunctionDispatch {
       ev.evaluateExpr(a, ctx, this, currentTick)
     );
 
+    this.updateScriptCamera(ctx, currentTick);
+
     switch (funcId) {
       // -------------------------------------------------------------------
       // Tick / Random / Multiplayer
@@ -75,7 +88,7 @@ export class TokFunctionDispatch {
         return simRng.int(0, (asInt(args[0]) || 100) - 1);
 
       case FUNC.Multiplayer:
-        return 0; // Always single-player
+        return 0;
 
       // -------------------------------------------------------------------
       // Position functions
@@ -106,9 +119,15 @@ export class TokFunctionDispatch {
       case FUNC.GetNeutralEntrancePoint:
         return this.getNeutralEntrancePoint(ctx);
 
-      case FUNC.GetExitPoint:
-      case FUNC.GetNeutralExitPoint:
-        return this.getNeutralEntrancePoint(ctx); // Same as entrance for now
+      case FUNC.GetExitPoint: {
+        const side = args.length > 0 ? asInt(args[0]) : 0;
+        return this.getExitPoint(ctx, side);
+      }
+
+      case FUNC.GetNeutralExitPoint: {
+        const fromPos = args.length > 0 && isPos(args[0]) ? asPos(args[0]) : null;
+        return this.getNeutralExitPoint(ctx, fromPos);
+      }
 
       case FUNC.GetUnusedBasePoint:
         return this.getUnusedBasePoint(ctx);
@@ -279,8 +298,10 @@ export class TokFunctionDispatch {
         return 0;
       }
 
-      case FUNC.ObjectIsCarried:
-        return 0; // Not implemented
+      case FUNC.ObjectIsCarried: {
+        const eid = asInt(args[0]);
+        return this.isObjectCarried(ctx, eid) ? 1 : 0;
+      }
 
       // -------------------------------------------------------------------
       // Object mutation
@@ -343,8 +364,28 @@ export class TokFunctionDispatch {
         return 0;
       }
 
-      case FUNC.ObjectUndeploy:
-        return 0; // No missions use this
+      case FUNC.ObjectUndeploy: {
+        const undeployEid = asInt(args[0]);
+        const w = ctx.game.getWorld();
+        if (undeployEid < 0 || !hasComponent(w, Position, undeployEid)) return 0;
+        if (Health.current[undeployEid] <= 0) return 0;
+        if (!hasComponent(w, BuildingType, undeployEid)) return 0;
+
+        const typeId = BuildingType.id[undeployEid];
+        const buildingName = ctx.typeRegistry.buildingTypeNames[typeId] ?? '';
+        if (!buildingName.includes('ConYard')) return 0;
+
+        const owner = hasComponent(w, Owner, undeployEid) ? Owner.playerId[undeployEid] : 0;
+        const x = Position.x[undeployEid];
+        const z = Position.z[undeployEid];
+        const prefix = buildingName.substring(0, 2);
+        const guessedMcv = `${prefix}MCV`;
+        const mcvName = ctx.typeRegistry.unitTypeIdMap.has(guessedMcv) ? guessedMcv : 'MCV';
+
+        Health.current[undeployEid] = 0;
+        EventBus.emit('unit:died', { entityId: undeployEid, killerEntity: -1 });
+        return this.spawnObject(ctx, mcvName, owner, x, z);
+      }
 
       case FUNC.ObjectSell: {
         const eid = asInt(args[0]);
@@ -670,8 +711,15 @@ export class TokFunctionDispatch {
         return 0;
       }
 
-      case FUNC.TimerMessageRemove:
-        return 0; // Timer UI not implemented
+      case FUNC.TimerMessageRemove: {
+        const panel = ctx.selectionPanel as any;
+        if (typeof panel?.removeTimerMessage === 'function') {
+          panel.removeTimerMessage();
+        } else if (typeof panel?.clearMessages === 'function') {
+          panel.clearMessages();
+        }
+        return 0;
+      }
 
       // -------------------------------------------------------------------
       // Credits
@@ -708,6 +756,8 @@ export class TokFunctionDispatch {
         if (eid >= 0 && hasComponent(ctx.game.getWorld(), Position, eid)) {
           ctx.scene.panTo(Position.x[eid], Position.z[eid]);
         }
+        if (funcId === FUNC.CameraTrackObject) this.mainCameraTrackEid = eid;
+        else this.pipCameraTrackEid = eid;
         return 0;
       }
 
@@ -720,29 +770,79 @@ export class TokFunctionDispatch {
       }
 
       case FUNC.PIPRelease:
-        // Returns the current game tick (used for timer calculations)
+        this.pipCameraTrackEid = null;
+        this.pipCameraSpin.active = false;
         return currentTick;
 
       case FUNC.CameraZoomTo:
+      case FUNC.PIPCameraZoomTo: {
+        const targetZoom = args.length > 1 ? asInt(args[1]) : asInt(args[0]);
+        this.setCameraZoom(ctx, targetZoom);
+        return 0;
+      }
+
       case FUNC.CameraViewFrom:
+      case FUNC.PIPCameraViewFrom: {
+        const pos = asPos(args[0]);
+        ctx.scene.panTo(pos.x, pos.z);
+        return 0;
+      }
+
       case FUNC.CameraStartRotate:
+      case FUNC.PIPCameraStartRotate: {
+        const speed = Math.max(0, asInt(args[0]));
+        const dirCode = args.length > 1 ? asInt(args[1]) : 1;
+        const spin = funcId === FUNC.CameraStartRotate ? this.mainCameraSpin : this.pipCameraSpin;
+        spin.active = true;
+        spin.speed = speed;
+        spin.direction = dirCode === 2 ? -1 : 1;
+        return 0;
+      }
+
       case FUNC.CameraStopRotate:
+        this.mainCameraSpin.active = false;
+        return 0;
+
+      case FUNC.PIPCameraStopRotate:
+        this.pipCameraSpin.active = false;
+        return 0;
+
       case FUNC.CameraStopTrack:
+        this.mainCameraTrackEid = null;
+        return 0;
+
+      case FUNC.PIPCameraStopTrack:
+        this.pipCameraTrackEid = null;
+        return 0;
+
       case FUNC.CameraIsPanning:
       case FUNC.CameraIsScrolling:
-      case FUNC.CameraIsSpinning:
-      case FUNC.CameraStore:
-      case FUNC.CameraRestore:
-      case FUNC.PIPCameraZoomTo:
-      case FUNC.PIPCameraViewFrom:
-      case FUNC.PIPCameraStartRotate:
-      case FUNC.PIPCameraStopRotate:
-      case FUNC.PIPCameraStopTrack:
       case FUNC.PIPCameraIsPanning:
       case FUNC.PIPCameraIsScrolling:
+        return this.isCameraPanning(ctx) ? 1 : 0;
+
+      case FUNC.CameraIsSpinning:
+        return this.mainCameraSpin.active ? 1 : 0;
+
       case FUNC.PIPCameraIsSpinning:
+        return this.pipCameraSpin.active ? 1 : 0;
+
+      case FUNC.CameraStore:
+        this.mainCameraStored = this.captureCamera(ctx);
+        return 0;
+
       case FUNC.PIPCameraStore:
+        this.pipCameraStored = this.captureCamera(ctx);
+        return 0;
+
+      case FUNC.CameraRestore:
+        if (this.mainCameraStored) this.restoreCamera(ctx, this.mainCameraStored);
+        return 0;
+
       case FUNC.PIPCameraRestore:
+        if (this.pipCameraStored) this.restoreCamera(ctx, this.pipCameraStored);
+        return 0;
+
       case FUNC.CentreCursor:
         return 0;
 
@@ -756,8 +856,15 @@ export class TokFunctionDispatch {
         return 0;
       }
 
-      case FUNC.ReplaceShroud:
+      case FUNC.ReplaceShroud: {
+        const pos = asPos(args[0]);
+        const radius = args.length > 1 ? asInt(args[1]) : 10;
+        const fog = ctx.fogOfWar as any;
+        if (typeof fog?.coverWorldArea === 'function') {
+          fog.coverWorldArea(pos.x, pos.z, radius);
+        }
         return 0;
+      }
 
       case FUNC.RemoveMapShroud: {
         const worldW = ctx.terrain.getMapWidth() * TILE_SIZE;
@@ -956,12 +1063,37 @@ export class TokFunctionDispatch {
         return 0;
       }
 
-      case FUNC.FireSpecialWeapon:
-        return 0; // Not used in campaign missions
-
-      case FUNC.SideAttractsWorms:
-      case FUNC.SideRepelsWorms:
+      case FUNC.FireSpecialWeapon: {
+        if (args.length === 0) return 0;
+        const side = asInt(args[0]);
+        let target: TokPos = this.getSidePosition(ctx, ev, side);
+        for (let i = 1; i < args.length; i++) {
+          if (isPos(args[i])) {
+            target = asPos(args[i]);
+            break;
+          }
+        }
+        ctx.superweaponSystem.fire(side, target.x, target.z);
         return 0;
+      }
+
+      case FUNC.SideAttractsWorms: {
+        const side = asInt(args[0]);
+        const pos = this.getSidePosition(ctx, ev, side);
+        ctx.sandwormSystem.deployThumper(pos.x, pos.z);
+        return 0;
+      }
+
+      case FUNC.SideRepelsWorms: {
+        const side = asInt(args[0]);
+        const pos = this.getSidePosition(ctx, ev, side);
+        const mapW = ctx.terrain.getMapWidth() * 2;
+        const mapH = ctx.terrain.getMapHeight() * 2;
+        const awayX = Math.max(5, Math.min(mapW - 5, mapW - pos.x));
+        const awayZ = Math.max(5, Math.min(mapH - 5, mapH - pos.z));
+        ctx.sandwormSystem.deployThumper(awayX, awayZ);
+        return 0;
+      }
 
       // -------------------------------------------------------------------
       // Crates
@@ -1048,8 +1180,12 @@ export class TokFunctionDispatch {
         return eid;
       }
 
-      case FUNC.SetReinforcements:
+      case FUNC.SetReinforcements: {
+        const side = asInt(args[0]);
+        const level = Math.max(0, asInt(args[1]));
+        this.setSideReinforcements(ctx, side, level);
         return 0;
+      }
 
       // -------------------------------------------------------------------
       // Misc
@@ -1070,10 +1206,10 @@ export class TokFunctionDispatch {
 
       case FUNC.GetSideColor:
         return this.sideColors.get(asInt(args[0])) ?? 0;
-        return 0;
 
       case FUNC.PlaySound: {
-        // PlaySound with numeric ID — not implemented
+        const soundId = asInt(args[0]);
+        this.playScriptSound(ctx, soundId);
         return 0;
       }
 
@@ -1144,6 +1280,114 @@ export class TokFunctionDispatch {
   // -----------------------------------------------------------------------
   // Helper methods
   // -----------------------------------------------------------------------
+
+  private updateScriptCamera(ctx: GameContext, currentTick: number): void {
+    if (currentTick === this.lastCameraTick) return;
+    const dt = this.lastCameraTick < 0 ? 1 : Math.max(1, currentTick - this.lastCameraTick);
+    this.lastCameraTick = currentTick;
+
+    this.applyCameraTrack(ctx, this.mainCameraTrackEid);
+    this.applyCameraTrack(ctx, this.pipCameraTrackEid);
+    this.applyCameraSpin(ctx, this.mainCameraSpin, dt);
+    this.applyCameraSpin(ctx, this.pipCameraSpin, dt);
+  }
+
+  private applyCameraTrack(ctx: GameContext, trackEid: number | null): void {
+    if (trackEid === null) return;
+    const w = ctx.game.getWorld();
+    if (trackEid < 0 || !hasComponent(w, Position, trackEid)) return;
+    if (hasComponent(w, Health, trackEid) && Health.current[trackEid] <= 0) return;
+    ctx.scene.panTo(Position.x[trackEid], Position.z[trackEid]);
+  }
+
+  private applyCameraSpin(ctx: GameContext, spin: CameraSpinState, dt: number): void {
+    if (!spin.active) return;
+    const scene = ctx.scene as any;
+    if (typeof scene?.rotateCamera !== 'function') return;
+    const delta = spin.speed * 0.01 * spin.direction * dt;
+    scene.rotateCamera(delta);
+  }
+
+  private setCameraZoom(ctx: GameContext, targetZoom: number): void {
+    const scene = ctx.scene as any;
+    if (typeof scene?.setZoom === 'function') {
+      scene.setZoom(targetZoom);
+      return;
+    }
+    if (typeof scene?.getZoom === 'function' && typeof scene?.zoom === 'function') {
+      const current = scene.getZoom();
+      scene.zoom(targetZoom - current);
+    }
+  }
+
+  private isCameraPanning(ctx: GameContext): boolean {
+    const scene = ctx.scene as any;
+    if (typeof scene?.isPanning === 'function') {
+      return !!scene.isPanning();
+    }
+    return false;
+  }
+
+  private captureCamera(ctx: GameContext): CameraSnapshot {
+    const scene = ctx.scene as any;
+    const target = typeof scene?.getCameraTarget === 'function'
+      ? scene.getCameraTarget()
+      : { x: 0, z: 0 };
+    const zoom = typeof scene?.getZoom === 'function' ? scene.getZoom() : 50;
+    const rotation = typeof scene?.getCameraRotation === 'function' ? scene.getCameraRotation() : 0;
+    return { x: target.x, z: target.z, zoom, rotation };
+  }
+
+  private restoreCamera(ctx: GameContext, snap: CameraSnapshot): void {
+    const scene = ctx.scene as any;
+    if (typeof scene?.snapTo === 'function') {
+      scene.snapTo(snap.x, snap.z);
+    } else {
+      scene.panTo(snap.x, snap.z);
+    }
+    this.setCameraZoom(ctx, snap.zoom);
+    if (typeof scene?.setRotation === 'function') {
+      scene.setRotation(snap.rotation);
+    } else if (typeof scene?.getCameraRotation === 'function' && typeof scene?.rotateCamera === 'function') {
+      scene.rotateCamera(snap.rotation - scene.getCameraRotation());
+    }
+  }
+
+  private isObjectCarried(ctx: GameContext, eid: number): boolean {
+    if (eid < 0) return false;
+    const ability = ctx.abilitySystem as any;
+    if (typeof ability?.getTransportPassengers !== 'function') return false;
+    const passengersByTransport = ability.getTransportPassengers() as Map<number, number[]>;
+    if (!(passengersByTransport instanceof Map)) return false;
+    for (const passengers of passengersByTransport.values()) {
+      if (passengers.includes(eid)) return true;
+    }
+    return false;
+  }
+
+  private setSideReinforcements(ctx: GameContext, side: number, level: number): void {
+    const ai = ctx.aiPlayers.find(a => (a as any).playerId === side) as any;
+    if (!ai) return;
+    const tunedWaveInterval = Math.max(150, level * 5);
+    ai.waveInterval = tunedWaveInterval;
+    if (typeof ai.attackCooldown === 'number') {
+      ai.attackCooldown = Math.max(100, Math.floor(tunedWaveInterval * 0.8));
+    }
+  }
+
+  private playScriptSound(ctx: GameContext, soundId: number): void {
+    const audio = ctx.audioManager as any;
+    if (typeof audio?.playSfx !== 'function') return;
+    const mapped: string =
+      soundId === 1 ? 'move' :
+        soundId === 2 ? 'attack' :
+          soundId === 3 ? 'explosion' :
+            soundId === 4 ? 'build' :
+              soundId === 5 ? 'sell' :
+                soundId === 6 ? 'powerlow' :
+                  'select';
+    audio.playSfx(mapped);
+  }
 
   private replaceObject(ctx: GameContext, eid: number, typeName: string, side: number): number {
     const w = ctx.game.getWorld();
@@ -1284,6 +1528,11 @@ export class TokFunctionDispatch {
     }
   }
 
+  private getExitPoint(ctx: GameContext, side: number): TokPos {
+    const entrance = this.getEntrancePoint(ctx, side);
+    return this.getFarthestEntrancePoint(ctx, entrance);
+  }
+
   private getNeutralEntrancePoint(ctx: GameContext): TokPos {
     const meta = ctx.mapMetadata;
     if (meta && meta.entrances.length > 0) {
@@ -1308,6 +1557,37 @@ export class TokFunctionDispatch {
       case 2: return { x: 5, z: simRng.int(5, mapH - 5) };
       default: return { x: mapW - 5, z: simRng.int(5, mapH - 5) };
     }
+  }
+
+  private getNeutralExitPoint(ctx: GameContext, fromPos: TokPos | null): TokPos {
+    const from = fromPos ?? this.getNeutralEntrancePoint(ctx);
+    return this.getFarthestEntrancePoint(ctx, from);
+  }
+
+  private getFarthestEntrancePoint(ctx: GameContext, from: TokPos): TokPos {
+    const meta = ctx.mapMetadata;
+    if (meta && meta.entrances.length > 0) {
+      let best = meta.entrances[0];
+      let bestDist = -1;
+      for (const e of meta.entrances) {
+        const wx = e.x * TILE_SIZE;
+        const wz = e.z * TILE_SIZE;
+        const dx = wx - from.x;
+        const dz = wz - from.z;
+        const dist = dx * dx + dz * dz;
+        if (dist > bestDist) {
+          bestDist = dist;
+          best = e;
+        }
+      }
+      return { x: best.x * TILE_SIZE, z: best.z * TILE_SIZE };
+    }
+
+    const mapW = ctx.terrain.getMapWidth() * 2;
+    const mapH = ctx.terrain.getMapHeight() * 2;
+    const flipX = from.x < mapW * 0.5 ? mapW - 5 : 5;
+    const flipZ = from.z < mapH * 0.5 ? mapH - 5 : 5;
+    return { x: flipX, z: flipZ };
   }
 
   private getUnusedBasePoint(ctx: GameContext): TokPos {

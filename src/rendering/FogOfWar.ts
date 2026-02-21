@@ -215,6 +215,14 @@ export class FogOfWar {
     this.updateTexture();
   }
 
+  /** Re-cover an area with shroud using world coordinates (called by mission scripts). */
+  coverWorldArea(worldX: number, worldZ: number, worldRadius: number): void {
+    const tile = worldToTile(worldX, worldZ);
+    const tileRadius = Math.ceil(worldRadius / TILE_SIZE);
+    this.coverArea(tile.tx, tile.tz, tileRadius);
+    this.updateTexture();
+  }
+
   private revealArea(cx: number, cz: number, radius: number): void {
     const r2 = radius * radius;
     for (let dz = -radius; dz <= radius; dz++) {
@@ -226,6 +234,21 @@ export class FogOfWar {
         const idx = tz * this.mapW + tx;
         this.visibility[idx] = FOG_VISIBLE;
         this.explored[idx] = 1;
+      }
+    }
+  }
+
+  private coverArea(cx: number, cz: number, radius: number): void {
+    const r2 = radius * radius;
+    for (let dz = -radius; dz <= radius; dz++) {
+      for (let dx = -radius; dx <= radius; dx++) {
+        if (dx * dx + dz * dz > r2) continue;
+        const tx = cx + dx;
+        const tz = cz + dz;
+        if (tx < 0 || tx >= this.mapW || tz < 0 || tz >= this.mapH) continue;
+        const idx = tz * this.mapW + tx;
+        this.visibility[idx] = FOG_UNEXPLORED;
+        this.explored[idx] = 0;
       }
     }
   }
