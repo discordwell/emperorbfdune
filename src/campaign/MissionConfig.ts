@@ -114,9 +114,14 @@ export function generateMissionConfig(params: {
   const briefingKey = buildBriefingKey(playerHouse, phase, phaseType, territoryId, subHousePresent, enemyHouse);
   const miniBriefingKey = buildMiniBriefingKey(playerHouse, phase, phaseType, territoryId, subHousePresent, enemyHouse);
 
-  // Script ID matches the briefing key pattern (e.g., ATP2M15IX)
-  // Only set if a corresponding script JSON exists (checked at load time)
-  const scriptId = briefingKey;
+  // Script ID for .tok lookup: special missions use SPECIAL_MISSIONS names,
+  // standard missions use the briefing key pattern (e.g., ATP2M15IX)
+  let scriptId: string;
+  if (isSpecial && SPECIAL_MISSIONS[phaseType]?.[playerHouse]) {
+    scriptId = SPECIAL_MISSIONS[phaseType][playerHouse];
+  } else {
+    scriptId = briefingKey;
+  }
 
   return {
     victoryCondition,

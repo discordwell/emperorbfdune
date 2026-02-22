@@ -6,7 +6,7 @@ import { AudioManager } from './audio/AudioManager';
 import { HouseSelect, type HouseChoice, type GameMode, type Difficulty } from './ui/HouseSelect';
 import { loadMap, loadMapManifest, getMapMetadata, getCampaignMapId, getSpecialMissionMapId } from './config/MapLoader';
 import { CampaignMap } from './ui/CampaignMap';
-import { loadCampaignStrings, type HousePrefix, JUMP_POINTS } from './campaign/CampaignData';
+import { loadCampaignStrings, type HousePrefix, JUMP_POINTS, getForcedMission } from './campaign/CampaignData';
 import { CampaignPhaseManager, loadPhaseRules } from './campaign/CampaignPhaseManager';
 import { SubHouseSystem, type AllianceSubHouse } from './campaign/SubHouseSystem';
 import { showMissionBriefing } from './ui/MissionBriefing';
@@ -285,6 +285,12 @@ async function main() {
         subSys.offerAlliance(missionSubHouse, missionPhase, house.campaignTerritoryId!);
       }
 
+      // Check for forced jump-point rebellion mission
+      const forced = getForcedMission(house.campaignTerritoryId!, house.prefix as HousePrefix);
+      if (forced) {
+        localStorage.setItem('ebfd_forced_mission', forced.missionName);
+      }
+
       campaignRef!.saveCampaign();
     });
 
@@ -535,7 +541,12 @@ async function main() {
   // --- MISSION SCRIPT INITIALIZATION ---
   // Must happen before restore so script state can be restored alongside entities.
   // Try .tok bytecode interpreter first, then fall back to JSON declarative scripts.
-  const scriptId = ctx.activeMissionConfig?.scriptId ?? savedGame?.scriptId;
+  // Check for forced rebellion mission override (set when capturing a jump point)
+  const forcedScript = localStorage.getItem('ebfd_forced_mission');
+  if (forcedScript) {
+    localStorage.removeItem('ebfd_forced_mission');
+  }
+  const scriptId = forcedScript ?? ctx.activeMissionConfig?.scriptId ?? savedGame?.scriptId;
   if (scriptId) {
     const { loadTokScript, loadMissionScript } = await import('./campaign/scripting/MissionScriptLoader');
 
