@@ -21,6 +21,9 @@
     "oracle:reference:hook-header": "node tools/oracles/generate-hook-manifest-header.mjs",
     "oracle:reference:compare": "node tools/oracles/compare-reference.mjs --report-out artifacts/oracle-diffs/reference_vs_internal.report.json",
     "oracle:reference:strict": "node tools/oracles/compare-reference.mjs --strict --require-reference --require-all-missions --min-coverage 1 --report-out artifacts/oracle-diffs/reference_vs_internal.report.json",
+    "oracle:reference:jsonl-compare": "node tools/oracles/compare-reference-jsonl.mjs --scripts fast --report-out artifacts/oracle-diffs/reference_jsonl_vs_internal.report.json",
+    "oracle:reference:jsonl-compare:canon": "node tools/oracles/compare-reference-jsonl.mjs --scripts fast --canonicalize-object-ids --report-out artifacts/oracle-diffs/reference_jsonl_vs_internal.report.json",
+    "oracle:reference:jsonl-strict": "node tools/oracles/compare-reference-jsonl.mjs --strict --require-reference --require-all-expected-rows --min-coverage 1 --scripts all --report-out artifacts/oracle-diffs/reference_jsonl_vs_internal.report.json",
     "oracle:reference:runtime": "vitest run tests/campaign/tok/TokReferenceRuntimeOracle.test.ts",
     "oracle:reference:runtime:strict": "TOK_REFERENCE_REQUIRE=1 TOK_REFERENCE_FULL=1 vitest run tests/campaign/tok/TokReferenceRuntimeOracle.test.ts"
   },

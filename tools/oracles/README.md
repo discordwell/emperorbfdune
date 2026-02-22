@@ -135,3 +135,21 @@ Optional env flags:
 - `TOK_REFERENCE_REQUIRE=1`: fail when reference file is missing
 - `TOK_REFERENCE_FULL=1`: replay all missions present in the reference dataset
 - `TOK_REFERENCE_MAX_MISSIONS=<N>`: cap mission count for local debug runs
+
+### 8) Compare raw reference JSONL rows against internal oracle hashes
+
+This step compares captured JSONL rows directly (script+tick hash signals) against rows derived from `tests/campaign/tok/oracles/tok_mission_oracle.v1.json`.
+
+Fast mode:
+
+```bash
+npm run oracle:reference:jsonl-compare
+```
+
+Strict full-corpus gate:
+
+```bash
+npm run oracle:reference:jsonl-strict
+```
+
+If your hook rows contain raw object IDs in payload fields (`objVars`, `eventFlags`, `dispatch`), add `--canonicalize-object-ids` to compare after mission-local ID normalization.

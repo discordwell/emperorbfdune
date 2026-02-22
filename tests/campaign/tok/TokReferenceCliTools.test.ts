@@ -9,6 +9,7 @@ const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(TEST_DIR, '../../../');
 const CHECK_PROGRESS = path.join(ROOT, 'tools/oracles/check-capture-progress.mjs');
 const GENERATE_HEADER = path.join(ROOT, 'tools/oracles/generate-hook-manifest-header.mjs');
+const COMPARE_JSONL = path.join(ROOT, 'tools/oracles/compare-reference-jsonl.mjs');
 
 function tempDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'tok-oracle-cli-'));
@@ -126,5 +127,140 @@ describe('Tok reference CLI tools', () => {
     );
     expect(strictRun.status).toBe(0);
     expect(strictRun.stdout).toContain('[progress] missions 2/2');
+  });
+
+  it('compares reference JSONL rows against expected mission oracle rows', () => {
+    const dir = tempDir();
+    const expectedOracleFile = path.join(dir, 'tok_mission_oracle.v1.json');
+    const referenceFile = path.join(dir, 'capture.jsonl');
+    const reportFile = path.join(dir, 'compare.report.json');
+    const diffFile = path.join(dir, 'compare.diff.json');
+
+    writeJsonFile(expectedOracleFile, {
+      schemaVersion: 1,
+      generator: 'test',
+      generatedAt: '2026-02-22T00:00:00.000Z',
+      seed: 9001,
+      defaultMaxTick: 80,
+      headerMaxTick: 8,
+      checkpointStride: 20,
+      fastScripts: ['ATP1D1FRFail'],
+      missions: {
+        ATP1D1FRFail: {
+          scriptId: 'ATP1D1FRFail',
+          maxTick: 80,
+          frameCount: 81,
+          checkpoints: [
+            {
+              tick: 0,
+              frameHash: 'a'.repeat(64),
+              intHash: 'b'.repeat(64),
+              objHash: 'c'.repeat(64),
+              posHash: 'd'.repeat(64),
+              relHash: 'e'.repeat(64),
+              eventHash: 'f'.repeat(64),
+              dispatchHash: '1'.repeat(64),
+            },
+            {
+              tick: 80,
+              frameHash: '2'.repeat(64),
+              intHash: '3'.repeat(64),
+              objHash: '4'.repeat(64),
+              posHash: '5'.repeat(64),
+              relHash: '6'.repeat(64),
+              eventHash: '7'.repeat(64),
+              dispatchHash: '8'.repeat(64),
+            },
+          ],
+          final: {
+            tick: 80,
+            frameHash: '2'.repeat(64),
+            intHash: '3'.repeat(64),
+            objHash: '4'.repeat(64),
+            posHash: '5'.repeat(64),
+            relHash: '6'.repeat(64),
+            eventHash: '7'.repeat(64),
+            dispatchHash: '8'.repeat(64),
+          },
+        },
+      },
+    });
+
+    writeJsonl(referenceFile, [
+      {
+        scriptId: 'ATP1D1FRFail',
+        tick: 0,
+        frameHash: 'a'.repeat(64),
+        intHash: 'b'.repeat(64),
+        objHash: 'c'.repeat(64),
+        posHash: 'd'.repeat(64),
+        relHash: 'e'.repeat(64),
+        eventHash: 'f'.repeat(64),
+        dispatchHash: '1'.repeat(64),
+      },
+      {
+        scriptId: 'ATP1D1FRFail',
+        tick: 80,
+        frameHash: '2'.repeat(64),
+        intHash: '3'.repeat(64),
+        objHash: '4'.repeat(64),
+        posHash: '5'.repeat(64),
+        relHash: '6'.repeat(64),
+        eventHash: '7'.repeat(64),
+        dispatchHash: '8'.repeat(64),
+      },
+    ]);
+
+    const okRun = spawnSync(
+      process.execPath,
+      [
+        COMPARE_JSONL,
+        '--reference', referenceFile,
+        '--expected-oracle', expectedOracleFile,
+        '--scripts', 'fast',
+        '--strict',
+        '--require-all-expected-rows',
+        '--min-coverage', '1',
+        '--report-out', reportFile,
+        '--diff-out', diffFile,
+      ],
+      { cwd: ROOT, encoding: 'utf8' },
+    );
+    expect(okRun.status).toBe(0);
+    expect(okRun.stdout).toContain('Reference JSONL matches expected oracle rows.');
+    expect(fs.existsSync(diffFile)).toBe(false);
+
+    writeJsonl(referenceFile, [
+      {
+        scriptId: 'ATP1D1FRFail',
+        tick: 0,
+        frameHash: 'a'.repeat(64),
+        intHash: '0'.repeat(64),
+        objHash: 'c'.repeat(64),
+        posHash: 'd'.repeat(64),
+        relHash: 'e'.repeat(64),
+        eventHash: 'f'.repeat(64),
+        dispatchHash: '1'.repeat(64),
+      },
+    ]);
+
+    const badRun = spawnSync(
+      process.execPath,
+      [
+        COMPARE_JSONL,
+        '--reference', referenceFile,
+        '--expected-oracle', expectedOracleFile,
+        '--scripts', 'fast',
+        '--strict',
+        '--require-all-expected-rows',
+        '--min-coverage', '1',
+        '--report-out', reportFile,
+        '--diff-out', diffFile,
+      ],
+      { cwd: ROOT, encoding: 'utf8' },
+    );
+    expect(badRun.status).toBe(1);
+    expect(badRun.stderr).toContain('Reference JSONL mismatch');
+    expect(fs.existsSync(diffFile)).toBe(true);
   });
 });

@@ -73,6 +73,210 @@ export function canonicalFrameFromRow(row) {
   };
 }
 
+function normalizeObjId(rawId, normalizer) {
+  if (!isFiniteNumber(rawId) || rawId < 0) return -1;
+  const existing = normalizer.canonicalByRawId.get(rawId);
+  if (existing !== undefined) return existing;
+  const created = normalizer.nextCanonicalId++;
+  normalizer.canonicalByRawId.set(rawId, created);
+  return created;
+}
+
+function normalizeEventFlagKey(rawKey, normalizer) {
+  if (typeof rawKey !== 'string') return rawKey;
+
+  if (rawKey.startsWith('obj_destroyed:')) {
+    const raw = Number(rawKey.slice('obj_destroyed:'.length));
+    return `obj_destroyed:${normalizeObjId(raw, normalizer)}`;
+  }
+
+  if (rawKey.startsWith('obj_delivered:')) {
+    const raw = Number(rawKey.slice('obj_delivered:'.length));
+    return `obj_delivered:${normalizeObjId(raw, normalizer)}`;
+  }
+
+  if (rawKey.startsWith('obj_delivered_side:')) {
+    const parts = rawKey.split(':');
+    if (parts.length === 3) {
+      const side = Number(parts[1]);
+      const raw = Number(parts[2]);
+      return `obj_delivered_side:${side}:${normalizeObjId(raw, normalizer)}`;
+    }
+  }
+
+  if (rawKey.startsWith('obj_constructed:')) {
+    const parts = rawKey.split(':');
+    if (parts.length === 3) {
+      const side = Number(parts[1]);
+      const raw = Number(parts[2]);
+      return `obj_constructed:${side}:${normalizeObjId(raw, normalizer)}`;
+    }
+  }
+
+  if (rawKey.startsWith('type_constructed_obj:')) {
+    const parts = rawKey.split(':');
+    if (parts.length === 4) {
+      const side = Number(parts[1]);
+      const typeName = parts[2];
+      const raw = Number(parts[3]);
+      return `type_constructed_obj:${side}:${typeName}:${normalizeObjId(raw, normalizer)}`;
+    }
+  }
+
+  if (rawKey.startsWith('obj_attacks_side:')) {
+    const parts = rawKey.split(':');
+    if (parts.length === 3) {
+      const raw = Number(parts[1]);
+      const side = Number(parts[2]);
+      return `obj_attacks_side:${normalizeObjId(raw, normalizer)}:${side}`;
+    }
+  }
+
+  return rawKey;
+}
+
+function canonicalizeDispatchObject(dispatch, normalizer) {
+  if (!dispatch || typeof dispatch !== 'object' || Array.isArray(dispatch)) {
+    return dispatch;
+  }
+  const out = { ...dispatch };
+
+  if (Array.isArray(out.airStrikes)) {
+    out.airStrikes = out.airStrikes
+      .map((strike) => ({
+        ...strike,
+        units: Array.isArray(strike?.units)
+          ? strike.units.map((rawId) => normalizeObjId(rawId, normalizer))
+          : [],
+      }))
+      .sort((a, b) => (a?.strikeId ?? 0) - (b?.strikeId ?? 0));
+  }
+
+  if (Array.isArray(out.tooltipMap)) {
+    out.tooltipMap = out.tooltipMap
+      .map((entry) => ({
+        ...entry,
+        entity: normalizeObjId(entry?.entity, normalizer),
+      }))
+      .sort((a, b) => {
+        const ae = a?.entity ?? -1;
+        const be = b?.entity ?? -1;
+        if (ae !== be) return ae - be;
+        return (a?.tooltipId ?? 0) - (b?.tooltipId ?? 0);
+      });
+  }
+
+  if (Array.isArray(out.sideColors)) {
+    out.sideColors = [...out.sideColors].sort((a, b) => (a?.side ?? 0) - (b?.side ?? 0));
+  }
+
+  if (Array.isArray(out.typeThreatLevels)) {
+    out.typeThreatLevels = [...out.typeThreatLevels].sort((a, b) => {
+      const an = String(a?.typeName ?? '');
+      const bn = String(b?.typeName ?? '');
+      return an.localeCompare(bn);
+    });
+  }
+
+  if (out.mainCameraTrackEid !== undefined) {
+    out.mainCameraTrackEid = normalizeObjId(out.mainCameraTrackEid, normalizer);
+  }
+  if (out.pipCameraTrackEid !== undefined) {
+    out.pipCameraTrackEid = normalizeObjId(out.pipCameraTrackEid, normalizer);
+  }
+
+  return out;
+}
+
+const SIGNAL_HASH_FIELDS = [
+  'frameHash',
+  'intHash',
+  'objHash',
+  'posHash',
+  'relHash',
+  'eventHash',
+  'dispatchHash',
+  'fh',
+  'ih',
+  'oh',
+  'ph',
+  'rh',
+  'eh',
+  'dh',
+];
+
+/**
+ * Canonicalizes mission-local object IDs in payload rows, matching interpreter trace semantics.
+ *
+ * Rows that contain payload fields (`objVars/o`, `eventFlags/e`, `dispatch/d`) are re-mapped.
+ * If payload is canonicalized, embedded hash fields are dropped so downstream hashing is recomputed.
+ */
+export function canonicalizeReferenceRowsObjectIds(rows) {
+  const grouped = new Map();
+  rows.forEach((row, idx) => {
+    const scriptId = pickScriptId(row);
+    const tick = pickTick(row);
+    if (typeof scriptId !== 'string' || !isFiniteNumber(tick)) {
+      throw new Error(`Row missing required fields {scriptId, tick}: ${JSON.stringify(row)}`);
+    }
+    const list = grouped.get(scriptId) ?? [];
+    list.push({ idx, tick, row });
+    grouped.set(scriptId, list);
+  });
+
+  const out = new Array(rows.length);
+  for (const entries of grouped.values()) {
+    entries.sort((a, b) => a.tick - b.tick || a.idx - b.idx);
+    const normalizer = { nextCanonicalId: 1, canonicalByRawId: new Map() };
+
+    for (const entry of entries) {
+      const row = { ...entry.row };
+      let canonicalizedPayload = false;
+
+      if (Array.isArray(row.objVars)) {
+        row.objVars = row.objVars.map((rawId) => normalizeObjId(rawId, normalizer));
+        canonicalizedPayload = true;
+      }
+      if (Array.isArray(row.o)) {
+        row.o = row.o.map((rawId) => normalizeObjId(rawId, normalizer));
+        canonicalizedPayload = true;
+      }
+
+      if (Array.isArray(row.eventFlags)) {
+        row.eventFlags = row.eventFlags
+          .map((key) => normalizeEventFlagKey(key, normalizer))
+          .sort((a, b) => String(a).localeCompare(String(b)));
+        canonicalizedPayload = true;
+      }
+      if (Array.isArray(row.e)) {
+        row.e = row.e
+          .map((key) => normalizeEventFlagKey(key, normalizer))
+          .sort((a, b) => String(a).localeCompare(String(b)));
+        canonicalizedPayload = true;
+      }
+
+      if (row.dispatch && typeof row.dispatch === 'object' && !Array.isArray(row.dispatch)) {
+        row.dispatch = canonicalizeDispatchObject(row.dispatch, normalizer);
+        canonicalizedPayload = true;
+      }
+      if (row.d && typeof row.d === 'object' && !Array.isArray(row.d)) {
+        row.d = canonicalizeDispatchObject(row.d, normalizer);
+        canonicalizedPayload = true;
+      }
+
+      if (canonicalizedPayload) {
+        for (const field of SIGNAL_HASH_FIELDS) {
+          delete row[field];
+        }
+      }
+
+      out[entry.idx] = row;
+    }
+  }
+
+  return out;
+}
+
 export function pickDeclaredFrameCount(row) {
   return pickFiniteNumberOrNull(row, 'frameCount', 'fc');
 }

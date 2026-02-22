@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildCaptureManifestFromOracleDataset,
   buildMissionOracleDatasetFromRows,
+  canonicalizeReferenceRowsObjectIds,
   mergeRows,
   validateReferenceRows,
 } from '../../../tools/oracles/lib/reference-jsonl.mjs';
@@ -107,5 +108,45 @@ describe('Tok reference JSONL tools', () => {
 
     const manifestAll = buildCaptureManifestFromOracleDataset(dataset, { scripts: 'all' });
     expect(manifestAll.missionCount).toBe(2);
+  });
+
+  it('canonicalizes mission-local object ids across raw payload rows', () => {
+    const rows = [
+      {
+        scriptId: 'ATP1D1FRFail',
+        tick: 0,
+        objVars: [100, 500],
+        eventFlags: ['obj_destroyed:500', 'obj_attacks_side:500:2'],
+        dispatch: {
+          tooltipMap: [{ entity: 500, tooltipId: 61 }],
+          mainCameraTrackEid: 500,
+          airStrikes: [{ strikeId: 7, units: [500, 100], targetX: 10, targetZ: 20 }],
+        },
+        frameHash: 'a'.repeat(64),
+        intHash: 'b'.repeat(64),
+        objHash: 'c'.repeat(64),
+        posHash: 'd'.repeat(64),
+        relHash: 'e'.repeat(64),
+        eventHash: 'f'.repeat(64),
+        dispatchHash: '1'.repeat(64),
+      },
+      {
+        scriptId: 'ATP1D1FRFail',
+        tick: 1,
+        objVars: [500, 100],
+      },
+    ];
+
+    const out = canonicalizeReferenceRowsObjectIds(rows);
+    expect(out[0].objVars).toEqual([1, 2]);
+    expect(out[1].objVars).toEqual([2, 1]);
+    expect(out[0].eventFlags).toEqual(['obj_attacks_side:2:2', 'obj_destroyed:2']);
+    expect(out[0].dispatch).toEqual({
+      tooltipMap: [{ entity: 2, tooltipId: 61 }],
+      mainCameraTrackEid: 2,
+      airStrikes: [{ strikeId: 7, units: [2, 1], targetX: 10, targetZ: 20 }],
+    });
+    expect(out[0].frameHash).toBeUndefined();
+    expect(out[0].intHash).toBeUndefined();
   });
 });

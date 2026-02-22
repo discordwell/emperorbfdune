@@ -37,6 +37,7 @@ Tools:
 
 - `tools/oracles/normalize-reference-jsonl.mjs`
 - `tools/oracles/compare-reference.mjs`
+- `tools/oracles/compare-reference-jsonl.mjs`
 - `tools/oracles/build-capture-manifest.mjs`
 - `tools/oracles/extract-reference-log-lines.mjs`
 - `tools/oracles/merge-reference-jsonl.mjs`
