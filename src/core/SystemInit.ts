@@ -381,6 +381,7 @@ export function initializeSystems(config: SystemInitConfig): GameContext {
     },
   });
 
+  unitRenderer.setDeviatedUnits(abilitySystem.getDeviatedUnits());
   selectionPanel.setPassengerCountFn((eid) => abilitySystem.getTransportPassengerCount(eid));
   selectionPanel.setRepairingFn((eid) => repairingBuildings.has(eid));
   selectionPanel.setPlayerFaction(house.prefix);
@@ -438,15 +439,27 @@ export function initializeSystems(config: SystemInitConfig): GameContext {
       if (!def) return;
       if (!productionSystem.startProduction(0, typeName, true)) {
         audioManager.playSfx('error');
-        selectionPanel.addMessage('Cannot build', '#ff4444');
-        audioManager.getDialogManager()?.trigger('insufficientFunds');
+        const reason = productionSystem.getBuildBlockReason(0, typeName, true);
+        if (reason?.reason === 'cost') {
+          selectionPanel.addMessage('Insufficient funds', '#ff4444');
+          audioManager.getDialogManager()?.trigger('insufficientFunds');
+        } else {
+          selectionPanel.addMessage(reason?.detail ?? 'Cannot build', '#ff4444');
+          audioManager.getDialogManager()?.trigger('cannotBuild');
+        }
         return;
       }
     } else {
       if (!productionSystem.startProduction(0, typeName, false)) {
         audioManager.playSfx('error');
-        selectionPanel.addMessage('Cannot build', '#ff4444');
-        audioManager.getDialogManager()?.trigger('insufficientFunds');
+        const reason = productionSystem.getBuildBlockReason(0, typeName, false);
+        if (reason?.reason === 'cost') {
+          selectionPanel.addMessage('Insufficient funds', '#ff4444');
+          audioManager.getDialogManager()?.trigger('insufficientFunds');
+        } else {
+          selectionPanel.addMessage(reason?.detail ?? 'Cannot build', '#ff4444');
+          audioManager.getDialogManager()?.trigger('cannotBuild');
+        }
         return;
       }
     }

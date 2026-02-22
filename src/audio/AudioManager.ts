@@ -62,6 +62,7 @@ export class AudioManager {
   private windFilter: BiquadFilterNode | null = null;
   private windActive = false;
   private windEverStarted = false; // True once game calls startAmbientWind()
+  private windSampled = false; // True if using sampled wind (vs synth)
 
   constructor() {
     this.setupEventListeners();
@@ -215,14 +216,15 @@ export class AudioManager {
       this.playSfx('deathBuilding');
       this.bumpCombatIntensity(0.25);
     });
-    EventBus.on('combat:fire', ({ attackerX, attackerZ }: { attackerX: number; attackerZ: number }) => {
+    EventBus.on('combat:fire', ({ attackerX, attackerZ, weaponType }) => {
       const now = Date.now();
       if (now - this.lastShotTime > 100) { // Max 10 shot sounds/sec
         this.lastShotTime = now;
+        const sfxType = this.getWeaponSfxType(weaponType);
         if (attackerX !== undefined && attackerZ !== undefined) {
-          this.playSfxAt('shot', attackerX, attackerZ);
+          this.playSfxAt(sfxType as SfxType, attackerX, attackerZ);
         } else {
-          this.playSfx('shot');
+          this.playSfx(sfxType as SfxType);
         }
       }
       this.bumpCombatIntensity(0.02);
@@ -1066,9 +1068,38 @@ export class AudioManager {
     return true;
   }
 
+  // --- Weapon-specific SFX routing ---
+
+  /** Map bullet/weapon name to specific SFX category. Falls back to generic 'shot'. */
+  private getWeaponSfxType(weaponType?: string): string {
+    if (!weaponType) return 'shot';
+    const wt = weaponType.toLowerCase();
+    if (wt.includes('rocket') || wt.includes('missile')) return 'shotRocket';
+    if (wt.includes('laser')) return 'shotLaser';
+    if (wt.includes('sonic')) return 'shotSonic';
+    if (wt.includes('flame') || wt.includes('chem')) return 'shotFlame';
+    if (wt.includes('mortar')) return 'shotMortar';
+    if (wt.includes('sniper')) return 'shotSniper';
+    if (wt.includes('buzzsaw')) return 'shotBuzzsaw';
+    if (wt.includes('inkvine') || wt.includes('ink_vine')) return 'shotInkvine';
+    if (wt.includes('cannon') || wt.includes('assault')) return 'shotCannon';
+    if (wt.includes('palace') || wt.includes('arc')) return 'shotPalace';
+    if (wt.includes('popup')) return 'shotPopupTurret';
+    if (wt.includes('chemturret')) return 'shotChemTurret';
+    return 'shot';
+  }
+
+  /** Play an ability SFX at a world position */
+  playAbilitySfxAt(type: string, worldX: number, worldZ: number): void {
+    if (this.muted) return;
+    const entry = SFX_MANIFEST[type];
+    if (!entry || entry.paths.length === 0) return;
+    this.playSfxAt(type as SfxType, worldX, worldZ);
+  }
+
   // --- Ambient Wind ---
 
-  /** Start a continuous desert wind ambient loop (synthesized). */
+  /** Start a continuous desert wind ambient loop (sampled with synth fallback). */
   startAmbientWind(): void {
     this.windEverStarted = true;
     if (this.windActive || this.muted) return;
@@ -1076,33 +1107,69 @@ export class AudioManager {
       const ctx = this.getContext();
       if (ctx.state === 'suspended') ctx.resume();
 
-      // Create brown noise for wind (low-pass filtered white noise)
-      const bufferSize = ctx.sampleRate * 2; // 2-second loop
+      // Try sampled wind loop first
+      const windEntry = SFX_MANIFEST['windLoop'];
+      if (windEntry && windEntry.paths.length > 0 && this.sampleBank) {
+        const windPath = windEntry.paths[Math.floor(Math.random() * windEntry.paths.length)];
+        if (this.sampleBank.has(windPath)) {
+          const buffer = this.sampleBank.getBuffer(windPath);
+          if (buffer) {
+            const source = ctx.createBufferSource();
+            source.buffer = buffer;
+            source.loop = true;
+
+            // Slow LFO for gusting effect
+            this.windLfo = ctx.createOscillator();
+            this.windLfoGain = ctx.createGain();
+            this.windLfo.type = 'sine';
+            this.windLfo.frequency.value = 0.15;
+            this.windLfoGain.gain.value = 0.03 * this.sfxVolume;
+            this.windLfo.connect(this.windLfoGain);
+
+            this.windGain = ctx.createGain();
+            this.windGain.gain.value = windEntry.volume * this.sfxVolume;
+            this.windLfoGain.connect(this.windGain.gain);
+
+            source.connect(this.windGain);
+            this.windGain.connect(ctx.destination);
+            this.windLfo.start();
+            source.start();
+
+            this.windNode = source;
+            this.windActive = true;
+            this.windSampled = true;
+            return;
+          }
+        }
+        // If wind samples aren't loaded yet, preload them for next time
+        this.sampleBank.preload(windEntry.paths).catch(() => {});
+      }
+
+      // Fallback: synthesized brown noise wind
+      this.windSampled = false;
+      const bufferSize = ctx.sampleRate * 2;
       const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
       const data = buffer.getChannelData(0);
       let lastOut = 0;
       for (let i = 0; i < bufferSize; i++) {
         const white = Math.random() * 2 - 1;
-        // Brown noise: integrate white noise with leaky filter
         lastOut = (lastOut + (0.02 * white)) / 1.02;
-        data[i] = Math.max(-1, Math.min(1, lastOut * 3.5)); // Normalize + clamp
+        data[i] = Math.max(-1, Math.min(1, lastOut * 3.5));
       }
 
       const source = ctx.createBufferSource();
       source.buffer = buffer;
       source.loop = true;
 
-      // Bandpass filter: 100-500 Hz for wind character
       this.windFilter = ctx.createBiquadFilter();
       this.windFilter.type = 'bandpass';
       this.windFilter.frequency.value = 250;
       this.windFilter.Q.value = 0.5;
 
-      // Slow LFO for gusting effect
       this.windLfo = ctx.createOscillator();
       this.windLfoGain = ctx.createGain();
       this.windLfo.type = 'sine';
-      this.windLfo.frequency.value = 0.15; // Very slow gusting
+      this.windLfo.frequency.value = 0.15;
       this.windLfoGain.gain.value = 0.02 * this.sfxVolume;
       this.windLfo.connect(this.windLfoGain);
 
@@ -1139,6 +1206,7 @@ export class AudioManager {
     }
     if (this.windGain) { this.windGain.disconnect(); this.windGain = null; }
     this.windActive = false;
+    this.windSampled = false;
   }
 
   /** Get the name of the currently playing music track. */
@@ -1221,10 +1289,11 @@ export class AudioManager {
       this.sampleBank.setVolume(this.sfxVolume);
     }
     if (this.windGain) {
-      this.windGain.gain.value = 0.04 * this.sfxVolume;
+      const windVol = this.windSampled ? (SFX_MANIFEST['windLoop']?.volume ?? 0.15) : 0.04;
+      this.windGain.gain.value = windVol * this.sfxVolume;
     }
     if (this.windLfoGain) {
-      this.windLfoGain.gain.value = 0.02 * this.sfxVolume;
+      this.windLfoGain.gain.value = (this.windSampled ? 0.03 : 0.02) * this.sfxVolume;
     }
   }
 

@@ -42,6 +42,7 @@ interface EventMap {
   'building:survivors': { x: number; z: number; count: number; owner: number };
   'teleport:target': { x: number; z: number };
   'shield:hit': { eid: number; absorbed: number };
+  'thumper:deployed': { x: number; z: number };
 }
 
 type EventName = keyof EventMap;

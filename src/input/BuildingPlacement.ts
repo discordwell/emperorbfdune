@@ -80,8 +80,15 @@ export class BuildingPlacement {
     const terrainList = terrainTypes ?? ['Rock'];
     for (const t of terrainList) {
       const lower = t.trim().toLowerCase();
-      if (lower === 'rock') { this.allowedTerrain.add(TerrainType.Rock); this.allowedTerrain.add(TerrainType.InfantryRock); }
-      else if (lower === 'sand') { this.allowedTerrain.add(TerrainType.Sand); this.allowedTerrain.add(TerrainType.Dunes); }
+      if (lower === 'rock' || lower === 'nbrock' || lower === 'ramp') {
+        this.allowedTerrain.add(TerrainType.Rock);
+        this.allowedTerrain.add(TerrainType.InfantryRock);
+      } else if (lower === 'sand' || lower === 'dustbowl') {
+        this.allowedTerrain.add(TerrainType.Sand);
+        this.allowedTerrain.add(TerrainType.Dunes);
+      } else if (lower === 'infrock') {
+        this.allowedTerrain.add(TerrainType.InfantryRock);
+      }
     }
     // Concrete slab is always valid terrain for building placement
     this.allowedTerrain.add(TerrainType.ConcreteSlab);
@@ -420,6 +427,7 @@ export class BuildingPlacement {
       e.stopPropagation();
     } else if (e.button === 0 && !this.isValidPlacement) {
       this.audioManager.playSfx('error');
+      this.audioManager.getDialogManager()?.trigger('cannotBuild');
       e.preventDefault();
       e.stopPropagation();
     }

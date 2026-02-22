@@ -170,9 +170,15 @@ export function registerEventHandlers(ctx: GameContext): void {
     if (Owner.playerId[entityId] === 0) {
       const rankNames = ['', 'Veteran', 'Elite', 'Heroic'];
       selectionPanel.addMessage(`Unit promoted to ${rankNames[rank]}!`, '#ffd700');
-      audioManager.playSfx('select');
+      audioManager.playAbilitySfxAt('veterancyUp', Position.x[entityId], Position.z[entityId]);
     }
     effectsManager.spawnPromotionBurst(Position.x[entityId], 0, Position.z[entityId]);
+  });
+
+  // Thumper deploy
+  EventBus.on('thumper:deployed', ({ x, z }) => {
+    audioManager.playAbilitySfxAt('thumperDeploy', x, z);
+    selectionPanel.addMessage('Thumper deployed!', '#ff8800');
   });
 
   // Sandworm events
@@ -414,7 +420,24 @@ export function registerEventHandlers(ctx: GameContext): void {
     }
 
     if (isBuildingType) {
-      if (owner === 0) {
+      // Agent mode: auto-place buildings for player 0 (same path as AI players)
+      if (owner === 0 && ctx.agentAI) {
+        const bDef = gameRules.buildings.get(unitType);
+        if (bDef) {
+          const pos = ctx.agentAI.getNextBuildingPlacement(unitType, bDef);
+          const agentBldgEid = ctx.spawnBuilding(world, unitType, 0, pos.x, pos.z);
+          movement.invalidateAllPaths();
+          // Update occupied tiles so BuildingPlacement validator stays in sync
+          buildingPlacement.updateOccupiedTiles(world);
+          if (agentBldgEid >= 0) {
+            EventBus.emit('building:placed', { entityId: agentBldgEid, buildingType: unitType, owner: 0 });
+            EventBus.emit('building:completed', { entityId: agentBldgEid, playerId: 0, typeName: unitType });
+          }
+          if (bDef.getUnitWhenBuilt) {
+            ctx.spawnUnit(world, bDef.getUnitWhenBuilt, 0, pos.x + 3, pos.z + 3);
+          }
+        }
+      } else if (owner === 0) {
         const placeDef = gameRules.buildings.get(unitType);
         if (placeDef?.wall) {
           // Wall: use drag-to-build mode, spawning each tile individually

@@ -288,6 +288,239 @@ export const SFX_MANIFEST: Record<string, SfxEntry> = {
     pitchVariation: false,
     cooldown: 500,
   },
+
+  // --- Weapon-specific fire sounds ---
+  shotRocket: {
+    paths: [
+      `${S}at_rocket_turret_1.ogg`,
+      `${S}ornithopter_rocket_1.ogg`,
+      `${S}ornithopter_rocket_2.ogg`,
+      `${S}hk_missile_tank_1.ogg`,
+    ],
+    volume: 0.35,
+    pitchVariation: true,
+    cooldown: 80,
+  },
+
+  shotLaser: {
+    paths: [
+      `${S}lasertankattack.ogg`,
+    ],
+    volume: 0.35,
+    pitchVariation: true,
+    cooldown: 80,
+  },
+
+  shotFlame: {
+    paths: [
+      `${S}chemflamerattack.ogg`,
+      `${S}hk_flame_infantry_1.ogg`,
+      `${S}hk_flame_turret_1.ogg`,
+    ],
+    volume: 0.35,
+    pitchVariation: true,
+    cooldown: 80,
+  },
+
+  shotSonic: {
+    paths: [
+      `${S}sonic_tank_boom_large_1.ogg`,
+    ],
+    volume: 0.4,
+    pitchVariation: false,
+    cooldown: 150,
+  },
+
+  shotMortar: {
+    paths: [
+      `${S}mortarattack.ogg`,
+      `${S}mortarattackpistol.ogg`,
+    ],
+    volume: 0.35,
+    pitchVariation: true,
+    cooldown: 100,
+  },
+
+  shotSniper: {
+    paths: [
+      `${S}sniper_3.ogg`,
+    ],
+    volume: 0.3,
+    pitchVariation: true,
+    cooldown: 100,
+  },
+
+  shotCannon: {
+    paths: [
+      `${S}hk_assault_tank_1a.ogg`,
+      `${S}kindjal_infantry_cannon_2.ogg`,
+    ],
+    volume: 0.4,
+    pitchVariation: true,
+    cooldown: 80,
+  },
+
+  shotBuzzsaw: {
+    paths: [
+      `${S}hk_buzzsaw_gun_1.ogg`,
+    ],
+    volume: 0.35,
+    pitchVariation: true,
+    cooldown: 80,
+  },
+
+  shotInkvine: {
+    paths: [
+      `${S}hk_inkvine_shot_1b.ogg`,
+    ],
+    volume: 0.35,
+    pitchVariation: true,
+    cooldown: 100,
+  },
+
+  shotChemTurret: {
+    paths: [
+      `${S}chemturretattack.ogg`,
+    ],
+    volume: 0.35,
+    pitchVariation: true,
+    cooldown: 100,
+  },
+
+  shotPopupTurret: {
+    paths: [
+      `${S}popupturretattack.ogg`,
+    ],
+    volume: 0.35,
+    pitchVariation: true,
+    cooldown: 100,
+  },
+
+  shotPalace: {
+    paths: [
+      `${S}palace_arc_1.ogg`,
+    ],
+    volume: 0.45,
+    pitchVariation: false,
+    cooldown: 200,
+  },
+
+  // --- Ability SFX ---
+  stealth: {
+    paths: [
+      `${S}stealth1.ogg`,
+      `${S}stealth2.ogg`,
+    ],
+    volume: 0.3,
+    pitchVariation: false,
+    cooldown: 500,
+  },
+
+  thumperDeploy: {
+    paths: [
+      `${S}thumper_deploy_1.ogg`,
+    ],
+    volume: 0.4,
+    pitchVariation: false,
+    cooldown: 300,
+  },
+
+  thumperRhythm: {
+    paths: [
+      `${S}thumper_single_1.ogg`,
+      `${S}thumper_single_2.ogg`,
+    ],
+    volume: 0.35,
+    pitchVariation: false,
+    cooldown: 200,
+  },
+
+  repairSparks: {
+    paths: [
+      `${S}repair_vehicle_sparks_1.ogg`,
+      `${S}repair_vehicle_sparks_1b.ogg`,
+      `${S}repair_vehicle_sparks_1c.ogg`,
+      `${S}repair_vehicle_sparks_1d.ogg`,
+    ],
+    volume: 0.25,
+    pitchVariation: true,
+    cooldown: 300,
+  },
+
+  veterancyUp: {
+    paths: [
+      `${S}veteran_upgrade_1.ogg`,
+    ],
+    volume: 0.45,
+    pitchVariation: false,
+    cooldown: 200,
+  },
+
+  popupTurretRise: {
+    paths: [
+      `${S}popupturretrise.ogg`,
+    ],
+    volume: 0.35,
+    pitchVariation: false,
+    cooldown: 200,
+  },
+
+  popupTurretDrop: {
+    paths: [
+      `${S}popupturretdrop.ogg`,
+    ],
+    volume: 0.35,
+    pitchVariation: false,
+    cooldown: 200,
+  },
+
+  leechAttack: {
+    paths: [
+      `${S}tx_leech_attack_6.ogg`,
+      `${S}tx_leech_attack_7.ogg`,
+    ],
+    volume: 0.35,
+    pitchVariation: true,
+    cooldown: 200,
+  },
+
+  fleshBorn: {
+    paths: [
+      `${S}tx_flesh_born_2.ogg`,
+      `${S}tx_flesh_born_3.ogg`,
+    ],
+    volume: 0.35,
+    pitchVariation: false,
+    cooldown: 200,
+  },
+
+  sonicDeploy: {
+    paths: [
+      `${S}sonic_tank_deploy_1.ogg`,
+    ],
+    volume: 0.4,
+    pitchVariation: false,
+    cooldown: 300,
+  },
+
+  weirdingWeapon: {
+    paths: [
+      `${S}weirding_weapon_3.ogg`,
+    ],
+    volume: 0.35,
+    pitchVariation: false,
+    cooldown: 200,
+  },
+
+  // --- Wind loops ---
+  windLoop: {
+    paths: [
+      `${S}wind_loop_medium_1.ogg`,
+      `${S}wind_loop_medium_2.ogg`,
+    ],
+    volume: 0.15,
+    pitchVariation: false,
+  },
 };
 
 /**
@@ -312,6 +545,8 @@ export function getPrioritySamplePaths(): string[] {
   const priority: string[] = [
     'explosion', 'shot', 'deathInfantry', 'deathVehicle', 'deathBuilding',
     'build', 'place', 'worm', 'harvest', 'powerlow', 'select',
+    'shotRocket', 'shotLaser', 'shotFlame', 'shotSonic', 'shotCannon',
+    'shotMortar', 'shotSniper', 'veterancyUp',
   ];
   const set = new Set<string>();
   for (const key of priority) {

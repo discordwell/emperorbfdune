@@ -57,6 +57,7 @@ export class SandwormSystem implements GameSystem {
   /** Deploy a thumper at a location (attracts worms for ~20 seconds) */
   deployThumper(x: number, z: number): void {
     this.thumpers.push({ x, z, ticksLeft: GameConstants.THUMPER_DURATION });
+    EventBus.emit('thumper:deployed', { x, z });
   }
 
   update(world: World, _dt: number): void {

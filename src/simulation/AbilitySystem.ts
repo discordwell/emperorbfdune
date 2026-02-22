@@ -423,6 +423,7 @@ export class AbilitySystem {
           // Activate stealth (visual transition handled below)
           timer.active = true;
           combatSystem.setStealthed(eid, true);
+          this.deps.audioManager?.playAbilitySfxAt('stealth', Position.x[eid], Position.z[eid]);
         }
       } else {
         // Fire cooldown still active — remain visible, reset idle
@@ -755,6 +756,7 @@ export class AbilitySystem {
           this.leechTargets.set(eid, other);
           MoveTarget.active[eid] = 0;
           combatSystem.setSuppressed(eid, true);
+          this.deps.audioManager?.playAbilitySfxAt('leechAttack', Position.x[eid], Position.z[eid]);
           if (leechOwner === 0) selectionPanel.addMessage('Leech attached!', '#88ff44');
           else if (Owner.playerId[other] === 0) selectionPanel.addMessage('Leech on your vehicle!', '#ff4444');
           break;
@@ -930,6 +932,7 @@ export class AbilitySystem {
             0.5 + Math.random() * 1.5,
             Position.z[other] + (Math.random() - 0.5) * 1.5
           );
+          this.deps.audioManager?.playAbilitySfxAt('repairSparks', Position.x[other], Position.z[other]);
         }
       }
 

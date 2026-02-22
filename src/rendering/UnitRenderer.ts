@@ -95,6 +95,10 @@ export class UnitRenderer {
   private animClock = new THREE.Clock();
   // Turret node cache: entity ID -> THREE.Object3D (found by ::0 name prefix)
   private turretNodes = new Map<number, THREE.Object3D>();
+  // Deviated units reference: eid -> { originalOwner, revertTick }
+  private deviatedUnits: Map<number, { originalOwner: number; revertTick: number }> | null = null;
+  // Track which entities have mind-control tint applied
+  private mindControlTinted = new Set<number>();
 
   constructor(sceneManager: SceneManager, modelManager: ModelManager, artMap: Map<string, ArtEntry>) {
     this.sceneManager = sceneManager;
@@ -105,6 +109,10 @@ export class UnitRenderer {
   setFogOfWar(fog: FogOfWar, localPlayerId = 0): void {
     this.fogOfWar = fog;
     this.localPlayerId = localPlayerId;
+  }
+
+  setDeviatedUnits(map: Map<number, { originalOwner: number; revertTick: number }>): void {
+    this.deviatedUnits = map;
   }
 
   setUnitCategoryFn(fn: (eid: number) => 'infantry' | 'vehicle' | 'aircraft' | 'building'): void {
@@ -513,6 +521,32 @@ export class UnitRenderer {
 
       // Update veterancy indicator
       this.updateRankSprite(eid);
+
+      // Mind-control purple tint for deviated units
+      if (this.deviatedUnits) {
+        const isDeviated = this.deviatedUnits.has(eid);
+        if (isDeviated && !this.mindControlTinted.has(eid)) {
+          // Apply purple emissive glow
+          this.mindControlTinted.add(eid);
+          obj.traverse(child => {
+            const mat = (child as any).material as THREE.MeshStandardMaterial;
+            if (mat && mat.emissive) {
+              mat.emissive.set(0x8800cc);
+              mat.emissiveIntensity = 0.4;
+            }
+          });
+        } else if (!isDeviated && this.mindControlTinted.has(eid)) {
+          // Remove purple tint
+          this.mindControlTinted.delete(eid);
+          obj.traverse(child => {
+            const mat = (child as any).material as THREE.MeshStandardMaterial;
+            if (mat && mat.emissive) {
+              mat.emissive.set(0x000000);
+              mat.emissiveIntensity = 0;
+            }
+          });
+        }
+      }
     }
   }
 
@@ -1010,6 +1044,7 @@ export class UnitRenderer {
     if (rc) { this.sceneManager.scene.remove(rc); rc.geometry.dispose(); (rc.material as THREE.Material).dispose(); this.rangeCircles.delete(eid); }
     const ihc = this.idleHarvesterCircles.get(eid);
     if (ihc) { this.sceneManager.scene.remove(ihc); ihc.geometry.dispose(); (ihc.material as THREE.Material).dispose(); this.idleHarvesterCircles.delete(eid); }
+    this.mindControlTinted.delete(eid);
   }
 
   /** Animate dying entities (call each frame) */

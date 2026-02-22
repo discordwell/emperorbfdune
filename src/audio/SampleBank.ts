@@ -104,4 +104,9 @@ export class SampleBank {
   has(path: string): boolean {
     return this.buffers.has(path);
   }
+
+  /** Get the raw AudioBuffer for a loaded sample (or null if not loaded). */
+  getBuffer(path: string): AudioBuffer | null {
+    return this.buffers.get(path) ?? null;
+  }
 }
