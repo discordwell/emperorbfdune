@@ -133,6 +133,10 @@ export class SandwormSystem implements GameSystem {
         this.thumpers.splice(i, 1);
         continue;
       }
+      // Rhythmic thumper sound (~every 3 seconds)
+      if (this.tickCounter % 75 === 0) {
+        EventBus.emit('thumper:rhythm', { x: this.thumpers[i].x, z: this.thumpers[i].z });
+      }
       // Thumpers attract roaming worms toward them
       if (this.tickCounter % 25 === 0) {
         const t = this.thumpers[i];

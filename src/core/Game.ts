@@ -26,6 +26,7 @@ export class Game {
   private accumulator = 0;
   private lastTime = 0;
   private speedMultiplier = 1.0;
+  private headless = false; // Use setInterval instead of rAF (for background tabs)
 
   // FPS tracking
   private frameCount = 0;
@@ -59,13 +60,28 @@ export class Game {
     this.renderSystems.push(system);
   }
 
+  /** Enable headless mode — uses setInterval instead of requestAnimationFrame.
+   *  Call before start(). Allows game to tick in background tabs. */
+  setHeadless(enabled: boolean): void {
+    this.headless = enabled;
+  }
+
   start(): void {
     if (this.running) return;
     this.running = true;
     this.lastTime = performance.now();
     this.fpsTime = this.lastTime;
     EventBus.emit('game:started', {});
-    this.loop(this.lastTime);
+    if (this.headless) {
+      // Use setInterval for background-tab-safe ticking
+      // Chrome throttles to ~1/sec for hidden tabs but simulation still advances
+      setInterval(() => {
+        if (!this.running) return;
+        this.loop(performance.now());
+      }, TICK_INTERVAL);
+    } else {
+      this.loop(this.lastTime);
+    }
   }
 
   pause(): void {
@@ -106,7 +122,7 @@ export class Game {
 
   private loop = (now: number): void => {
     if (!this.running) return;
-    requestAnimationFrame(this.loop);
+    if (!this.headless) requestAnimationFrame(this.loop);
 
     const elapsed = now - this.lastTime;
     this.lastTime = now;

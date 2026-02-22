@@ -1076,7 +1076,7 @@ export class AudioManager {
     const wt = weaponType.toLowerCase();
     if (wt.includes('rocket') || wt.includes('missile')) return 'shotRocket';
     if (wt.includes('laser')) return 'shotLaser';
-    if (wt.includes('sonic')) return 'shotSonic';
+    if (wt.includes('sonic') || wt.includes('sound')) return 'shotSonic'; // bullets: Sound_B, SoundInf_B
     if (wt.includes('flame') || wt.includes('chem')) return 'shotFlame';
     if (wt.includes('mortar')) return 'shotMortar';
     if (wt.includes('sniper')) return 'shotSniper';

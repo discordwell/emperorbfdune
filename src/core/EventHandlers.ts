@@ -175,10 +175,13 @@ export function registerEventHandlers(ctx: GameContext): void {
     effectsManager.spawnPromotionBurst(Position.x[entityId], 0, Position.z[entityId]);
   });
 
-  // Thumper deploy
+  // Thumper deploy and rhythm
   EventBus.on('thumper:deployed', ({ x, z }) => {
     audioManager.playAbilitySfxAt('thumperDeploy', x, z);
     selectionPanel.addMessage('Thumper deployed!', '#ff8800');
+  });
+  EventBus.on('thumper:rhythm', ({ x, z }) => {
+    audioManager.playAbilitySfxAt('thumperRhythm', x, z);
   });
 
   // Sandworm events

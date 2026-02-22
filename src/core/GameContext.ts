@@ -147,6 +147,7 @@ export interface GameContext {
   sidebar: Sidebar;
   iconRenderer: IconRenderer;
   aiPlayers: AIPlayer[];
+  agentAI: AIPlayer | null; // Agent mode: AIPlayer controlling player 0
 
   // Mission scripting
   missionScriptRunner: MissionScriptRunnerInterface | null;

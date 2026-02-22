@@ -347,6 +347,7 @@ function parseBuildingDef(name: string, section: Section): BuildingDef {
       case 'AiResource': def.aiResource = parseBool(value); break;
       case 'AiDefence': def.aiDefence = parseBool(value); break;
       case 'AiCritical': def.aiCritical = parseBool(value); break;
+      case 'PopupTurret': def.popupTurret = parseBool(value); break;
       case 'Outpost': def.outpost = parseBool(value); break;
       case 'HideUnitOnRadar': def.hideOnRadar = parseBool(value); break;
       case 'UpgradeCost': def.upgradeCost = parseNum(value); def.upgradable = true; break;

@@ -1077,7 +1077,7 @@ export class AbilitySystem {
           }
           this.kobraBaseRange.delete(eid);
           selectionPanel.addMessage('Kobra undeployed', '#aaa');
-          audioManager.playSfx('build');
+          audioManager.playAbilitySfxAt('sonicDeploy', Position.x[eid], Position.z[eid]);
         } else {
           // Deploy: immobilize, double range (store base)
           if (hasComponent(world, Combat, eid)) {
@@ -1087,7 +1087,7 @@ export class AbilitySystem {
           this.kobraDeployed.add(eid);
           MoveTarget.active[eid] = 0;
           selectionPanel.addMessage('Kobra deployed - range doubled!', '#44ff44');
-          audioManager.playSfx('build');
+          audioManager.playAbilitySfxAt('sonicDeploy', Position.x[eid], Position.z[eid]);
         }
         handled = true;
       }
@@ -1337,6 +1337,7 @@ export class AbilitySystem {
           const cx = Position.x[targetEntity];
           const cz = Position.z[targetEntity];
           spawnUnit(this.deps.getWorld(), atName2, attackerOwner, cx, cz);
+          this.deps.audioManager?.playAbilitySfxAt('fleshBorn', cx, cz);
           if (attackerOwner === 0) selectionPanel.addMessage('Infantry contaminated!', '#88ff44');
           else if (tgtOwner === 0) selectionPanel.addMessage('Unit contaminated by enemy!', '#ff4444');
         }

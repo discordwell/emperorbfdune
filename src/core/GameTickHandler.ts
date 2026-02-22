@@ -43,6 +43,10 @@ export function registerTickHandler(ctx: GameContext): void {
   const techLevelEl = document.getElementById('tech-level');
   const musicTrackEl = document.getElementById('music-track');
 
+  // Popup turret state tracking
+  const popupTurretRisen = new Set<number>();
+  const popupTurretInitialized = new Set<number>();
+
   // Objective display for campaign
   let objectiveEl: HTMLDivElement | null = null;
   let objectiveBarFillEl: HTMLDivElement | null = null;
@@ -482,6 +486,75 @@ export function registerTickHandler(ctx: GameContext): void {
         effectsManager.updateBuildingDamage(
           eid, Position.x[eid], Position.y[eid], Position.z[eid], ratio
         );
+      }
+    }
+
+    // Suppress new popup turrets immediately (every tick, cheap check)
+    {
+      const popupBuildings = buildingQuery(world);
+      for (const eid of popupBuildings) {
+        if (popupTurretInitialized.has(eid) || Health.current[eid] <= 0) continue;
+        const typeId = BuildingType.id[eid];
+        const bName = buildingTypeNames[typeId];
+        const bDef = bName ? gameRules.buildings.get(bName) : null;
+        if (!bDef?.popupTurret) continue;
+        popupTurretInitialized.add(eid);
+        combatSystem.setSuppressed(eid, true);
+        const obj = unitRenderer.getEntityObject(eid);
+        if (obj) obj.scale.y = 0.3;
+      }
+    }
+
+    // Popup turret rise/drop state machine (check every 25 ticks)
+    if (currentTick % 25 === 12) {
+      const allUnits = unitQuery(world);
+      const popupBuildings = buildingQuery(world);
+      // Clean up dead popup turrets
+      for (const rid of popupTurretRisen) {
+        if (Health.current[rid] <= 0) { popupTurretRisen.delete(rid); popupTurretInitialized.delete(rid); }
+      }
+      for (const eid of popupBuildings) {
+        if (Health.current[eid] <= 0) continue;
+        const typeId = BuildingType.id[eid];
+        const bName = buildingTypeNames[typeId];
+        const bDef = bName ? gameRules.buildings.get(bName) : null;
+        if (!bDef?.popupTurret) continue;
+
+        const bOwner = Owner.playerId[eid];
+        const bx = Position.x[eid];
+        const bz = Position.z[eid];
+        const detectRange = (bDef.viewRange || 10) * 2; // World units
+        const detectRange2 = detectRange * detectRange;
+        const wasRisen = popupTurretRisen.has(eid);
+
+        // Check for enemies within detection range
+        let enemyNearby = false;
+        for (const uid of allUnits) {
+          if (Owner.playerId[uid] === bOwner) continue;
+          if (Health.current[uid] <= 0) continue;
+          const dx = Position.x[uid] - bx;
+          const dz = Position.z[uid] - bz;
+          if (dx * dx + dz * dz < detectRange2) {
+            enemyNearby = true;
+            break;
+          }
+        }
+
+        if (enemyNearby && !wasRisen) {
+          // Rise: enable combat
+          popupTurretRisen.add(eid);
+          combatSystem.setSuppressed(eid, false);
+          audioManager.playAbilitySfxAt('popupTurretRise', bx, bz);
+          const obj = unitRenderer.getEntityObject(eid);
+          if (obj) obj.scale.y = 1.0;
+        } else if (!enemyNearby && wasRisen) {
+          // Drop: disable combat
+          popupTurretRisen.delete(eid);
+          combatSystem.setSuppressed(eid, true);
+          audioManager.playAbilitySfxAt('popupTurretDrop', bx, bz);
+          const obj = unitRenderer.getEntityObject(eid);
+          if (obj) obj.scale.y = 0.3;
+        }
       }
     }
 

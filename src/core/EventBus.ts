@@ -43,6 +43,7 @@ interface EventMap {
   'teleport:target': { x: number; z: number };
   'shield:hit': { eid: number; absorbed: number };
   'thumper:deployed': { x: number; z: number };
+  'thumper:rhythm': { x: number; z: number };
 }
 
 type EventName = keyof EventMap;

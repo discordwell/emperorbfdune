@@ -41,6 +41,9 @@ export interface BuildingDef {
   roofHeight: number;
   unstealthRange: number;
 
+  // Popup turret
+  popupTurret: boolean; // Rises when enemies in range, drops when idle
+
   // Radar
   outpost: boolean; // Enables minimap/radar when owned
   hideOnRadar: boolean; // Don't show this building on minimap (decorations)
@@ -93,6 +96,7 @@ export function createDefaultBuildingDef(name: string): BuildingDef {
     numInfantryWhenGone: 0,
     roofHeight: 80,
     unstealthRange: 0,
+    popupTurret: false,
     outpost: false,
     hideOnRadar: false,
     excludeFromSkirmishLose: false,
