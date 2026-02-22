@@ -1,6 +1,7 @@
 node_modules/
 dist/
 *.js.map
+artifacts/
 
 # Raw game data and converted assets (too large for git)
 extracted/
