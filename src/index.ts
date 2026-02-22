@@ -625,9 +625,9 @@ async function main() {
       mapLoaded = true;
       console.log(`Loaded real map: ${realMapId} (${mapData.width}×${mapData.height})`);
 
-      // Try loading original terrain mesh (graceful fallback to splatmap)
-      const xbfLoaded = await ctx.terrain.loadTerrainMesh(realMapId);
-      console.log(xbfLoaded ? `XBF terrain: ${realMapId}` : `Splatmap terrain: ${realMapId}`);
+      // Load original XBF terrain mesh (required)
+      await ctx.terrain.loadTerrainMesh(realMapId);
+      console.log(`XBF terrain: ${realMapId}`);
 
       // Load map metadata (spawn points, script points, entrances, etc.)
       const manifest = await loadMapManifest();
@@ -638,13 +638,21 @@ async function main() {
         const sc = ctx.mapMetadata.scriptPoints.filter(p => p !== null).length;
         const en = ctx.mapMetadata.entrances.length;
         console.log(`Map metadata: ${sp} spawns, ${sc} scripts, ${en} entrances`);
+
+        // Place SpiceMound 3D models at spice field centers
+        if (ctx.mapMetadata.spiceFields.length > 0) {
+          await ctx.terrain.placeSpiceMounds(ctx.mapMetadata.spiceFields);
+        }
+
+        // Apply per-map lighting from test.lit
+        if (manifestEntry.lighting) {
+          ctx.scene.setMapLighting(manifestEntry.lighting);
+        }
       }
     }
   }
   if (!mapLoaded) {
-    if (house.mapChoice) ctx.terrain.setMapSeed(house.mapChoice.seed);
-    await ctx.terrain.generate();
-    ctx.activeMapId = null;
+    throw new Error(`Failed to load map data for: ${realMapId ?? 'unknown'}`);
   }
 
   // Update systems with actual map dimensions

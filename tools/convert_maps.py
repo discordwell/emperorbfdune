@@ -119,26 +119,90 @@ def parse_map_inf(path: str) -> tuple[int, int]:
 
 
 def parse_lit(path: str) -> tuple[float, float]:
-    """Parse test.lit for ambient lighting values.
+    """Parse test.lit for ambient lighting values (backward compat).
 
-    Format: first line has 1-2 float values (ambient intensity).
     Returns (ambientR, ambientG) as floats 0.0-1.0.
+    """
+    lighting = parse_lit_full(path)
+    if lighting:
+        return lighting['intensity'][0], lighting['intensity'][-1]
+    return 0.5, 0.5
+
+
+def parse_lit_full(path: str) -> dict | None:
+    """Parse test.lit for full lighting data.
+
+    Format (text lines before binary data):
+      Line 1: 1-3 floats (intensity multiplier(s))
+      Line 2: R G B (0-255) — ambient/shadow color
+      Line 3: R G B (0-255) — sun/directional color
+      Line 4: R G B (0-255) — ground color
+      Line 5: R G B (0-255) — sky/hemisphere color (optional)
+
+    Returns dict with intensity, ambientColor, sunColor, groundColor, skyColor.
     """
     try:
         with open(path, 'rb') as f:
             data = f.read()
-        # Find the text portion (before any binary data)
-        text = data.split(b'\r\n')[0].decode('ascii', errors='ignore').strip()
-        parts = text.split()
 
-        if len(parts) >= 2:
-            return float(parts[0]), float(parts[1])
-        elif len(parts) == 1:
-            v = float(parts[0])
-            return v, v
-        return 0.5, 0.5
+        # Split into lines (CRLF), decode text portion only
+        raw_lines = data.split(b'\r\n')
+        lines: list[str] = []
+        for raw in raw_lines:
+            # Try full ASCII decode first
+            try:
+                text = raw.decode('ascii').strip()
+            except UnicodeDecodeError:
+                # Last text line may bleed into binary — extract ASCII prefix
+                ascii_bytes = bytearray()
+                for b in raw:
+                    if b < 0x80 and (b == 0x20 or b == 0x2E or 0x30 <= b <= 0x39):
+                        ascii_bytes.append(b)
+                    elif len(ascii_bytes) > 0:
+                        break
+                text = ascii_bytes.decode('ascii').strip() if ascii_bytes else ''
+                if not text:
+                    break
+            if not text:
+                break
+            # Validate all parts are numbers
+            parts = text.split()
+            try:
+                [float(p) for p in parts]
+            except ValueError:
+                break
+            lines.append(text)
+            if len(lines) >= 5:
+                break
+
+        if len(lines) < 4:
+            return None
+
+        # Line 1: intensity (1-3 floats)
+        intensity = [float(v) for v in lines[0].split()]
+
+        def parse_rgb(line: str) -> list[int]:
+            return [int(v) for v in line.split()[:3]]
+
+        ambient_color = parse_rgb(lines[1])
+        sun_color = parse_rgb(lines[2])
+        ground_color = parse_rgb(lines[3])
+
+        result: dict = {
+            'intensity': intensity,
+            'ambientColor': ambient_color,
+            'sunColor': sun_color,
+            'groundColor': ground_color,
+        }
+
+        if len(lines) >= 5:
+            sky_parts = lines[4].split()
+            if len(sky_parts) >= 3:
+                result['skyColor'] = [int(v) for v in sky_parts[:3]]
+
+        return result
     except Exception:
-        return 0.5, 0.5
+        return None
 
 
 def read_cpt(path: str, w: int, h: int) -> np.ndarray:
@@ -362,6 +426,12 @@ def convert_map(map_dir: str, dirname: str, output_dir: str) -> dict | None:
         'binSize': bin_size,
         'hasThumb': has_thumb,
     }
+
+    # Add full lighting data from test.lit
+    if os.path.exists(lit_path):
+        lighting = parse_lit_full(lit_path)
+        if lighting:
+            entry['lighting'] = lighting
 
     if metadata:
         entry.update(metadata)

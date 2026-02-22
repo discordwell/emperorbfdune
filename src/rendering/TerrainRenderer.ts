@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { TILE_SIZE } from '../utils/MathUtils';
 import type { SceneManager } from './SceneManager';
-import type { MapData } from '../config/MapLoader';
+import type { MapData, MapPoint } from '../config/MapLoader';
 
 // Terrain types matching EBFD
 export enum TerrainType {
@@ -16,31 +16,8 @@ export enum TerrainType {
   InfantryRock = 7, // Elevated rock where infantry gets bonuses
 }
 
-// Fallback vertex color palette
-const TERRAIN_COLORS: Record<TerrainType, THREE.Color> = {
-  [TerrainType.Sand]: new THREE.Color(0xC2A54F),
-  [TerrainType.Rock]: new THREE.Color(0x8B7355),
-  [TerrainType.SpiceLow]: new THREE.Color(0xD4842A),
-  [TerrainType.SpiceHigh]: new THREE.Color(0xB85C1E),
-  [TerrainType.Dunes]: new THREE.Color(0xD4B86A),
-  [TerrainType.Cliff]: new THREE.Color(0x6B5B45),
-  [TerrainType.ConcreteSlab]: new THREE.Color(0x808080),
-  [TerrainType.InfantryRock]: new THREE.Color(0x9B8B6B),
-};
-
-// Default map size for proc-gen fallback
-const DEFAULT_MAP_SIZE = 128;
-
 // Maximum terrain height from heightmap values (world units)
 const MAX_ELEVATION = 3.0;
-
-/** Type-based height for procedural maps (no heightmap data) */
-function proceduralHeight(t: TerrainType): number {
-  if (t === TerrainType.Cliff) return 1.5;
-  if (t === TerrainType.Rock || t === TerrainType.InfantryRock) return 0.3;
-  if (t === TerrainType.Dunes) return 0.15;
-  return 0;
-}
 
 /**
  * CPF passability nibble (0-15) → visual TerrainType mapping.
@@ -104,9 +81,7 @@ const terrainFragmentShader = /* glsl */ `
     vec2 tiledUv = vWorldUv * texScale;
     vec3 sandColor = texture2D(sandTex, tiledUv).rgb;
     vec3 rockColor = texture2D(rockTex, tiledUv).rgb;
-    vec3 spiceBase = texture2D(spiceTex, tiledUv).rgb;
-    // Tint spice texture orange
-    vec3 spiceColor = spiceBase * vec3(1.4, 0.8, 0.3);
+    vec3 spiceColor = texture2D(spiceTex, tiledUv).rgb;
 
     // Blend based on splatmap weights (R=sand, G=rock, B=spice)
     float total = splat.r + splat.g + splat.b;
@@ -149,8 +124,7 @@ const spiceOverlayFragmentShader = /* glsl */ `
 
     // Tile the spice texture across the terrain
     vec2 tiledUv = vSplatUv * mapWorldSize * 0.075;
-    vec3 spiceBase = texture2D(spiceTex, tiledUv).rgb;
-    vec3 spiceColor = spiceBase * vec3(1.4, 0.8, 0.3);
+    vec3 spiceColor = texture2D(spiceTex, tiledUv).rgb;
 
     gl_FragColor = vec4(spiceColor, spiceWeight * 0.85);
   }
@@ -171,9 +145,9 @@ export class TerrainRenderer {
   private rockTex: THREE.Texture | null = null;
   private spiceTex: THREE.Texture | null = null;
 
-  // Variable map dimensions (replaces fixed MAP_SIZE)
-  private mapWidth = DEFAULT_MAP_SIZE;
-  private mapHeight = DEFAULT_MAP_SIZE;
+  // Variable map dimensions
+  private mapWidth = 128;
+  private mapHeight = 128;
 
   // Heightmap data from real maps (null for proc-gen)
   private heightData: Uint8Array | null = null;
@@ -186,6 +160,7 @@ export class TerrainRenderer {
   private heightGridH = 0;
   private spiceOverlayMesh: THREE.Mesh | null = null;
   private spiceOverlayMaterial: THREE.ShaderMaterial | null = null;
+  private spiceMounds: THREE.Group[] = [];
 
   constructor(sceneManager: SceneManager) {
     this.sceneManager = sceneManager;
@@ -243,16 +218,7 @@ export class TerrainRenderer {
     }
 
     if (!this.heightData) {
-      // Procedural: interpolate between neighboring tile heights for smooth transitions
-      const fracX = fx - tx;
-      const fracZ = fz - tz;
-      const h00 = proceduralHeight(this.getTerrainType(tx, tz));
-      const h10 = proceduralHeight(this.getTerrainType(tx + 1, tz));
-      const h01 = proceduralHeight(this.getTerrainType(tx, tz + 1));
-      const h11 = proceduralHeight(this.getTerrainType(tx + 1, tz + 1));
-      const top = h00 + (h10 - h00) * fracX;
-      const bot = h01 + (h11 - h01) * fracX;
-      return top + (bot - top) * fracZ;
+      return 0;
     }
 
     // Bilinear interpolation of uint8 heightmap
@@ -369,22 +335,6 @@ export class TerrainRenderer {
     console.log(`Terrain loaded from map data: ${this.mapWidth}×${this.mapHeight}`);
   }
 
-  /** Procedural generation fallback */
-  async generate(): Promise<void> {
-    // Reset to default size for proc-gen
-    this.mapWidth = DEFAULT_MAP_SIZE;
-    this.mapHeight = DEFAULT_MAP_SIZE;
-    this.terrainData = new Uint8Array(this.mapWidth * this.mapHeight);
-    this.baseTerrain = new Uint8Array(this.mapWidth * this.mapHeight);
-    this.spiceAmount = new Float32Array(this.mapWidth * this.mapHeight);
-    this.heightData = null;
-
-    this.generateProceduralTerrain();
-    await this.loadTextures();
-    this.generateSplatmap();
-    this.buildMesh();
-  }
-
   private async loadTextures(): Promise<void> {
     if (this.texturesLoaded) return; // Already loaded
     const loader = new THREE.TextureLoader();
@@ -397,7 +347,7 @@ export class TerrainRenderer {
       const [sand, rock, spice] = await Promise.all([
         load('/assets/textures/ground.png'),
         load('/assets/textures/rockpatch5.png'),
-        load('/assets/textures/sandcover.png'),
+        load('/assets/textures/@!Spice.png'),
       ]);
 
       for (const tex of [sand, rock, spice]) {
@@ -492,10 +442,9 @@ export class TerrainRenderer {
     // Offset so tile (0,0) is at world origin
     geometry.translate(worldW / 2 - TILE_SIZE / 2, 0, worldH / 2 - TILE_SIZE / 2);
 
-    // Vertex colors (needed for fallback and shader vColor)
+    // Apply heightmap to vertices
     const posAttr = geometry.attributes.position;
     const vertexCount = posAttr.count;
-    const colors = new Float32Array(vertexCount * 3);
 
     for (let i = 0; i < vertexCount; i++) {
       const wx = posAttr.getX(i);
@@ -507,30 +456,12 @@ export class TerrainRenderer {
       const clampedTz = Math.max(0, Math.min(this.mapHeight - 1, tz));
 
       const tileIdx = clampedTz * this.mapWidth + clampedTx;
-      const terrainType = this.terrainData[tileIdx] as TerrainType;
-      const color = TERRAIN_COLORS[terrainType] ?? TERRAIN_COLORS[TerrainType.Sand];
 
-      colors[i * 3] = color.r;
-      colors[i * 3 + 1] = color.g;
-      colors[i * 3 + 2] = color.b;
-
-      // Height: use real heightmap if available, otherwise type-based
       if (this.heightData) {
         const elevation = this.heightData[tileIdx] / 255.0 * MAX_ELEVATION;
         posAttr.setY(i, posAttr.getY(i) + elevation);
-      } else {
-        // Procedural height variation
-        if (terrainType === TerrainType.Rock || terrainType === TerrainType.InfantryRock) {
-          posAttr.setY(i, posAttr.getY(i) + 0.3);
-        } else if (terrainType === TerrainType.Cliff) {
-          posAttr.setY(i, posAttr.getY(i) + 1.5);
-        } else if (terrainType === TerrainType.Dunes) {
-          posAttr.setY(i, posAttr.getY(i) + 0.15);
-        }
       }
     }
-
-    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     geometry.computeVertexNormals();
 
     let material: THREE.Material;
@@ -552,11 +483,10 @@ export class TerrainRenderer {
         },
         vertexShader: terrainVertexShader,
         fragmentShader: terrainFragmentShader,
-        vertexColors: true,
       });
     } else {
-      // Fallback: vertex colors
-      material = new THREE.MeshLambertMaterial({ vertexColors: true });
+      // Fallback: basic desert material
+      material = new THREE.MeshLambertMaterial({ color: 0xC2A54F });
     }
 
     this.mesh = new THREE.Mesh(geometry, material);
@@ -621,7 +551,7 @@ export class TerrainRenderer {
           for (const mat of materials) {
             if (mat instanceof THREE.MeshStandardMaterial) {
               mat.metalness = 0;
-              mat.roughness = 0.85;
+              mat.roughness = 1.0;
               if (mat.map) {
                 mat.map.wrapS = THREE.RepeatWrapping;
                 mat.map.wrapT = THREE.RepeatWrapping;
@@ -646,9 +576,8 @@ export class TerrainRenderer {
       this.xbfLoaded = true;
       console.log(`XBF terrain loaded: ${mapId} (heights: ${heightsLoaded})`);
       return true;
-    } catch {
-      // GLB not found or failed to load - fall back to splatmap
-      return false;
+    } catch (e) {
+      throw new Error(`Failed to load XBF terrain for ${mapId}: ${e}`);
     }
   }
 
@@ -695,7 +624,51 @@ export class TerrainRenderer {
     this.sceneManager.scene.add(this.spiceOverlayMesh);
   }
 
+  /** Place 3D SpiceMound models at spice field centers */
+  async placeSpiceMounds(spiceFields: MapPoint[]): Promise<void> {
+    if (spiceFields.length === 0) return;
+
+    let template: THREE.Group;
+    try {
+      const loader = new GLTFLoader();
+      const gltf = await new Promise<{ scene: THREE.Group }>((resolve, reject) => {
+        loader.load('/assets/models/spice/Spicemound.gltf', resolve, undefined, reject);
+      });
+      template = gltf.scene;
+    } catch (e) {
+      console.warn('Failed to load SpiceMound model, skipping placement:', e);
+      return;
+    }
+
+    for (const field of spiceFields) {
+      const mound = template.clone(true);
+      // XBF model coordinates [-16,16] → TILE_SIZE via scale 0.0625
+      mound.scale.setScalar(TILE_SIZE / 32);
+      const wx = field.x * TILE_SIZE;
+      const wz = field.z * TILE_SIZE;
+      const y = this.getHeightAt(wx, wz);
+      mound.position.set(wx, y, wz);
+      this.sceneManager.scene.add(mound);
+      this.spiceMounds.push(mound);
+    }
+
+    console.log(`Placed ${spiceFields.length} SpiceMound models`);
+  }
+
   dispose(): void {
+    // Dispose spice mounds
+    for (const mound of this.spiceMounds) {
+      mound.traverse((child) => {
+        if ((child as THREE.Mesh).isMesh) {
+          const mesh = child as THREE.Mesh;
+          mesh.geometry.dispose();
+          const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+          for (const mat of materials) mat.dispose();
+        }
+      });
+      this.sceneManager.scene.remove(mound);
+    }
+    this.spiceMounds = [];
     // Dispose XBF terrain
     if (this.xbfMesh) {
       this.xbfMesh.traverse((child) => {
@@ -741,84 +714,4 @@ export class TerrainRenderer {
     this.xbfLoaded = false;
   }
 
-  private mapSeed = Math.random() * 10000;
-
-  setMapSeed(seed: number): void { this.mapSeed = seed; }
-
-  private generateProceduralTerrain(): void {
-    const seed = this.mapSeed;
-    const w = this.mapWidth;
-    const h = this.mapHeight;
-    const noise = (x: number, z: number, scale: number): number => {
-      const s = scale;
-      return (
-        Math.sin((x + seed) * 0.03 * s + z * 0.05 * s) * 0.3 +
-        Math.sin(x * 0.07 * s - (z + seed) * 0.04 * s + 1.5) * 0.25 +
-        Math.sin((x + seed * 0.7) * 0.13 * s + z * 0.11 * s + 3.0) * 0.2 +
-        Math.sin(x * 0.23 * s - (z + seed * 0.3) * 0.19 * s + 5.0) * 0.15 +
-        Math.sin((x + seed * 0.5) * 0.41 * s + z * 0.37 * s + 7.0) * 0.1
-      );
-    };
-
-    // Map layout variations based on seed
-    const layout = Math.floor(seed) % 4;
-    // 0 = Open Desert (default), 1 = Canyon, 2 = Rocky Plateau, 3 = Coastal
-
-    for (let tz = 0; tz < h; tz++) {
-      for (let tx = 0; tx < w; tx++) {
-        const idx = tz * w + tx;
-        const rockNoise = noise(tx, tz, 1.0);
-        const duneNoise = noise(tx + 500, tz + 500, 0.5);
-        const spiceNoise = noise(tx + 1000, tz + 1000, 0.8);
-
-        let terrain = TerrainType.Sand;
-        let rockThreshold = 0.35;
-        let cliffThreshold = 0.55;
-        let spiceThreshold = 0.2;
-
-        if (layout === 1) {
-          // Canyon: more cliffs, narrow passages
-          rockThreshold = 0.25;
-          cliffThreshold = 0.40;
-          const cx = Math.abs(tx - w / 2) / (w / 2);
-          const cz = Math.abs(tz - h / 2) / (h / 2);
-          const canyonVal = Math.min(cx, cz);
-          if (canyonVal < 0.15) { rockThreshold = 0.6; cliffThreshold = 0.8; }
-        } else if (layout === 2) {
-          rockThreshold = 0.15;
-          cliffThreshold = 0.50;
-          spiceThreshold = 0.25;
-        } else if (layout === 3) {
-          const midDist = Math.abs(tx + tz - w) / w;
-          if (midDist < 0.15) { rockThreshold = 0.1; cliffThreshold = 0.25; }
-          else { rockThreshold = 0.45; cliffThreshold = 0.65; }
-        }
-
-        if (rockNoise > rockThreshold) {
-          terrain = TerrainType.Rock;
-        } else if (rockNoise > rockThreshold - 0.1) {
-          terrain = TerrainType.InfantryRock;
-        }
-
-        if (rockNoise > cliffThreshold || tx <= 1 || tx >= w - 2 || tz <= 1 || tz >= h - 2) {
-          terrain = TerrainType.Cliff;
-        }
-
-        if (terrain === TerrainType.Sand && duneNoise > 0.3) {
-          terrain = TerrainType.Dunes;
-        }
-
-        this.terrainData[idx] = terrain;
-        this.baseTerrain[idx] = terrain;
-
-        if (terrain === TerrainType.Sand || terrain === TerrainType.Dunes) {
-          if (spiceNoise > spiceThreshold) {
-            const spiceAmount = Math.min(1.0, (spiceNoise - spiceThreshold) * 2.5);
-            this.spiceAmount[idx] = spiceAmount;
-            this.terrainData[idx] = spiceAmount > 0.6 ? TerrainType.SpiceHigh : TerrainType.SpiceLow;
-          }
-        }
-      }
-    }
-  }
 }

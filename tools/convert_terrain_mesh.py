@@ -279,7 +279,7 @@ def convert_terrain(map_id: str) -> bool:
                 "pbrMetallicRoughness": {
                     "baseColorTexture": {"index": tex_gltf_idx},
                     "metallicFactor": 0.0,
-                    "roughnessFactor": 0.85,
+                    "roughnessFactor": 1.0,
                 },
             })
         else:
@@ -289,7 +289,7 @@ def convert_terrain(map_id: str) -> bool:
                 "pbrMetallicRoughness": {
                     "baseColorFactor": [0.76, 0.65, 0.31, 1.0],
                     "metallicFactor": 0.0,
-                    "roughnessFactor": 0.85,
+                    "roughnessFactor": 1.0,
                 },
             })
 

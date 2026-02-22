@@ -33,6 +33,14 @@ export interface MapMetadata {
   aiWaypoints: MapPoint[];
 }
 
+export interface MapLighting {
+  intensity: number[];                    // 1-3 floats from line 1
+  ambientColor: [number, number, number]; // RGB 0-255
+  sunColor: [number, number, number];     // RGB 0-255
+  groundColor: [number, number, number];  // RGB 0-255
+  skyColor?: [number, number, number];    // RGB 0-255 (optional)
+}
+
 export interface MapManifestEntry {
   name: string;
   w: number;
@@ -41,6 +49,7 @@ export interface MapManifestEntry {
   type: string;
   binSize: number;
   hasThumb: boolean;
+  lighting?: MapLighting;
   // Optional metadata from test.xbf FXData (tile coordinates)
   spawnPoints?: number[][];      // [[x, z], ...]
   scriptPoints?: (number[] | null)[];  // indexed 0-23

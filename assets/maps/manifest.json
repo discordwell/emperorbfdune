@@ -41,6 +41,31 @@
     ],
     "h": 192,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        55,
+        45,
+        33
+      ],
+      "groundColor": [
+        55,
+        45,
+        33
+      ],
+      "intensity": [
+        5.0
+      ],
+      "skyColor": [
+        226,
+        195,
+        135
+      ],
+      "sunColor": [
+        219,
+        141,
+        82
+      ]
+    },
     "name": "Caladan Capital",
     "players": 2,
     "scriptPoints": [
@@ -173,6 +198,33 @@
     ],
     "h": 208,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        19,
+        80,
+        81
+      ],
+      "groundColor": [
+        14,
+        58,
+        51
+      ],
+      "intensity": [
+        1.0,
+        0.5,
+        0.5
+      ],
+      "skyColor": [
+        227,
+        251,
+        255
+      ],
+      "sunColor": [
+        227,
+        254,
+        255
+      ]
+    },
     "name": "Draconis IV HW",
     "players": 2,
     "scriptPoints": [
@@ -279,6 +331,33 @@
     ],
     "h": 232,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        120,
+        60,
+        7
+      ],
+      "groundColor": [
+        100,
+        60,
+        10
+      ],
+      "intensity": [
+        1.0,
+        0.6,
+        -1.0
+      ],
+      "skyColor": [
+        255,
+        122,
+        92
+      ],
+      "sunColor": [
+        255,
+        122,
+        92
+      ]
+    },
     "name": "Harkonnen Capital M",
     "players": 2,
     "scriptPoints": [
@@ -335,6 +414,33 @@
     ],
     "h": 256,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        120,
+        60,
+        7
+      ],
+      "groundColor": [
+        100,
+        60,
+        10
+      ],
+      "intensity": [
+        1.0,
+        0.6,
+        -1.0
+      ],
+      "skyColor": [
+        255,
+        122,
+        92
+      ],
+      "sunColor": [
+        255,
+        122,
+        92
+      ]
+    },
     "name": "Harkonnen Civil War Attack",
     "players": 2,
     "scriptPoints": [
@@ -431,6 +537,31 @@
     ],
     "h": 192,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        55,
+        45,
+        33
+      ],
+      "groundColor": [
+        55,
+        45,
+        33
+      ],
+      "intensity": [
+        5.0
+      ],
+      "skyColor": [
+        226,
+        195,
+        135
+      ],
+      "sunColor": [
+        219,
+        141,
+        82
+      ]
+    },
     "name": "Atreides Homeworld Defence",
     "players": 2,
     "scriptPoints": [
@@ -500,6 +631,33 @@
     ],
     "h": 96,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        19,
+        80,
+        81
+      ],
+      "groundColor": [
+        14,
+        58,
+        51
+      ],
+      "intensity": [
+        1.0,
+        0.5,
+        0.5
+      ],
+      "skyColor": [
+        227,
+        251,
+        255
+      ],
+      "sunColor": [
+        227,
+        254,
+        255
+      ]
+    },
     "name": "Ordos Homeworld Defense",
     "players": 2,
     "scriptPoints": [
@@ -596,6 +754,31 @@
     ],
     "h": 160,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        80,
+        65,
+        46
+      ],
+      "groundColor": [
+        64,
+        51,
+        39
+      ],
+      "intensity": [
+        0.7
+      ],
+      "skyColor": [
+        139,
+        110,
+        54
+      ],
+      "sunColor": [
+        150,
+        133,
+        78
+      ]
+    },
     "name": "End Mission Emperor Worm",
     "players": 2,
     "scriptPoints": [
@@ -730,6 +913,31 @@
     ],
     "h": 144,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        24,
+        42,
+        32
+      ],
+      "groundColor": [
+        12,
+        35,
+        24
+      ],
+      "intensity": [
+        0.9
+      ],
+      "skyColor": [
+        95,
+        255,
+        240
+      ],
+      "sunColor": [
+        80,
+        240,
+        220
+      ]
+    },
     "name": "Atreides Heighliner",
     "players": 2,
     "scriptPoints": [
@@ -802,6 +1010,31 @@
     ],
     "h": 176,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        24,
+        42,
+        32
+      ],
+      "groundColor": [
+        12,
+        35,
+        24
+      ],
+      "intensity": [
+        0.9
+      ],
+      "skyColor": [
+        95,
+        255,
+        240
+      ],
+      "sunColor": [
+        80,
+        240,
+        220
+      ]
+    },
     "name": "Ordos Heighliner",
     "players": 2,
     "scriptPoints": [
@@ -858,6 +1091,31 @@
     ],
     "h": 184,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        24,
+        42,
+        32
+      ],
+      "groundColor": [
+        12,
+        35,
+        24
+      ],
+      "intensity": [
+        0.9
+      ],
+      "skyColor": [
+        95,
+        255,
+        240
+      ],
+      "sunColor": [
+        80,
+        240,
+        220
+      ]
+    },
     "name": "Heighliner Mission JF",
     "players": 2,
     "scriptPoints": [
@@ -1015,6 +1273,33 @@
     ],
     "h": 144,
     "hasThumb": true,
+    "lighting": {
+      "ambientColor": [
+        74,
+        65,
+        123
+      ],
+      "groundColor": [
+        45,
+        34,
+        102
+      ],
+      "intensity": [
+        1.0,
+        1.0,
+        1.3
+      ],
+      "skyColor": [
+        255,
+        163,
+        127
+      ],
+      "sunColor": [
+        255,
+        171,
+        145
+      ]
+    },
     "name": "KOTH1",
     "players": 2,
     "spawnPoints": [
@@ -1136,6 +1421,32 @@
     ],
     "h": 128,
     "hasThumb": true,
+    "lighting": {
+      "ambientColor": [
+        97,
+        45,
+        33
+      ],
+      "groundColor": [
+        80,
+        40,
+        20
+      ],
+      "intensity": [
+        0.7,
+        0.3
+      ],
+      "skyColor": [
+        200,
+        140,
+        250
+      ],
+      "sunColor": [
+        255,
+        149,
+        214
+      ]
+    },
     "name": "Ruins of Calea Berm",
     "players": 2,
     "spawnPoints": [
@@ -1279,6 +1590,32 @@
     ],
     "h": 128,
     "hasThumb": true,
+    "lighting": {
+      "ambientColor": [
+        97,
+        45,
+        33
+      ],
+      "groundColor": [
+        80,
+        40,
+        20
+      ],
+      "intensity": [
+        0.7,
+        0.3
+      ],
+      "skyColor": [
+        200,
+        140,
+        250
+      ],
+      "sunColor": [
+        255,
+        149,
+        214
+      ]
+    },
     "name": "_JF_S_2-4p",
     "players": 2,
     "spawnPoints": [
@@ -1437,6 +1774,31 @@
     ],
     "h": 184,
     "hasThumb": true,
+    "lighting": {
+      "ambientColor": [
+        74,
+        67,
+        56
+      ],
+      "groundColor": [
+        55,
+        45,
+        33
+      ],
+      "intensity": [
+        1.0
+      ],
+      "skyColor": [
+        226,
+        151,
+        92
+      ],
+      "sunColor": [
+        242,
+        178,
+        127
+      ]
+    },
     "name": "Worm Garden",
     "players": 2,
     "spawnPoints": [
@@ -1580,6 +1942,31 @@
     ],
     "h": 144,
     "hasThumb": true,
+    "lighting": {
+      "ambientColor": [
+        45,
+        47,
+        104
+      ],
+      "groundColor": [
+        30,
+        29,
+        68
+      ],
+      "intensity": [
+        1.0
+      ],
+      "skyColor": [
+        124,
+        189,
+        250
+      ],
+      "sunColor": [
+        157,
+        208,
+        255
+      ]
+    },
     "name": "Spice Bowl2",
     "players": 2,
     "spawnPoints": [
@@ -1742,6 +2129,33 @@
     ],
     "h": 184,
     "hasThumb": true,
+    "lighting": {
+      "ambientColor": [
+        74,
+        65,
+        123
+      ],
+      "groundColor": [
+        45,
+        34,
+        102
+      ],
+      "intensity": [
+        1.0,
+        1.0,
+        1.3
+      ],
+      "skyColor": [
+        255,
+        163,
+        127
+      ],
+      "sunColor": [
+        255,
+        171,
+        145
+      ]
+    },
     "name": "Crunch",
     "players": 2,
     "spawnPoints": [
@@ -1866,6 +2280,31 @@
     ],
     "h": 200,
     "hasThumb": true,
+    "lighting": {
+      "ambientColor": [
+        74,
+        67,
+        56
+      ],
+      "groundColor": [
+        55,
+        45,
+        33
+      ],
+      "intensity": [
+        1.0
+      ],
+      "skyColor": [
+        226,
+        151,
+        92
+      ],
+      "sunColor": [
+        242,
+        178,
+        127
+      ]
+    },
     "name": "Divided Country",
     "players": 2,
     "spawnPoints": [
@@ -2020,6 +2459,33 @@
     ],
     "h": 184,
     "hasThumb": true,
+    "lighting": {
+      "ambientColor": [
+        74,
+        65,
+        123
+      ],
+      "groundColor": [
+        45,
+        34,
+        102
+      ],
+      "intensity": [
+        1.0,
+        1.0,
+        1.3
+      ],
+      "skyColor": [
+        255,
+        163,
+        127
+      ],
+      "sunColor": [
+        255,
+        171,
+        145
+      ]
+    },
     "name": "Sihaya 2000",
     "players": 2,
     "spawnPoints": [
@@ -2129,6 +2595,32 @@
     ],
     "h": 128,
     "hasThumb": true,
+    "lighting": {
+      "ambientColor": [
+        97,
+        45,
+        33
+      ],
+      "groundColor": [
+        80,
+        40,
+        20
+      ],
+      "intensity": [
+        0.7,
+        0.3
+      ],
+      "skyColor": [
+        200,
+        140,
+        2505
+      ],
+      "sunColor": [
+        255,
+        149,
+        214
+      ]
+    },
     "name": "S",
     "players": 2,
     "spawnPoints": [
@@ -2309,6 +2801,33 @@
     ],
     "h": 184,
     "hasThumb": true,
+    "lighting": {
+      "ambientColor": [
+        74,
+        65,
+        123
+      ],
+      "groundColor": [
+        45,
+        34,
+        102
+      ],
+      "intensity": [
+        1.0,
+        1.0,
+        1.3
+      ],
+      "skyColor": [
+        255,
+        163,
+        127
+      ],
+      "sunColor": [
+        255,
+        171,
+        145
+      ]
+    },
     "name": "CTF1",
     "players": 2,
     "spawnPoints": [
@@ -2480,6 +2999,32 @@
     ],
     "h": 128,
     "hasThumb": true,
+    "lighting": {
+      "ambientColor": [
+        97,
+        45,
+        33
+      ],
+      "groundColor": [
+        80,
+        40,
+        20
+      ],
+      "intensity": [
+        0.7,
+        0.3
+      ],
+      "skyColor": [
+        200,
+        140,
+        250
+      ],
+      "sunColor": [
+        255,
+        149,
+        214
+      ]
+    },
     "name": "Patchwork Mesa",
     "players": 6,
     "spawnPoints": [
@@ -2635,6 +3180,31 @@
     ],
     "h": 144,
     "hasThumb": true,
+    "lighting": {
+      "ambientColor": [
+        74,
+        67,
+        56
+      ],
+      "groundColor": [
+        55,
+        45,
+        33
+      ],
+      "intensity": [
+        1.0
+      ],
+      "skyColor": [
+        226,
+        151,
+        92
+      ],
+      "sunColor": [
+        242,
+        178,
+        127
+      ]
+    },
     "name": "Canyon Channel",
     "players": 4,
     "spawnPoints": [
@@ -2786,6 +3356,33 @@
     ],
     "h": 184,
     "hasThumb": true,
+    "lighting": {
+      "ambientColor": [
+        25,
+        65,
+        55
+      ],
+      "groundColor": [
+        14,
+        58,
+        51
+      ],
+      "intensity": [
+        1.0,
+        1.0,
+        0.5
+      ],
+      "skyColor": [
+        227,
+        251,
+        255
+      ],
+      "sunColor": [
+        240,
+        255,
+        255
+      ]
+    },
     "name": "Arged Desert",
     "players": 4,
     "spawnPoints": [
@@ -2900,6 +3497,31 @@
     ],
     "h": 144,
     "hasThumb": true,
+    "lighting": {
+      "ambientColor": [
+        74,
+        67,
+        56
+      ],
+      "groundColor": [
+        55,
+        45,
+        33
+      ],
+      "intensity": [
+        1.0
+      ],
+      "skyColor": [
+        226,
+        151,
+        92
+      ],
+      "sunColor": [
+        242,
+        178,
+        127
+      ]
+    },
     "name": "Aprit Chard",
     "players": 2,
     "spawnPoints": [
@@ -2995,6 +3617,33 @@
     ],
     "h": 160,
     "hasThumb": true,
+    "lighting": {
+      "ambientColor": [
+        74,
+        65,
+        123
+      ],
+      "groundColor": [
+        45,
+        34,
+        102
+      ],
+      "intensity": [
+        1.0,
+        1.0,
+        1.3
+      ],
+      "skyColor": [
+        255,
+        163,
+        127
+      ],
+      "sunColor": [
+        255,
+        171,
+        145
+      ]
+    },
     "name": "New S'Tan Cliffs",
     "players": 2,
     "spawnPoints": [
@@ -3080,6 +3729,31 @@
     ],
     "h": 176,
     "hasThumb": true,
+    "lighting": {
+      "ambientColor": [
+        101,
+        65,
+        46
+      ],
+      "groundColor": [
+        74,
+        51,
+        39
+      ],
+      "intensity": [
+        0.7
+      ],
+      "skyColor": [
+        139,
+        110,
+        54
+      ],
+      "sunColor": [
+        172,
+        133,
+        78
+      ]
+    },
     "name": "To Nimila",
     "players": 4,
     "spawnPoints": [
@@ -3297,6 +3971,31 @@
     ],
     "h": 240,
     "hasThumb": true,
+    "lighting": {
+      "ambientColor": [
+        74,
+        67,
+        56
+      ],
+      "groundColor": [
+        55,
+        45,
+        33
+      ],
+      "intensity": [
+        1.0
+      ],
+      "skyColor": [
+        226,
+        151,
+        92
+      ],
+      "sunColor": [
+        242,
+        178,
+        127
+      ]
+    },
     "name": "Fishes Plain",
     "players": 8,
     "spawnPoints": [
@@ -3458,6 +4157,31 @@
     ],
     "h": 128,
     "hasThumb": true,
+    "lighting": {
+      "ambientColor": [
+        101,
+        65,
+        46
+      ],
+      "groundColor": [
+        74,
+        51,
+        39
+      ],
+      "intensity": [
+        0.7
+      ],
+      "skyColor": [
+        139,
+        110,
+        544
+      ],
+      "sunColor": [
+        172,
+        133,
+        78
+      ]
+    },
     "name": "Knifefight1",
     "players": 2,
     "spawnPoints": [
@@ -3537,6 +4261,32 @@
     ],
     "h": 128,
     "hasThumb": true,
+    "lighting": {
+      "ambientColor": [
+        97,
+        45,
+        33
+      ],
+      "groundColor": [
+        80,
+        40,
+        20
+      ],
+      "intensity": [
+        0.7,
+        0.3
+      ],
+      "skyColor": [
+        200,
+        140,
+        250
+      ],
+      "sunColor": [
+        255,
+        149,
+        214
+      ]
+    },
     "name": "Da'Ja Sada",
     "players": 2,
     "spawnPoints": [
@@ -3687,6 +4437,31 @@
     ],
     "h": 256,
     "hasThumb": true,
+    "lighting": {
+      "ambientColor": [
+        74,
+        67,
+        56
+      ],
+      "groundColor": [
+        55,
+        45,
+        33
+      ],
+      "intensity": [
+        1.0
+      ],
+      "skyColor": [
+        226,
+        151,
+        92
+      ],
+      "sunColor": [
+        242,
+        178,
+        127
+      ]
+    },
     "name": "_JF_S_8P",
     "players": 8,
     "spawnPoints": [
@@ -3827,6 +4602,31 @@
     ],
     "h": 152,
     "hasThumb": true,
+    "lighting": {
+      "ambientColor": [
+        101,
+        65,
+        46
+      ],
+      "groundColor": [
+        74,
+        51,
+        39
+      ],
+      "intensity": [
+        0.7
+      ],
+      "skyColor": [
+        139,
+        110,
+        54
+      ],
+      "sunColor": [
+        172,
+        133,
+        78
+      ]
+    },
     "name": "Triskele",
     "players": 3,
     "spawnPoints": [
@@ -3966,6 +4766,32 @@
     ],
     "h": 96,
     "hasThumb": true,
+    "lighting": {
+      "ambientColor": [
+        97,
+        45,
+        33
+      ],
+      "groundColor": [
+        80,
+        40,
+        20
+      ],
+      "intensity": [
+        0.7,
+        0.3
+      ],
+      "skyColor": [
+        200,
+        140,
+        250
+      ],
+      "sunColor": [
+        255,
+        149,
+        214
+      ]
+    },
     "name": "twin capitals",
     "players": 2,
     "spawnPoints": [
@@ -4095,6 +4921,31 @@
     ],
     "h": 144,
     "hasThumb": true,
+    "lighting": {
+      "ambientColor": [
+        101,
+        65,
+        46
+      ],
+      "groundColor": [
+        74,
+        51,
+        39
+      ],
+      "intensity": [
+        0.7
+      ],
+      "skyColor": [
+        139,
+        110,
+        54
+      ],
+      "sunColor": [
+        172,
+        133,
+        78
+      ]
+    },
     "name": "besieged",
     "players": 2,
     "spawnPoints": [
@@ -4192,6 +5043,33 @@
     ],
     "h": 96,
     "hasThumb": true,
+    "lighting": {
+      "ambientColor": [
+        74,
+        65,
+        123
+      ],
+      "groundColor": [
+        45,
+        34,
+        102
+      ],
+      "intensity": [
+        1.0,
+        1.0,
+        1.3
+      ],
+      "skyColor": [
+        255,
+        163,
+        127
+      ],
+      "sunColor": [
+        255,
+        171,
+        145
+      ]
+    },
     "name": "streetfight",
     "players": 2,
     "spawnPoints": [
@@ -4253,6 +5131,33 @@
     ],
     "h": 144,
     "hasThumb": true,
+    "lighting": {
+      "ambientColor": [
+        120,
+        60,
+        7
+      ],
+      "groundColor": [
+        100,
+        60,
+        10
+      ],
+      "intensity": [
+        1.0,
+        0.6,
+        -1.0
+      ],
+      "skyColor": [
+        255,
+        122,
+        92
+      ],
+      "sunColor": [
+        255,
+        122,
+        92
+      ]
+    },
     "name": "Geidi",
     "players": 2,
     "spawnPoints": [
@@ -4318,6 +5223,33 @@
     ],
     "h": 144,
     "hasThumb": true,
+    "lighting": {
+      "ambientColor": [
+        120,
+        60,
+        7
+      ],
+      "groundColor": [
+        100,
+        60,
+        10
+      ],
+      "intensity": [
+        1.0,
+        0.6,
+        -1.0
+      ],
+      "skyColor": [
+        255,
+        122,
+        92
+      ],
+      "sunColor": [
+        255,
+        122,
+        92
+      ]
+    },
     "name": "Geidi2",
     "players": 2,
     "spawnPoints": [
@@ -4349,6 +5281,33 @@
     ],
     "h": 144,
     "hasThumb": true,
+    "lighting": {
+      "ambientColor": [
+        55,
+        45,
+        33
+      ],
+      "groundColor": [
+        55,
+        45,
+        33
+      ],
+      "intensity": [
+        1.0,
+        1.0,
+        0.5
+      ],
+      "skyColor": [
+        226,
+        151,
+        92
+      ],
+      "sunColor": [
+        226,
+        151,
+        92
+      ]
+    },
     "name": "Caladan",
     "players": 2,
     "spawnPoints": [
@@ -4443,6 +5402,33 @@
     ],
     "h": 144,
     "hasThumb": true,
+    "lighting": {
+      "ambientColor": [
+        55,
+        45,
+        33
+      ],
+      "groundColor": [
+        55,
+        45,
+        33
+      ],
+      "intensity": [
+        1.0,
+        1.0,
+        0.5
+      ],
+      "skyColor": [
+        226,
+        151,
+        92
+      ],
+      "sunColor": [
+        226,
+        151,
+        92
+      ]
+    },
     "name": "Caladan2",
     "players": 2,
     "spawnPoints": [
@@ -4493,6 +5479,33 @@
     ],
     "h": 208,
     "hasThumb": true,
+    "lighting": {
+      "ambientColor": [
+        19,
+        80,
+        81
+      ],
+      "groundColor": [
+        14,
+        58,
+        51
+      ],
+      "intensity": [
+        1.0,
+        0.5,
+        0.5
+      ],
+      "skyColor": [
+        227,
+        251,
+        255
+      ],
+      "sunColor": [
+        227,
+        254,
+        255
+      ]
+    },
     "name": "Draconis plains",
     "players": 2,
     "spawnPoints": [
@@ -4537,6 +5550,33 @@
     ],
     "h": 128,
     "hasThumb": true,
+    "lighting": {
+      "ambientColor": [
+        19,
+        80,
+        81
+      ],
+      "groundColor": [
+        14,
+        58,
+        51
+      ],
+      "intensity": [
+        1.0,
+        0.5,
+        0.5
+      ],
+      "skyColor": [
+        227,
+        251,
+        255
+      ],
+      "sunColor": [
+        227,
+        254,
+        255
+      ]
+    },
     "name": "draconis coastline",
     "players": 2,
     "spawnPoints": [
@@ -4623,6 +5663,31 @@
     ],
     "h": 192,
     "hasThumb": true,
+    "lighting": {
+      "ambientColor": [
+        101,
+        65,
+        46
+      ],
+      "groundColor": [
+        74,
+        51,
+        39
+      ],
+      "intensity": [
+        0.7
+      ],
+      "skyColor": [
+        139,
+        110,
+        54
+      ],
+      "sunColor": [
+        172,
+        133,
+        78
+      ]
+    },
     "name": "Temple Valley",
     "players": 2,
     "spawnPoints": [
@@ -4686,6 +5751,31 @@
     ],
     "h": 192,
     "hasThumb": true,
+    "lighting": {
+      "ambientColor": [
+        74,
+        67,
+        56
+      ],
+      "groundColor": [
+        55,
+        45,
+        33
+      ],
+      "intensity": [
+        1.0
+      ],
+      "skyColor": [
+        226,
+        151,
+        92
+      ],
+      "sunColor": [
+        242,
+        178,
+        127
+      ]
+    },
     "name": "Sandy Pass",
     "players": 2,
     "spawnPoints": [
@@ -4767,6 +5857,31 @@
     ],
     "h": 144,
     "hasThumb": true,
+    "lighting": {
+      "ambientColor": [
+        74,
+        67,
+        56
+      ],
+      "groundColor": [
+        55,
+        45,
+        33
+      ],
+      "intensity": [
+        1.0
+      ],
+      "skyColor": [
+        226,
+        151,
+        92
+      ],
+      "sunColor": [
+        242,
+        178,
+        127
+      ]
+    },
     "name": "Three-way",
     "players": 3,
     "spawnPoints": [
@@ -4839,6 +5954,31 @@
     ],
     "h": 200,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        101,
+        65,
+        46
+      ],
+      "groundColor": [
+        74,
+        51,
+        39
+      ],
+      "intensity": [
+        0.7
+      ],
+      "skyColor": [
+        139,
+        110,
+        54
+      ],
+      "sunColor": [
+        172,
+        133,
+        78
+      ]
+    },
     "name": "Harkonnen Jump Point",
     "players": 2,
     "spawnPoints": [
@@ -4954,6 +6094,31 @@
     ],
     "h": 176,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        101,
+        65,
+        46
+      ],
+      "groundColor": [
+        74,
+        51,
+        39
+      ],
+      "intensity": [
+        0.7
+      ],
+      "skyColor": [
+        139,
+        110,
+        54
+      ],
+      "sunColor": [
+        172,
+        133,
+        78
+      ]
+    },
     "name": "Tsimpo Rise",
     "players": 2,
     "spawnPoints": [
@@ -5089,6 +6254,31 @@
     ],
     "h": 160,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        74,
+        67,
+        56
+      ],
+      "groundColor": [
+        55,
+        45,
+        33
+      ],
+      "intensity": [
+        1.0
+      ],
+      "skyColor": [
+        226,
+        151,
+        92
+      ],
+      "sunColor": [
+        242,
+        178,
+        127
+      ]
+    },
     "name": "Qanat Pass",
     "players": 2,
     "spawnPoints": [
@@ -5235,6 +6425,31 @@
     ],
     "h": 176,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        74,
+        67,
+        56
+      ],
+      "groundColor": [
+        55,
+        45,
+        33
+      ],
+      "intensity": [
+        1.0
+      ],
+      "skyColor": [
+        226,
+        151,
+        92
+      ],
+      "sunColor": [
+        242,
+        178,
+        127
+      ]
+    },
     "name": "Harg Plateau",
     "players": 2,
     "spawnPoints": [
@@ -5394,6 +6609,32 @@
     ],
     "h": 160,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        97,
+        45,
+        33
+      ],
+      "groundColor": [
+        80,
+        40,
+        20
+      ],
+      "intensity": [
+        0.7,
+        0.3
+      ],
+      "skyColor": [
+        200,
+        140,
+        250
+      ],
+      "sunColor": [
+        255,
+        149,
+        214
+      ]
+    },
     "name": "Horseshoe Temple",
     "players": 2,
     "scriptPoints": [
@@ -5585,6 +6826,31 @@
     ],
     "h": 224,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        74,
+        67,
+        56
+      ],
+      "groundColor": [
+        55,
+        45,
+        33
+      ],
+      "intensity": [
+        1.0
+      ],
+      "skyColor": [
+        226,
+        151,
+        92
+      ],
+      "sunColor": [
+        242,
+        178,
+        127
+      ]
+    },
     "name": "Huanui Basin",
     "players": 2,
     "spawnPoints": [
@@ -5789,6 +7055,33 @@
     ],
     "h": 200,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        74,
+        65,
+        123
+      ],
+      "groundColor": [
+        45,
+        34,
+        102
+      ],
+      "intensity": [
+        1.0,
+        1.0,
+        1.3
+      ],
+      "skyColor": [
+        255,
+        163,
+        127
+      ],
+      "sunColor": [
+        255,
+        171,
+        145
+      ]
+    },
     "name": "Fred's House",
     "players": 2,
     "spawnPoints": [
@@ -5953,6 +7246,31 @@
     ],
     "h": 144,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        30,
+        30,
+        104
+      ],
+      "groundColor": [
+        20,
+        20,
+        70
+      ],
+      "intensity": [
+        1.0
+      ],
+      "skyColor": [
+        124,
+        150,
+        255
+      ],
+      "sunColor": [
+        157,
+        180,
+        255
+      ]
+    },
     "name": "Canyonlands",
     "players": 2,
     "spawnPoints": [
@@ -6087,6 +7405,33 @@
     ],
     "h": 128,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        74,
+        65,
+        123
+      ],
+      "groundColor": [
+        45,
+        34,
+        102
+      ],
+      "intensity": [
+        1.0,
+        1.0,
+        -1.3
+      ],
+      "skyColor": [
+        255,
+        163,
+        127
+      ],
+      "sunColor": [
+        255,
+        171,
+        145
+      ]
+    },
     "name": "Chin Rock",
     "players": 2,
     "spawnPoints": [
@@ -6237,6 +7582,31 @@
     ],
     "h": 184,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        101,
+        65,
+        46
+      ],
+      "groundColor": [
+        74,
+        51,
+        39
+      ],
+      "intensity": [
+        0.7
+      ],
+      "skyColor": [
+        139,
+        110,
+        54
+      ],
+      "sunColor": [
+        172,
+        133,
+        78
+      ]
+    },
     "name": "Hajra Plains",
     "players": 2,
     "spawnPoints": [
@@ -6429,6 +7799,31 @@
     ],
     "h": 200,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        30,
+        30,
+        104
+      ],
+      "groundColor": [
+        20,
+        20,
+        70
+      ],
+      "intensity": [
+        1.0
+      ],
+      "skyColor": [
+        124,
+        189,
+        255
+      ],
+      "sunColor": [
+        157,
+        208,
+        255
+      ]
+    },
     "name": "The Green Place",
     "players": 2,
     "spawnPoints": [
@@ -6588,6 +7983,31 @@
     ],
     "h": 208,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        101,
+        65,
+        46
+      ],
+      "groundColor": [
+        74,
+        51,
+        39
+      ],
+      "intensity": [
+        0.7
+      ],
+      "skyColor": [
+        139,
+        110,
+        54
+      ],
+      "sunColor": [
+        172,
+        133,
+        78
+      ]
+    },
     "name": "Shield Wall",
     "players": 2,
     "spawnPoints": [
@@ -6752,6 +8172,31 @@
     ],
     "h": 200,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        101,
+        65,
+        46
+      ],
+      "groundColor": [
+        74,
+        51,
+        39
+      ],
+      "intensity": [
+        0.7
+      ],
+      "skyColor": [
+        139,
+        110,
+        54
+      ],
+      "sunColor": [
+        172,
+        133,
+        78
+      ]
+    },
     "name": "Plaster Basin",
     "players": 2,
     "spawnPoints": [
@@ -6917,6 +8362,32 @@
     ],
     "h": 160,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        97,
+        45,
+        33
+      ],
+      "groundColor": [
+        80,
+        40,
+        20
+      ],
+      "intensity": [
+        0.7,
+        0.3
+      ],
+      "skyColor": [
+        200,
+        140,
+        250
+      ],
+      "sunColor": [
+        255,
+        149,
+        214
+      ]
+    },
     "name": "Hole-in-the-Rock",
     "players": 2,
     "spawnPoints": [
@@ -7056,6 +8527,31 @@
     ],
     "h": 152,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        30,
+        30,
+        104
+      ],
+      "groundColor": [
+        20,
+        20,
+        70
+      ],
+      "intensity": [
+        1.0
+      ],
+      "skyColor": [
+        124,
+        189,
+        255
+      ],
+      "sunColor": [
+        157,
+        208,
+        255
+      ]
+    },
     "name": "Habbanya Erg",
     "players": 2,
     "spawnPoints": [
@@ -7187,6 +8683,31 @@
     ],
     "h": 136,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        74,
+        67,
+        56
+      ],
+      "groundColor": [
+        55,
+        45,
+        33
+      ],
+      "intensity": [
+        1.0
+      ],
+      "skyColor": [
+        226,
+        151,
+        92
+      ],
+      "sunColor": [
+        242,
+        178,
+        127
+      ]
+    },
     "name": "3 Sisters Pass s",
     "players": 2,
     "spawnPoints": [
@@ -7333,6 +8854,33 @@
     ],
     "h": 208,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        74,
+        65,
+        123
+      ],
+      "groundColor": [
+        45,
+        34,
+        102
+      ],
+      "intensity": [
+        1.0,
+        1.0,
+        1.3
+      ],
+      "skyColor": [
+        255,
+        163,
+        127
+      ],
+      "sunColor": [
+        255,
+        171,
+        145
+      ]
+    },
     "name": "Sihaya Ridge",
     "players": 2,
     "spawnPoints": [
@@ -7480,6 +9028,26 @@
     ],
     "h": 216,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        55,
+        45,
+        33
+      ],
+      "groundColor": [
+        55,
+        45,
+        33
+      ],
+      "intensity": [
+        1.0
+      ],
+      "sunColor": [
+        226,
+        151,
+        92
+      ]
+    },
     "name": "Tsimpo Heights",
     "players": 2,
     "spawnPoints": [
@@ -7603,6 +9171,26 @@
     ],
     "h": 192,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        55,
+        45,
+        33
+      ],
+      "groundColor": [
+        55,
+        45,
+        33
+      ],
+      "intensity": [
+        1.0
+      ],
+      "sunColor": [
+        226,
+        151,
+        92
+      ]
+    },
     "name": "Bidriyah Sink",
     "players": 2,
     "spawnPoints": [
@@ -7724,6 +9312,26 @@
     ],
     "h": 160,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        55,
+        45,
+        33
+      ],
+      "groundColor": [
+        55,
+        45,
+        33
+      ],
+      "intensity": [
+        1.0
+      ],
+      "sunColor": [
+        226,
+        151,
+        92
+      ]
+    },
     "name": "G'albana Valley",
     "players": 2,
     "spawnPoints": [
@@ -7876,6 +9484,26 @@
     ],
     "h": 200,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        55,
+        45,
+        33
+      ],
+      "groundColor": [
+        55,
+        45,
+        33
+      ],
+      "intensity": [
+        1.0
+      ],
+      "sunColor": [
+        226,
+        151,
+        92
+      ]
+    },
     "name": "Galbana Depression",
     "players": 2,
     "spawnPoints": [
@@ -8039,6 +9667,33 @@
     ],
     "h": 176,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        25,
+        65,
+        55
+      ],
+      "groundColor": [
+        14,
+        58,
+        51
+      ],
+      "intensity": [
+        1.0,
+        1.0,
+        0.5
+      ],
+      "skyColor": [
+        227,
+        251,
+        255
+      ],
+      "sunColor": [
+        240,
+        255,
+        255
+      ]
+    },
     "name": "Hajj Plateau",
     "players": 2,
     "spawnPoints": [
@@ -8173,6 +9828,31 @@
     ],
     "h": 144,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        101,
+        65,
+        46
+      ],
+      "groundColor": [
+        74,
+        51,
+        39
+      ],
+      "intensity": [
+        0.7
+      ],
+      "skyColor": [
+        139,
+        110,
+        54
+      ],
+      "sunColor": [
+        172,
+        133,
+        78
+      ]
+    },
     "name": "Dragons Nest",
     "players": 2,
     "spawnPoints": [
@@ -8322,6 +10002,33 @@
     ],
     "h": 152,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        25,
+        65,
+        55
+      ],
+      "groundColor": [
+        14,
+        58,
+        51
+      ],
+      "intensity": [
+        1.0,
+        1.0,
+        0.5
+      ],
+      "skyColor": [
+        227,
+        251,
+        255
+      ],
+      "sunColor": [
+        240,
+        255,
+        255
+      ]
+    },
     "name": "Rock Valley",
     "players": 2,
     "spawnPoints": [
@@ -8460,6 +10167,33 @@
     ],
     "h": 184,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        25,
+        65,
+        55
+      ],
+      "groundColor": [
+        14,
+        58,
+        51
+      ],
+      "intensity": [
+        1.0,
+        1.0,
+        0.5
+      ],
+      "skyColor": [
+        227,
+        251,
+        255
+      ],
+      "sunColor": [
+        240,
+        255,
+        255
+      ]
+    },
     "name": "Ordos Jump Point",
     "players": 2,
     "spawnPoints": [
@@ -8550,6 +10284,33 @@
     ],
     "h": 192,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        74,
+        65,
+        123
+      ],
+      "groundColor": [
+        45,
+        34,
+        102
+      ],
+      "intensity": [
+        1.0,
+        1.0,
+        1.3
+      ],
+      "skyColor": [
+        255,
+        163,
+        127
+      ],
+      "sunColor": [
+        255,
+        171,
+        145
+      ]
+    },
     "name": "Bled El-Hajra",
     "players": 2,
     "spawnPoints": [
@@ -8655,6 +10416,33 @@
     ],
     "h": 200,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        55,
+        45,
+        33
+      ],
+      "groundColor": [
+        55,
+        45,
+        33
+      ],
+      "intensity": [
+        1.0,
+        1.8,
+        1.0
+      ],
+      "skyColor": [
+        226,
+        151,
+        92
+      ],
+      "sunColor": [
+        226,
+        151,
+        92
+      ]
+    },
     "name": "Atreides Jump Point",
     "players": 2,
     "spawnPoints": [
@@ -8780,6 +10568,33 @@
     ],
     "h": 144,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        74,
+        65,
+        123
+      ],
+      "groundColor": [
+        45,
+        34,
+        102
+      ],
+      "intensity": [
+        1.0,
+        1.0,
+        1.3
+      ],
+      "skyColor": [
+        230,
+        163,
+        127
+      ],
+      "sunColor": [
+        230,
+        171,
+        145
+      ]
+    },
     "name": "Bled Al-Hazrad",
     "players": 2,
     "spawnPoints": [
@@ -8924,6 +10739,32 @@
     ],
     "h": 200,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        97,
+        45,
+        33
+      ],
+      "groundColor": [
+        80,
+        40,
+        20
+      ],
+      "intensity": [
+        0.7,
+        0.3
+      ],
+      "skyColor": [
+        200,
+        140,
+        250
+      ],
+      "sunColor": [
+        255,
+        149,
+        214
+      ]
+    },
     "name": "The Cauldron",
     "players": 2,
     "spawnPoints": [
@@ -9078,6 +10919,31 @@
     ],
     "h": 184,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        74,
+        67,
+        56
+      ],
+      "groundColor": [
+        55,
+        45,
+        33
+      ],
+      "intensity": [
+        1.0
+      ],
+      "skyColor": [
+        226,
+        151,
+        92
+      ],
+      "sunColor": [
+        242,
+        178,
+        127
+      ]
+    },
     "name": "Alazor Steppe",
     "players": 2,
     "spawnPoints": [
@@ -9172,6 +11038,32 @@
     ],
     "h": 160,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        97,
+        45,
+        33
+      ],
+      "groundColor": [
+        80,
+        40,
+        20
+      ],
+      "intensity": [
+        0.7,
+        0.3
+      ],
+      "skyColor": [
+        200,
+        140,
+        250
+      ],
+      "sunColor": [
+        255,
+        149,
+        214
+      ]
+    },
     "name": "Bilar Slopes",
     "players": 2,
     "spawnPoints": [
@@ -9349,6 +11241,31 @@
     ],
     "h": 144,
     "hasThumb": true,
+    "lighting": {
+      "ambientColor": [
+        30,
+        30,
+        104
+      ],
+      "groundColor": [
+        20,
+        20,
+        70
+      ],
+      "intensity": [
+        1.0
+      ],
+      "skyColor": [
+        124,
+        189,
+        255
+      ],
+      "sunColor": [
+        157,
+        208,
+        255
+      ]
+    },
     "name": "Baklawa Flats",
     "players": 2,
     "spawnPoints": [
@@ -9565,6 +11482,33 @@
     ],
     "h": 192,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        74,
+        65,
+        123
+      ],
+      "groundColor": [
+        45,
+        34,
+        102
+      ],
+      "intensity": [
+        1.0,
+        1.0,
+        1.3
+      ],
+      "skyColor": [
+        255,
+        163,
+        127
+      ],
+      "sunColor": [
+        255,
+        171,
+        145
+      ]
+    },
     "name": "Arrakeen Spice Field",
     "players": 2,
     "spawnPoints": [
@@ -9657,6 +11601,31 @@
     ],
     "h": 96,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        30,
+        30,
+        104
+      ],
+      "groundColor": [
+        20,
+        20,
+        70
+      ],
+      "intensity": [
+        1.0
+      ],
+      "skyColor": [
+        124,
+        120,
+        255
+      ],
+      "sunColor": [
+        157,
+        150,
+        255
+      ]
+    },
     "name": "Start",
     "players": 2,
     "scriptPoints": [
@@ -9713,6 +11682,33 @@
     ],
     "h": 96,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        19,
+        80,
+        81
+      ],
+      "groundColor": [
+        14,
+        58,
+        51
+      ],
+      "intensity": [
+        1.0,
+        1.0,
+        0.5
+      ],
+      "skyColor": [
+        227,
+        251,
+        255
+      ],
+      "sunColor": [
+        227,
+        254,
+        255
+      ]
+    },
     "name": "Start",
     "players": 2,
     "scriptPoints": [
@@ -9769,6 +11765,31 @@
     ],
     "h": 96,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        74,
+        67,
+        56
+      ],
+      "groundColor": [
+        55,
+        45,
+        33
+      ],
+      "intensity": [
+        0.7
+      ],
+      "skyColor": [
+        226,
+        151,
+        92
+      ],
+      "sunColor": [
+        242,
+        178,
+        127
+      ]
+    },
     "name": "Start",
     "players": 2,
     "scriptPoints": [
@@ -9825,6 +11846,33 @@
     ],
     "h": 256,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        120,
+        60,
+        7
+      ],
+      "groundColor": [
+        100,
+        60,
+        10
+      ],
+      "intensity": [
+        1.0,
+        0.6,
+        -1.0
+      ],
+      "skyColor": [
+        255,
+        122,
+        92
+      ],
+      "sunColor": [
+        255,
+        122,
+        92
+      ]
+    },
     "name": "Harkonnen Homeworld Defence",
     "players": 2,
     "scriptPoints": [
@@ -9917,6 +11965,33 @@
     ],
     "h": 112,
     "hasThumb": false,
+    "lighting": {
+      "ambientColor": [
+        74,
+        65,
+        123
+      ],
+      "groundColor": [
+        45,
+        34,
+        102
+      ],
+      "intensity": [
+        1.0,
+        1.0,
+        1.3
+      ],
+      "skyColor": [
+        255,
+        163,
+        127
+      ],
+      "sunColor": [
+        255,
+        171,
+        145
+      ]
+    },
     "name": "Player Tutorial",
     "players": 1,
     "scriptPoints": [

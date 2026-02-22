@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { RenderSystem } from '../core/Game';
+import type { MapLighting } from '../config/MapLoader';
 
 export class SceneManager implements RenderSystem {
   readonly scene: THREE.Scene;
@@ -33,6 +34,15 @@ export class SceneManager implements RenderSystem {
   private sunLight: THREE.DirectionalLight | null = null;
   private ambientLight: THREE.AmbientLight | null = null;
   private hemiLight: THREE.HemisphereLight | null = null;
+
+  // Per-map base lighting colors (set from test.lit, modulated by day/night)
+  private baseSunColor = new THREE.Color(0xffeedd);
+  private baseSunIntensity = 1.2;
+  private baseAmbientColor = new THREE.Color(0xffe4b5);
+  private baseAmbientIntensity = 0.4;
+  private baseHemiSkyColor = new THREE.Color(0x87CEEB);
+  private baseHemiGroundColor = new THREE.Color(0xC2B280);
+  private baseHemiIntensity = 0.3;
 
   // Map bounds for camera clamping (world units)
   private mapBoundsX = 128 * 2;
@@ -189,6 +199,45 @@ export class SceneManager implements RenderSystem {
     this.mapBoundsZ = worldH;
   }
 
+  /** Set per-map lighting colors from test.lit data */
+  setMapLighting(lighting: MapLighting): void {
+    const toColor = (rgb: [number, number, number]) =>
+      new THREE.Color(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255);
+
+    this.baseSunColor = toColor(lighting.sunColor);
+    this.baseAmbientColor = toColor(lighting.ambientColor);
+    this.baseHemiGroundColor = toColor(lighting.groundColor);
+
+    if (lighting.skyColor) {
+      this.baseHemiSkyColor = toColor(lighting.skyColor);
+    }
+
+    // Use first intensity value as sun multiplier
+    const intensityMul = lighting.intensity[0] ?? 1.0;
+    this.baseSunIntensity = 1.2 * intensityMul;
+    this.baseAmbientIntensity = 0.4 * intensityMul;
+    this.baseHemiIntensity = 0.3 * intensityMul;
+
+    // Apply immediately
+    if (this.sunLight) {
+      this.sunLight.color.copy(this.baseSunColor);
+      this.sunLight.intensity = this.baseSunIntensity;
+    }
+    if (this.ambientLight) {
+      this.ambientLight.color.copy(this.baseAmbientColor);
+      this.ambientLight.intensity = this.baseAmbientIntensity;
+    }
+    if (this.hemiLight) {
+      this.hemiLight.color.copy(this.baseHemiSkyColor);
+      this.hemiLight.groundColor.copy(this.baseHemiGroundColor);
+      this.hemiLight.intensity = this.baseHemiIntensity;
+    }
+
+    // Update fog to match ambient tone
+    const fogColor = this.baseAmbientColor.clone().lerp(this.baseSunColor, 0.3);
+    this.scene.fog = new THREE.FogExp2(fogColor.getHex(), 0.003);
+  }
+
   /** Smoothly pan the camera to a world position (clamped to map bounds) */
   panTo(x: number, z: number): void {
     const cx = Math.max(-20, Math.min(this.mapBoundsX + 20, x));
@@ -311,7 +360,7 @@ export class SceneManager implements RenderSystem {
   /**
    * Subtle ambient lighting shift based on game time.
    * Full cycle = 15000 ticks (~10 minutes).
-   * Stays bright enough for clear unit identification at all times.
+   * Modulates the per-map base colors set by setMapLighting().
    * Dawn=warm gold, Midday=bright white, Dusk=orange, Night=cool blue-tinted.
    */
   updateDayNightCycle(tick: number): void {
@@ -321,39 +370,29 @@ export class SceneManager implements RenderSystem {
     // Smooth cosine: 1.0 at midday (phase 0.25), -1.0 at midnight (phase 0.75)
     const sunPhase = Math.cos((phase - 0.25) * Math.PI * 2);
 
-    // Sun intensity: subtle range 0.9 to 1.2 (never too dark)
-    const sunIntensity = 1.05 + sunPhase * 0.15;
+    // Intensity modulation around base values (subtle +-15%)
+    const sunMul = 1.0 + sunPhase * 0.12;
+    const ambMul = 1.0 + sunPhase * 0.15;
 
-    // Ambient: 0.3 to 0.45
-    const ambIntensity = 0.37 + sunPhase * 0.08;
-
-    // Color tint: subtle shift - always near desert-white, with slight hue changes
-    // Base desert color: R=1.0 G=0.93 B=0.85
-    const warmth = Math.max(0, sunPhase); // 0-1, higher = warmer
-    const coolness = Math.max(0, -sunPhase); // 0-1, higher = cooler
-
-    // Dawn/dusk detection for golden hour tinting
-    const dawnDusk = Math.max(0, 1 - Math.abs(sunPhase) * 2.5); // peaks at transitions
-
-    const sunR = 1.0;
-    const sunG = 0.93 - coolness * 0.08 + dawnDusk * 0.02;
-    const sunB = 0.85 - coolness * 0.05 - dawnDusk * 0.15 + warmth * 0.02;
+    const coolness = Math.max(0, -sunPhase);
+    const dawnDusk = Math.max(0, 1 - Math.abs(sunPhase) * 2.5);
 
     if (this.sunLight) {
-      this.sunLight.intensity = sunIntensity;
-      this.sunLight.color.setRGB(sunR, sunG, sunB);
+      this.sunLight.intensity = this.baseSunIntensity * sunMul;
+      // Modulate base sun color with subtle cool/warm shift
+      this.sunLight.color.copy(this.baseSunColor);
+      this.sunLight.color.g *= 1.0 - coolness * 0.08 + dawnDusk * 0.02;
+      this.sunLight.color.b *= 1.0 - coolness * 0.05 - dawnDusk * 0.15;
     }
     if (this.ambientLight) {
-      this.ambientLight.intensity = ambIntensity;
-      // Ambient picks up slight cool/warm tint
-      this.ambientLight.color.setRGB(
-        1.0 - coolness * 0.05,
-        0.9 - coolness * 0.05 + dawnDusk * 0.03,
-        0.75 + coolness * 0.1 - dawnDusk * 0.1
-      );
+      this.ambientLight.intensity = this.baseAmbientIntensity * ambMul;
+      this.ambientLight.color.copy(this.baseAmbientColor);
+      this.ambientLight.color.r *= 1.0 - coolness * 0.05;
+      this.ambientLight.color.g *= 1.0 - coolness * 0.05 + dawnDusk * 0.03;
+      this.ambientLight.color.b *= 1.0 + coolness * 0.1 - dawnDusk * 0.1;
     }
     if (this.hemiLight) {
-      this.hemiLight.intensity = 0.25 + sunPhase * 0.05;
+      this.hemiLight.intensity = this.baseHemiIntensity * (1.0 + sunPhase * 0.15);
     }
   }
 
