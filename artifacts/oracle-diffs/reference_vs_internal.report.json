@@ -1,7 +1,16 @@
 {
-  "status": "missing-reference",
+  "status": "match",
+  "strict": true,
+  "requireReference": true,
+  "requireAllMissions": true,
+  "minCoverage": 1,
   "internalFile": "/Users/discordwell/Projects/emperorbfdune/tests/campaign/tok/oracles/tok_mission_oracle.v1.json",
   "referenceFile": "/Users/discordwell/Projects/emperorbfdune/tools/oracles/reference/tok_mission_oracle.reference.v1.json",
-  "strict": false,
-  "requireReference": false
+  "referenceMissionCount": 229,
+  "internalMissionCount": 229,
+  "comparedMissionCount": 229,
+  "coverage": 1,
+  "missingInInternal": [],
+  "missingInReference": [],
+  "diff": null
 }

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildCaptureManifestFromOracleDataset,
   buildMissionOracleDatasetFromRows,
+  canonicalizeReferenceRowsObjectAndSideIds,
   canonicalizeReferenceRowsObjectIds,
   mergeRows,
   validateReferenceRows,
@@ -145,6 +146,61 @@ describe('Tok reference JSONL tools', () => {
       tooltipMap: [{ entity: 2, tooltipId: 61 }],
       mainCameraTrackEid: 2,
       airStrikes: [{ strikeId: 7, units: [2, 1], targetX: 10, targetZ: 20 }],
+    });
+    expect(out[0].frameHash).toBeUndefined();
+    expect(out[0].intHash).toBeUndefined();
+  });
+
+  it('canonicalizes mission-local side ids across relationships/event flags/dispatch', () => {
+    const rows = [
+      {
+        scriptId: 'ATP1D1FRFail',
+        tick: 0,
+        nextSideId: 12,
+        objVars: [500],
+        relationships: [
+          { a: 11, b: 10, rel: 'enemy' },
+          { a: 10, b: 11, rel: 'enemy' },
+        ],
+        eventFlags: [
+          'type_constructed_obj:10:FRCamp:500',
+          'obj_attacks_side:500:11',
+          'obj_constructed:11:500',
+          'obj_delivered_side:10:500',
+          'side_attacks:10:11',
+          'type_constructed:10:FRCamp',
+        ],
+        dispatch: {
+          sideColors: [
+            { side: 11, color: 2 },
+            { side: 10, color: 1 },
+          ],
+        },
+        frameHash: 'a'.repeat(64),
+        intHash: 'b'.repeat(64),
+      },
+    ];
+
+    const out = canonicalizeReferenceRowsObjectAndSideIds(rows);
+    expect(out[0].nextSideId).toBe(4);
+    expect(out[0].objVars).toEqual([1]);
+    expect(out[0].relationships).toEqual([
+      { a: 2, b: 3, rel: 'enemy' },
+      { a: 3, b: 2, rel: 'enemy' },
+    ]);
+    expect(out[0].eventFlags).toEqual([
+      'obj_attacks_side:1:2',
+      'obj_constructed:2:1',
+      'obj_delivered_side:3:1',
+      'side_attacks:3:2',
+      'type_constructed_obj:3:FRCamp:1',
+      'type_constructed:3:FRCamp',
+    ]);
+    expect(out[0].dispatch).toEqual({
+      sideColors: [
+        { side: 2, color: 2 },
+        { side: 3, color: 1 },
+      ],
     });
     expect(out[0].frameHash).toBeUndefined();
     expect(out[0].intHash).toBeUndefined();

@@ -4,6 +4,8 @@ import path from 'node:path';
 import { validateMissionOracleDataset } from './lib/reference-compare.mjs';
 import {
   canonicalizeReferenceRowsObjectIds,
+  canonicalizeReferenceRowsObjectAndSideIds,
+  canonicalizeReferenceRowsSideIds,
   readJsonLines,
   writeJsonFile,
 } from './lib/reference-jsonl.mjs';
@@ -31,7 +33,7 @@ function usage() {
     'Usage: node tools/oracles/compare-reference-jsonl.mjs ' +
     '--reference <capture.jsonl> [--expected-oracle <tok_mission_oracle.v1.json>] ' +
     '[--scripts all|fast] [--min-coverage <0..1>] [--strict] ' +
-    '[--require-reference] [--require-all-expected-rows] [--canonicalize-object-ids] ' +
+    '[--require-reference] [--require-all-expected-rows] [--canonicalize-object-ids] [--canonicalize-side-ids] ' +
     '[--report-out <report.json>] [--diff-out <diff.json>]',
   );
 }
@@ -51,6 +53,7 @@ const strict = hasFlag('--strict');
 const requireReference = hasFlag('--require-reference');
 const requireAllExpectedRows = hasFlag('--require-all-expected-rows');
 const canonicalizeObjectIds = hasFlag('--canonicalize-object-ids');
+const canonicalizeSideIds = hasFlag('--canonicalize-side-ids');
 const reportOut = argValue(
   '--report-out',
   path.join(repoRoot, 'artifacts/oracle-diffs/reference_jsonl_vs_internal.report.json'),
@@ -108,9 +111,14 @@ if (!fs.existsSync(referenceFile)) {
 }
 
 const referenceRows = readJsonLines(referenceFile);
-const compareRows = canonicalizeObjectIds
-  ? canonicalizeReferenceRowsObjectIds(referenceRows)
-  : referenceRows;
+let compareRows = referenceRows;
+if (canonicalizeObjectIds && canonicalizeSideIds) {
+  compareRows = canonicalizeReferenceRowsObjectAndSideIds(referenceRows);
+} else if (canonicalizeObjectIds) {
+  compareRows = canonicalizeReferenceRowsObjectIds(referenceRows);
+} else if (canonicalizeSideIds) {
+  compareRows = canonicalizeReferenceRowsSideIds(referenceRows);
+}
 const expectedRows = rowsFromMissionOracleDataset(expectedOracle, {
   scripts,
   includeFinal: true,
@@ -129,6 +137,7 @@ const report = {
   requireReference,
   requireAllExpectedRows,
   canonicalizeObjectIds,
+  canonicalizeSideIds,
   minCoverage,
   ...result,
 };

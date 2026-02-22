@@ -26,6 +26,18 @@ Place a normalized reference file at:
 
 `tools/oracles/reference/tok_mission_oracle.reference.v1.json`
 
+End-to-end workflow driver:
+
+```bash
+npm run oracle:reference:workflow:prepare
+npm run oracle:reference:workflow:status
+npm run oracle:reference:workflow:finalize
+```
+
+Detailed tranche plan/runbook:
+
+- `tools/oracles/reference/EXTERNAL_CAPTURE_PLAN.md`
+
 ### 1) Build capture manifest
 
 ```bash
@@ -54,6 +66,12 @@ npm run oracle:reference:extract -- \
 ```
 
 Trace line format is documented in `tools/oracles/reference/TRACE_FORMAT.md`.
+
+Optional internal baseline export (for pipeline self-check):
+
+```bash
+npm run oracle:reference:export-internal
+```
 
 ### 3) Merge capture shards (optional)
 
@@ -153,3 +171,15 @@ npm run oracle:reference:jsonl-strict
 ```
 
 If your hook rows contain raw object IDs in payload fields (`objVars`, `eventFlags`, `dispatch`), add `--canonicalize-object-ids` to compare after mission-local ID normalization.
+
+If your hook rows also use side IDs that differ from internal runtime IDs, add `--canonicalize-side-ids` (or use both flags together):
+
+```bash
+npm run oracle:reference:jsonl-compare:canon-ids
+```
+
+Quick self-check (internal export + strict compare):
+
+```bash
+npm run oracle:reference:jsonl-selfcheck
+```

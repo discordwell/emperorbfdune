@@ -1,0 +1,19 @@
+{
+  "status": "match",
+  "referenceFile": "/Users/discordwell/Projects/emperorbfdune/tools/oracles/reference/tok_capture_merged.jsonl",
+  "expectedOracleFile": "/Users/discordwell/Projects/emperorbfdune/tests/campaign/tok/oracles/tok_mission_oracle.v1.json",
+  "scripts": "all",
+  "strict": true,
+  "requireReference": true,
+  "requireAllExpectedRows": true,
+  "canonicalizeObjectIds": false,
+  "canonicalizeSideIds": false,
+  "minCoverage": 1,
+  "diff": null,
+  "coverage": 1,
+  "comparedRows": 1142,
+  "expectedRows": 1142,
+  "referenceRows": 1142,
+  "missingInReference": [],
+  "unexpectedInReference": []
+}

@@ -38,15 +38,19 @@ Tools:
 - `tools/oracles/normalize-reference-jsonl.mjs`
 - `tools/oracles/compare-reference.mjs`
 - `tools/oracles/compare-reference-jsonl.mjs`
+- `tools/oracles/export-internal-reference-jsonl.mjs`
+- `tools/oracles/external-capture-workflow.mjs`
 - `tools/oracles/build-capture-manifest.mjs`
 - `tools/oracles/extract-reference-log-lines.mjs`
 - `tools/oracles/merge-reference-jsonl.mjs`
 - `tools/oracles/validate-reference-jsonl.mjs`
 - `tools/oracles/check-capture-progress.mjs`
+- `tools/oracles/reference/EXTERNAL_CAPTURE_PLAN.md`
 
 Purpose:
 
 - Ingest original-game traces
+- Canonicalize mission-local object/side IDs when capture runtimes assign different IDs
 - Normalize to mission-oracle schema
 - Diff against internal oracle with first-diff artifact output
 - Replay current interpreter against external checkpoint captures

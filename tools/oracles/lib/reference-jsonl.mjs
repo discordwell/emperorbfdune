@@ -82,44 +82,88 @@ function normalizeObjId(rawId, normalizer) {
   return created;
 }
 
-function normalizeEventFlagKey(rawKey, normalizer) {
+function createSideNormalizer() {
+  return {
+    nextCanonicalId: 2,
+    canonicalByRawId: new Map([
+      [0, 0],
+      [1, 1],
+    ]),
+  };
+}
+
+function normalizeSideId(rawId, normalizer) {
+  if (!isFiniteNumber(rawId) || rawId < 0) return rawId;
+  const existing = normalizer.canonicalByRawId.get(rawId);
+  if (existing !== undefined) return existing;
+  const created = normalizer.nextCanonicalId++;
+  normalizer.canonicalByRawId.set(rawId, created);
+  return created;
+}
+
+function maybeNormalizeObjId(rawId, normalizer, enabled) {
+  if (!enabled) return rawId;
+  return normalizeObjId(rawId, normalizer);
+}
+
+function maybeNormalizeSideId(rawId, normalizer, enabled) {
+  if (!enabled) return rawId;
+  return normalizeSideId(rawId, normalizer);
+}
+
+function normalizeEventFlagKey(rawKey, normalizers) {
+  const {
+    object: objectNormalizer,
+    side: sideNormalizer,
+    canonicalizeObjectIds,
+    canonicalizeSideIds,
+  } = normalizers;
   if (typeof rawKey !== 'string') return rawKey;
 
   if (rawKey.startsWith('obj_destroyed:')) {
     const raw = Number(rawKey.slice('obj_destroyed:'.length));
-    return `obj_destroyed:${normalizeObjId(raw, normalizer)}`;
+    return `obj_destroyed:${maybeNormalizeObjId(raw, objectNormalizer, canonicalizeObjectIds)}`;
   }
 
   if (rawKey.startsWith('obj_delivered:')) {
     const raw = Number(rawKey.slice('obj_delivered:'.length));
-    return `obj_delivered:${normalizeObjId(raw, normalizer)}`;
+    return `obj_delivered:${maybeNormalizeObjId(raw, objectNormalizer, canonicalizeObjectIds)}`;
   }
 
   if (rawKey.startsWith('obj_delivered_side:')) {
     const parts = rawKey.split(':');
     if (parts.length === 3) {
-      const side = Number(parts[1]);
+      const sideId = Number(parts[1]);
       const raw = Number(parts[2]);
-      return `obj_delivered_side:${side}:${normalizeObjId(raw, normalizer)}`;
+      return `obj_delivered_side:${maybeNormalizeSideId(sideId, sideNormalizer, canonicalizeSideIds)}:${maybeNormalizeObjId(raw, objectNormalizer, canonicalizeObjectIds)}`;
     }
   }
 
   if (rawKey.startsWith('obj_constructed:')) {
     const parts = rawKey.split(':');
     if (parts.length === 3) {
-      const side = Number(parts[1]);
+      const sideId = Number(parts[1]);
       const raw = Number(parts[2]);
-      return `obj_constructed:${side}:${normalizeObjId(raw, normalizer)}`;
+      return `obj_constructed:${maybeNormalizeSideId(sideId, sideNormalizer, canonicalizeSideIds)}:${maybeNormalizeObjId(raw, objectNormalizer, canonicalizeObjectIds)}`;
+    }
+  }
+
+  if (rawKey.startsWith('type_constructed:')) {
+    const parts = rawKey.split(':');
+    if (parts.length === 3) {
+      const sideId = Number(parts[1]);
+      const typeName = parts[2];
+      return `type_constructed:${maybeNormalizeSideId(sideId, sideNormalizer, canonicalizeSideIds)}:${typeName}`;
     }
   }
 
   if (rawKey.startsWith('type_constructed_obj:')) {
     const parts = rawKey.split(':');
     if (parts.length === 4) {
-      const side = Number(parts[1]);
+      const sideId = Number(parts[1]);
       const typeName = parts[2];
       const raw = Number(parts[3]);
-      return `type_constructed_obj:${side}:${typeName}:${normalizeObjId(raw, normalizer)}`;
+      return `type_constructed_obj:${maybeNormalizeSideId(sideId, sideNormalizer, canonicalizeSideIds)}:${typeName}:${maybeNormalizeObjId(raw, objectNormalizer, canonicalizeObjectIds)}`;
     }
   }
 
@@ -127,15 +171,46 @@ function normalizeEventFlagKey(rawKey, normalizer) {
     const parts = rawKey.split(':');
     if (parts.length === 3) {
       const raw = Number(parts[1]);
-      const side = Number(parts[2]);
-      return `obj_attacks_side:${normalizeObjId(raw, normalizer)}:${side}`;
+      const sideId = Number(parts[2]);
+      return `obj_attacks_side:${maybeNormalizeObjId(raw, objectNormalizer, canonicalizeObjectIds)}:${maybeNormalizeSideId(sideId, sideNormalizer, canonicalizeSideIds)}`;
+    }
+  }
+
+  if (rawKey.startsWith('side_attacks:')) {
+    const parts = rawKey.split(':');
+    if (parts.length === 3) {
+      const sideA = Number(parts[1]);
+      const sideB = Number(parts[2]);
+      return `side_attacks:${maybeNormalizeSideId(sideA, sideNormalizer, canonicalizeSideIds)}:${maybeNormalizeSideId(sideB, sideNormalizer, canonicalizeSideIds)}`;
     }
   }
 
   return rawKey;
 }
 
-function canonicalizeDispatchObject(dispatch, normalizer) {
+function canonicalizeRelationships(relationships, sideNormalizer) {
+  if (!Array.isArray(relationships)) return relationships;
+  return relationships
+    .map((entry) => ({
+      ...entry,
+      a: normalizeSideId(entry?.a, sideNormalizer),
+      b: normalizeSideId(entry?.b, sideNormalizer),
+    }))
+    .sort((a, b) => {
+      const aa = a?.a ?? 0;
+      const ba = b?.a ?? 0;
+      if (aa !== ba) return aa - ba;
+      const ab = a?.b ?? 0;
+      const bb = b?.b ?? 0;
+      if (ab !== bb) return ab - bb;
+      return String(a?.rel ?? '').localeCompare(String(b?.rel ?? ''));
+    });
+}
+
+function canonicalizeDispatchObject(dispatch, objectNormalizer, sideNormalizer, options) {
+  const canonicalizeObjectIds = options.canonicalizeObjectIds === true;
+  const canonicalizeSideIds = options.canonicalizeSideIds === true;
+
   if (!dispatch || typeof dispatch !== 'object' || Array.isArray(dispatch)) {
     return dispatch;
   }
@@ -146,7 +221,7 @@ function canonicalizeDispatchObject(dispatch, normalizer) {
       .map((strike) => ({
         ...strike,
         units: Array.isArray(strike?.units)
-          ? strike.units.map((rawId) => normalizeObjId(rawId, normalizer))
+          ? strike.units.map((rawId) => maybeNormalizeObjId(rawId, objectNormalizer, canonicalizeObjectIds))
           : [],
       }))
       .sort((a, b) => (a?.strikeId ?? 0) - (b?.strikeId ?? 0));
@@ -156,7 +231,7 @@ function canonicalizeDispatchObject(dispatch, normalizer) {
     out.tooltipMap = out.tooltipMap
       .map((entry) => ({
         ...entry,
-        entity: normalizeObjId(entry?.entity, normalizer),
+        entity: maybeNormalizeObjId(entry?.entity, objectNormalizer, canonicalizeObjectIds),
       }))
       .sort((a, b) => {
         const ae = a?.entity ?? -1;
@@ -167,7 +242,12 @@ function canonicalizeDispatchObject(dispatch, normalizer) {
   }
 
   if (Array.isArray(out.sideColors)) {
-    out.sideColors = [...out.sideColors].sort((a, b) => (a?.side ?? 0) - (b?.side ?? 0));
+    out.sideColors = out.sideColors
+      .map((entry) => ({
+        ...entry,
+        side: maybeNormalizeSideId(entry?.side, sideNormalizer, canonicalizeSideIds),
+      }))
+      .sort((a, b) => (a?.side ?? 0) - (b?.side ?? 0));
   }
 
   if (Array.isArray(out.typeThreatLevels)) {
@@ -179,10 +259,10 @@ function canonicalizeDispatchObject(dispatch, normalizer) {
   }
 
   if (out.mainCameraTrackEid !== undefined) {
-    out.mainCameraTrackEid = normalizeObjId(out.mainCameraTrackEid, normalizer);
+    out.mainCameraTrackEid = maybeNormalizeObjId(out.mainCameraTrackEid, objectNormalizer, canonicalizeObjectIds);
   }
   if (out.pipCameraTrackEid !== undefined) {
-    out.pipCameraTrackEid = normalizeObjId(out.pipCameraTrackEid, normalizer);
+    out.pipCameraTrackEid = maybeNormalizeObjId(out.pipCameraTrackEid, objectNormalizer, canonicalizeObjectIds);
   }
 
   return out;
@@ -205,13 +285,14 @@ const SIGNAL_HASH_FIELDS = [
   'dh',
 ];
 
-/**
- * Canonicalizes mission-local object IDs in payload rows, matching interpreter trace semantics.
- *
- * Rows that contain payload fields (`objVars/o`, `eventFlags/e`, `dispatch/d`) are re-mapped.
- * If payload is canonicalized, embedded hash fields are dropped so downstream hashing is recomputed.
- */
-export function canonicalizeReferenceRowsObjectIds(rows) {
+function canonicalizeReferenceRows(rows, options = {}) {
+  const canonicalizeObjectIds = options.canonicalizeObjectIds === true;
+  const canonicalizeSideIds = options.canonicalizeSideIds === true;
+
+  if (!canonicalizeObjectIds && !canonicalizeSideIds) {
+    return [...rows];
+  }
+
   const grouped = new Map();
   rows.forEach((row, idx) => {
     const scriptId = pickScriptId(row);
@@ -227,40 +308,80 @@ export function canonicalizeReferenceRowsObjectIds(rows) {
   const out = new Array(rows.length);
   for (const entries of grouped.values()) {
     entries.sort((a, b) => a.tick - b.tick || a.idx - b.idx);
-    const normalizer = { nextCanonicalId: 1, canonicalByRawId: new Map() };
+    const objectNormalizer = { nextCanonicalId: 1, canonicalByRawId: new Map() };
+    const sideNormalizer = createSideNormalizer();
 
     for (const entry of entries) {
       const row = { ...entry.row };
       let canonicalizedPayload = false;
 
-      if (Array.isArray(row.objVars)) {
-        row.objVars = row.objVars.map((rawId) => normalizeObjId(rawId, normalizer));
+      if (canonicalizeObjectIds) {
+        if (Array.isArray(row.objVars)) {
+          row.objVars = row.objVars.map((rawId) => normalizeObjId(rawId, objectNormalizer));
+          canonicalizedPayload = true;
+        }
+        if (Array.isArray(row.o)) {
+          row.o = row.o.map((rawId) => normalizeObjId(rawId, objectNormalizer));
+          canonicalizedPayload = true;
+        }
+      }
+
+      if (Array.isArray(row.relationships) && canonicalizeSideIds) {
+        row.relationships = canonicalizeRelationships(row.relationships, sideNormalizer);
         canonicalizedPayload = true;
       }
-      if (Array.isArray(row.o)) {
-        row.o = row.o.map((rawId) => normalizeObjId(rawId, normalizer));
+      if (Array.isArray(row.r) && canonicalizeSideIds) {
+        row.r = canonicalizeRelationships(row.r, sideNormalizer);
         canonicalizedPayload = true;
       }
 
-      if (Array.isArray(row.eventFlags)) {
+      if (Array.isArray(row.eventFlags) && (canonicalizeObjectIds || canonicalizeSideIds)) {
         row.eventFlags = row.eventFlags
-          .map((key) => normalizeEventFlagKey(key, normalizer))
+          .map((key) => normalizeEventFlagKey(key, {
+            object: objectNormalizer,
+            side: sideNormalizer,
+            canonicalizeObjectIds,
+            canonicalizeSideIds,
+          }))
           .sort((a, b) => String(a).localeCompare(String(b)));
         canonicalizedPayload = true;
       }
-      if (Array.isArray(row.e)) {
+      if (Array.isArray(row.e) && (canonicalizeObjectIds || canonicalizeSideIds)) {
         row.e = row.e
-          .map((key) => normalizeEventFlagKey(key, normalizer))
+          .map((key) => normalizeEventFlagKey(key, {
+            object: objectNormalizer,
+            side: sideNormalizer,
+            canonicalizeObjectIds,
+            canonicalizeSideIds,
+          }))
           .sort((a, b) => String(a).localeCompare(String(b)));
         canonicalizedPayload = true;
       }
 
-      if (row.dispatch && typeof row.dispatch === 'object' && !Array.isArray(row.dispatch)) {
-        row.dispatch = canonicalizeDispatchObject(row.dispatch, normalizer);
+      if (canonicalizeSideIds) {
+        const normalizedNextSide = Math.max(2, sideNormalizer.nextCanonicalId);
+        if (isFiniteNumber(row.nextSideId)) {
+          row.nextSideId = normalizedNextSide;
+          canonicalizedPayload = true;
+        }
+        if (isFiniteNumber(row.n)) {
+          row.n = normalizedNextSide;
+          canonicalizedPayload = true;
+        }
+      }
+
+      if (row.dispatch && typeof row.dispatch === 'object' && !Array.isArray(row.dispatch) && (canonicalizeObjectIds || canonicalizeSideIds)) {
+        row.dispatch = canonicalizeDispatchObject(row.dispatch, objectNormalizer, sideNormalizer, {
+          canonicalizeObjectIds,
+          canonicalizeSideIds,
+        });
         canonicalizedPayload = true;
       }
-      if (row.d && typeof row.d === 'object' && !Array.isArray(row.d)) {
-        row.d = canonicalizeDispatchObject(row.d, normalizer);
+      if (row.d && typeof row.d === 'object' && !Array.isArray(row.d) && (canonicalizeObjectIds || canonicalizeSideIds)) {
+        row.d = canonicalizeDispatchObject(row.d, objectNormalizer, sideNormalizer, {
+          canonicalizeObjectIds,
+          canonicalizeSideIds,
+        });
         canonicalizedPayload = true;
       }
 
@@ -275,6 +396,35 @@ export function canonicalizeReferenceRowsObjectIds(rows) {
   }
 
   return out;
+}
+
+/**
+ * Canonicalizes mission-local object IDs in payload rows, matching interpreter trace semantics.
+ *
+ * Rows that contain payload fields (`objVars/o`, `eventFlags/e`, `dispatch/d`) are re-mapped.
+ * If payload is canonicalized, embedded hash fields are dropped so downstream hashing is recomputed.
+ */
+export function canonicalizeReferenceRowsObjectIds(rows) {
+  return canonicalizeReferenceRows(rows, { canonicalizeObjectIds: true });
+}
+
+/**
+ * Canonicalizes mission-local side IDs in payload rows.
+ *
+ * This is useful when external captures use side IDs that differ from the internal runtime.
+ */
+export function canonicalizeReferenceRowsSideIds(rows) {
+  return canonicalizeReferenceRows(rows, { canonicalizeSideIds: true });
+}
+
+/**
+ * Canonicalizes mission-local object IDs and side IDs in payload rows.
+ */
+export function canonicalizeReferenceRowsObjectAndSideIds(rows) {
+  return canonicalizeReferenceRows(rows, {
+    canonicalizeObjectIds: true,
+    canonicalizeSideIds: true,
+  });
 }
 
 export function pickDeclaredFrameCount(row) {
