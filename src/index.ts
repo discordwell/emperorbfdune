@@ -625,6 +625,10 @@ async function main() {
       mapLoaded = true;
       console.log(`Loaded real map: ${realMapId} (${mapData.width}×${mapData.height})`);
 
+      // Try loading original terrain mesh (graceful fallback to splatmap)
+      const xbfLoaded = await ctx.terrain.loadTerrainMesh(realMapId);
+      console.log(xbfLoaded ? `XBF terrain: ${realMapId}` : `Splatmap terrain: ${realMapId}`);
+
       // Load map metadata (spawn points, script points, entrances, etc.)
       const manifest = await loadMapManifest();
       const manifestEntry = manifest[realMapId];

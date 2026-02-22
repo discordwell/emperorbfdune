@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { TILE_SIZE } from '../utils/MathUtils';
 import type { SceneManager } from './SceneManager';
 import type { MapData } from '../config/MapLoader';
@@ -126,6 +127,35 @@ const terrainFragmentShader = /* glsl */ `
   }
 `;
 
+// Spice overlay shaders (renders on top of XBF terrain mesh)
+const spiceOverlayVertexShader = /* glsl */ `
+  varying vec2 vSplatUv;
+  void main() {
+    vSplatUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const spiceOverlayFragmentShader = /* glsl */ `
+  uniform sampler2D splatmap;
+  uniform sampler2D spiceTex;
+  uniform vec2 mapWorldSize;
+  varying vec2 vSplatUv;
+
+  void main() {
+    vec4 splat = texture2D(splatmap, vSplatUv);
+    float spiceWeight = splat.b;
+    if (spiceWeight < 0.01) discard;
+
+    // Tile the spice texture across the terrain
+    vec2 tiledUv = vSplatUv * mapWorldSize * 0.075;
+    vec3 spiceBase = texture2D(spiceTex, tiledUv).rgb;
+    vec3 spiceColor = spiceBase * vec3(1.4, 0.8, 0.3);
+
+    gl_FragColor = vec4(spiceColor, spiceWeight * 0.85);
+  }
+`;
+
 export class TerrainRenderer {
   private sceneManager: SceneManager;
   private terrainData: Uint8Array; // TerrainType per tile (visual only)
@@ -147,6 +177,15 @@ export class TerrainRenderer {
 
   // Heightmap data from real maps (null for proc-gen)
   private heightData: Uint8Array | null = null;
+
+  // XBF terrain mesh (original game terrain)
+  private xbfMesh: THREE.Group | null = null;
+  private xbfLoaded = false;
+  private float32Heights: Float32Array | null = null;
+  private heightGridW = 0;
+  private heightGridH = 0;
+  private spiceOverlayMesh: THREE.Mesh | null = null;
+  private spiceOverlayMaterial: THREE.ShaderMaterial | null = null;
 
   constructor(sceneManager: SceneManager) {
     this.sceneManager = sceneManager;
@@ -181,6 +220,28 @@ export class TerrainRenderer {
     const tx = Math.floor(fx);
     const tz = Math.floor(fz);
 
+    // Use float32 heights from XBF terrain if available (most accurate)
+    if (this.float32Heights) {
+      const gw = this.heightGridW;
+      const gh = this.heightGridH;
+      const tx0 = tx < 0 ? 0 : tx >= gw ? gw - 1 : tx;
+      const tz0 = tz < 0 ? 0 : tz >= gh ? gh - 1 : tz;
+      const tx1 = Math.min(tx0 + 1, gw); // grid is (W+1) wide
+      const tz1 = Math.min(tz0 + 1, gh); // grid is (H+1) tall
+      const fracX = Math.max(0, Math.min(1, fx - tx));
+      const fracZ = Math.max(0, Math.min(1, fz - tz));
+
+      const stride = gw + 1; // (W+1) values per row
+      const h00 = this.float32Heights[tz0 * stride + tx0];
+      const h10 = this.float32Heights[tz0 * stride + tx1];
+      const h01 = this.float32Heights[tz1 * stride + tx0];
+      const h11 = this.float32Heights[tz1 * stride + tx1];
+
+      const top = h00 + (h10 - h00) * fracX;
+      const bot = h01 + (h11 - h01) * fracX;
+      return top + (bot - top) * fracZ;
+    }
+
     if (!this.heightData) {
       // Procedural: interpolate between neighboring tile heights for smooth transitions
       const fracX = fx - tx;
@@ -194,7 +255,7 @@ export class TerrainRenderer {
       return top + (bot - top) * fracZ;
     }
 
-    // Bilinear interpolation of heightmap
+    // Bilinear interpolation of uint8 heightmap
     const w = this.mapWidth;
     const h = this.mapHeight;
     const tx0 = tx < 0 ? 0 : tx >= w ? w - 1 : tx;
@@ -504,12 +565,180 @@ export class TerrainRenderer {
   }
 
   updateSpiceVisuals(): void {
-    // Regenerate splatmap from current terrain data without full mesh rebuild
+    if (this.xbfLoaded) {
+      // XBF mode: only regenerate splatmap texture (spice overlay reads it automatically)
+      this.generateSplatmap();
+      return;
+    }
+    // Splatmap mode: regenerate splatmap from current terrain data without full mesh rebuild
     if (this.texturesLoaded && this.splatmapData && this.splatmapTexture) {
       this.generateSplatmap();
     } else {
       this.buildMesh();
     }
+  }
+
+  /** Load original XBF terrain mesh, replacing the splatmap terrain visually.
+   *  Returns true on success, false on failure (graceful fallback to splatmap). */
+  async loadTerrainMesh(mapId: string): Promise<boolean> {
+    const glbUrl = `/assets/maps/terrain/${mapId}.terrain.glb`;
+    const heightsUrl = `/assets/maps/terrain/${mapId}.terrain.heights`;
+
+    try {
+      // Load GLB mesh
+      const loader = new GLTFLoader();
+      const gltf = await new Promise<{ scene: THREE.Group }>((resolve, reject) => {
+        loader.load(glbUrl, resolve, undefined, reject);
+      });
+
+      // Load heights file
+      let heightsLoaded = false;
+      try {
+        const resp = await fetch(heightsUrl);
+        if (resp.ok) {
+          const buf = await resp.arrayBuffer();
+          const view = new DataView(buf);
+          const w = view.getUint16(0, true);
+          const h = view.getUint16(2, true);
+          // yScale stored at offset 4 but heights are already pre-scaled in the file
+          const numFloats = (w + 1) * (h + 1);
+          this.float32Heights = new Float32Array(buf, 8, numFloats);
+          this.heightGridW = w;
+          this.heightGridH = h;
+          heightsLoaded = true;
+        }
+      } catch {
+        // Heights file optional - fall back to existing heightmap
+      }
+
+      // Configure loaded mesh materials
+      gltf.scene.traverse((child) => {
+        if ((child as THREE.Mesh).isMesh) {
+          const mesh = child as THREE.Mesh;
+          mesh.receiveShadow = true;
+          // Ensure textures use repeat wrapping
+          const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+          for (const mat of materials) {
+            if (mat instanceof THREE.MeshStandardMaterial) {
+              mat.metalness = 0;
+              mat.roughness = 0.85;
+              if (mat.map) {
+                mat.map.wrapS = THREE.RepeatWrapping;
+                mat.map.wrapT = THREE.RepeatWrapping;
+              }
+            }
+          }
+        }
+      });
+
+      // Add XBF mesh to scene
+      this.xbfMesh = gltf.scene;
+      this.sceneManager.scene.add(this.xbfMesh);
+
+      // Hide the splatmap mesh
+      if (this.mesh) {
+        this.mesh.visible = false;
+      }
+
+      // Build spice overlay
+      this.buildSpiceOverlay();
+
+      this.xbfLoaded = true;
+      console.log(`XBF terrain loaded: ${mapId} (heights: ${heightsLoaded})`);
+      return true;
+    } catch {
+      // GLB not found or failed to load - fall back to splatmap
+      return false;
+    }
+  }
+
+  private buildSpiceOverlay(): void {
+    if (!this.spiceTex) return;
+
+    const worldW = this.mapWidth * TILE_SIZE;
+    const worldH = this.mapHeight * TILE_SIZE;
+
+    // Create a plane matching the map dimensions, subdivided per tile
+    const geometry = new THREE.PlaneGeometry(worldW, worldH, this.mapWidth, this.mapHeight);
+    geometry.rotateX(-Math.PI / 2);
+    geometry.translate(worldW / 2 - TILE_SIZE / 2, 0, worldH / 2 - TILE_SIZE / 2);
+
+    // Conform overlay vertices to terrain surface
+    const posAttr = geometry.attributes.position;
+    for (let i = 0; i < posAttr.count; i++) {
+      const wx = posAttr.getX(i);
+      const wz = posAttr.getZ(i);
+      const y = this.getHeightAt(wx, wz) + 0.1; // Slight offset above terrain
+      posAttr.setY(i, y);
+    }
+    posAttr.needsUpdate = true;
+
+    // Generate splatmap if not yet done
+    if (!this.splatmapTexture) {
+      this.generateSplatmap();
+    }
+
+    this.spiceOverlayMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        splatmap: { value: this.splatmapTexture },
+        spiceTex: { value: this.spiceTex },
+        mapWorldSize: { value: new THREE.Vector2(worldW, worldH) },
+      },
+      vertexShader: spiceOverlayVertexShader,
+      fragmentShader: spiceOverlayFragmentShader,
+      transparent: true,
+      depthWrite: false,
+    });
+
+    this.spiceOverlayMesh = new THREE.Mesh(geometry, this.spiceOverlayMaterial);
+    this.spiceOverlayMesh.renderOrder = 1; // Render after terrain
+    this.sceneManager.scene.add(this.spiceOverlayMesh);
+  }
+
+  dispose(): void {
+    // Dispose XBF terrain
+    if (this.xbfMesh) {
+      this.xbfMesh.traverse((child) => {
+        if ((child as THREE.Mesh).isMesh) {
+          const mesh = child as THREE.Mesh;
+          mesh.geometry.dispose();
+          const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+          for (const mat of materials) {
+            if (mat instanceof THREE.MeshStandardMaterial) mat.map?.dispose();
+            mat.dispose();
+          }
+        }
+      });
+      this.sceneManager.scene.remove(this.xbfMesh);
+      this.xbfMesh = null;
+    }
+    // Dispose spice overlay
+    if (this.spiceOverlayMesh) {
+      this.spiceOverlayMesh.geometry.dispose();
+      this.spiceOverlayMaterial?.dispose();
+      this.sceneManager.scene.remove(this.spiceOverlayMesh);
+      this.spiceOverlayMesh = null;
+      this.spiceOverlayMaterial = null;
+    }
+    // Dispose splatmap mesh
+    if (this.mesh) {
+      this.mesh.geometry.dispose();
+      (this.mesh.material as THREE.Material).dispose();
+      this.sceneManager.scene.remove(this.mesh);
+      this.mesh = null;
+    }
+    // Dispose shared textures
+    this.sandTex?.dispose();
+    this.rockTex?.dispose();
+    this.spiceTex?.dispose();
+    this.splatmapTexture?.dispose();
+    this.sandTex = null;
+    this.rockTex = null;
+    this.spiceTex = null;
+    this.splatmapTexture = null;
+    this.texturesLoaded = false;
+    this.float32Heights = null;
+    this.xbfLoaded = false;
   }
 
   private mapSeed = Math.random() * 10000;
