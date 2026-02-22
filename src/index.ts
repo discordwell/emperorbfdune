@@ -25,10 +25,21 @@ import { setupGameUI } from './ui/GameUI';
 import { spawnFreshGame } from './core/FreshGameSpawn';
 import { simRng } from './utils/DeterministicRNG';
 import { restoreFromSave } from './core/SaveLoadSystem';
-import { hasComponent, Harvester, Owner } from './core/ECS';
+import { hasComponent, Harvester, Owner, Position, BuildingType as BT, buildingQuery, removeEntity } from './core/ECS';
 import { loadDisplayNames } from './config/DisplayNames';
+import { isAgentMode, getAgentConfig, pickTerritoryWithContext, startAgent, stopAgent } from './ai/CampaignAgent';
+import { AIPlayer } from './ai/AIPlayer';
 
 async function main() {
+  // Check for ?agent=XX URL param to start agent mode
+  const urlParams = new URLSearchParams(window.location.search);
+  const agentParam = urlParams.get('agent');
+  if (agentParam && !isAgentMode()) {
+    startAgent(agentParam);
+    return;
+  }
+  const isAgent = isAgentMode();
+  const agentConfig = getAgentConfig();
   console.log('Emperor: Battle for Dune - Initializing...');
   updateLoading(5, 'Loading game data...');
 
@@ -113,6 +124,79 @@ async function main() {
     if (house.gameMode === 'campaign') { await loadCampaignStrings(); await loadPhaseRules(); }
     const loadScreen = document.getElementById('loading-screen');
     if (loadScreen) loadScreen.style.display = 'flex';
+  } else if (isAgent && agentConfig) {
+    // --- AGENT MODE: bypass all UI ---
+    await loadCampaignStrings();
+    await loadPhaseRules();
+
+    const nextMission = localStorage.getItem('ebfd_campaign_next');
+    if (nextMission) {
+      // Auto-continue path: ebfd_campaign_next already set from previous mission
+      localStorage.removeItem('ebfd_campaign_next');
+      const next = JSON.parse(nextMission);
+      const rawCampaign = localStorage.getItem('ebfd_campaign');
+      if (!rawCampaign) { stopAgent(); return; }
+      const campaignState = JSON.parse(rawCampaign);
+      const houseMap: Record<string, { name: string; enemyPrefix: string; enemyName: string }> = {
+        'AT': { name: 'Atreides', enemyPrefix: 'HK', enemyName: 'Harkonnen' },
+        'HK': { name: 'Harkonnen', enemyPrefix: 'AT', enemyName: 'Atreides' },
+        'OR': { name: 'Ordos', enemyPrefix: 'HK', enemyName: 'Harkonnen' },
+      };
+      const info = houseMap[campaignState.housePrefix] ?? houseMap['AT'];
+      house = {
+        id: campaignState.housePrefix.toLowerCase(),
+        name: info.name,
+        prefix: campaignState.housePrefix,
+        color: '#f0c040',
+        description: '',
+        enemyPrefix: campaignState.enemyPrefix ?? info.enemyPrefix,
+        enemyName: campaignState.enemyHouse ?? info.enemyName,
+        difficulty: next.difficulty ?? 'normal',
+        gameMode: 'campaign',
+        campaignTerritoryId: next.territoryId,
+        mapChoice: { id: `campaign-${next.territoryId}`, name: 'Campaign Mission', seed: next.mapSeed, description: '' },
+      };
+    } else {
+      // First mission or fresh start: create campaign, pick territory
+      const hp = agentConfig.house;
+      const houseNames: Record<string, { name: string; enemyPrefix: string; enemyName: string }> = {
+        'AT': { name: 'Atreides', enemyPrefix: 'HK', enemyName: 'Harkonnen' },
+        'HK': { name: 'Harkonnen', enemyPrefix: 'AT', enemyName: 'Atreides' },
+        'OR': { name: 'Ordos', enemyPrefix: 'HK', enemyName: 'Harkonnen' },
+      };
+      const hInfo = houseNames[hp] ?? houseNames['AT'];
+      const campaign = new CampaignMap(audioManager, hp, hInfo.name, hInfo.enemyPrefix, hInfo.enemyName);
+      const attackable = campaign.getAttackableTerritories();
+      const picked = pickTerritoryWithContext(
+        attackable,
+        campaign.getState().territories,
+        campaign.getPhaseManager(),
+        hp,
+      );
+      campaign.saveCampaign();
+
+      const phase = campaign.getPhaseManager().getCurrentPhase();
+      const playerCount = campaign.getState().territories.filter(t => t.owner === 'player').length;
+      console.log(`[Agent] Active: House ${hInfo.name} | Phase ${phase} | Tech ${campaign.getPhaseManager().getCurrentTechLevel()} | ${playerCount}/33 territories`);
+      console.log(`[Agent] Selected territory: ${picked.name} (id=${picked.id}, difficulty=${picked.difficulty})`);
+
+      house = {
+        id: hp.toLowerCase(),
+        name: hInfo.name,
+        prefix: hp,
+        color: '#f0c040',
+        description: '',
+        enemyPrefix: hInfo.enemyPrefix,
+        enemyName: hInfo.enemyName,
+        difficulty: picked.difficulty,
+        gameMode: 'campaign',
+        campaignTerritoryId: picked.id,
+        mapChoice: { id: `campaign-${picked.id}`, name: picked.name, seed: picked.mapSeed, description: '' },
+      };
+    }
+
+    const loadScreenEl = document.getElementById('loading-screen');
+    if (loadScreenEl) loadScreenEl.style.display = 'flex';
   } else {
     const loadScreenEl = document.getElementById('loading-screen');
     const uiOverlay = document.getElementById('ui-overlay');
@@ -164,16 +248,18 @@ async function main() {
       }
       activeMissionConfig = missionConfig ?? null;
 
-      const campaignState = savedCampaign ? JSON.parse(savedCampaign) : null;
-      const tData = campaignState?.territories?.find((t: { id: number }) => t.id === house.campaignTerritoryId);
-      if (tData) {
-        const briefingResult = await showMissionBriefing(
-          { id: house.campaignTerritoryId, name: tData.name, description: tData.description ?? '', difficulty: tData.difficulty ?? 'normal', x: 0, y: 0, adjacent: [], mapSeed: 0, owner: 'enemy', ownerHouse: tData.ownerHouse ?? 'neutral', isHomeworld: false },
-          house.name, house.prefix, house.enemyName, undefined, missionConfig
-        );
-        if (briefingResult === 'resign') {
-          window.location.reload();
-          return;
+      if (!isAgent) {
+        const campaignState = savedCampaign ? JSON.parse(savedCampaign) : null;
+        const tData = campaignState?.territories?.find((t: { id: number }) => t.id === house.campaignTerritoryId);
+        if (tData) {
+          const briefingResult = await showMissionBriefing(
+            { id: house.campaignTerritoryId, name: tData.name, description: tData.description ?? '', difficulty: tData.difficulty ?? 'normal', x: 0, y: 0, adjacent: [], mapSeed: 0, owner: 'enemy', ownerHouse: tData.ownerHouse ?? 'neutral', isHomeworld: false },
+            house.name, house.prefix, house.enemyName, undefined, missionConfig
+          );
+          if (briefingResult === 'resign') {
+            window.location.reload();
+            return;
+          }
         }
       }
     }
@@ -300,6 +386,67 @@ async function main() {
     });
 
     ctx.victorySystem.setCampaignContinue(async () => {
+      // --- AGENT: auto-handle campaign continue ---
+      if (isAgent && agentConfig) {
+        const phState = phaseManagerRef!.getState();
+
+        if (phState.isVictory) {
+          console.log('[Agent] CAMPAIGN COMPLETE! House ' + house.name + ' has conquered Arrakis!');
+          stopAgent();
+          return;
+        }
+        if (phState.isLost) {
+          console.log('[Agent] CAMPAIGN LOST. House ' + house.name + ' has fallen.');
+          stopAgent();
+          return;
+        }
+
+        const outcome = ctx.victorySystem.getOutcome();
+        console.log(`[Agent] Mission ${outcome}. Auto-continuing...`);
+
+        // Auto civil war choice (HK only)
+        if (lastBattleResult?.civilWarChoice && house.prefix === 'HK') {
+          phaseManagerRef!.setCivilWarChoice(agentConfig.civilWarChoice);
+          campaignRef!.saveCampaign();
+          console.log(`[Agent] Civil war choice: ${agentConfig.civilWarChoice}`);
+        }
+
+        // Auto-accept alliance offers
+        const agentSubSys = campaignRef!.getSubHouseSystem();
+        const agentPending = agentSubSys.getState().offeredAlliance;
+        if (agentPending) {
+          agentSubSys.acceptAlliance();
+          campaignRef!.saveCampaign();
+          console.log(`[Agent] Alliance offer from ${agentPending}: ACCEPTED`);
+        }
+
+        // Pick next territory
+        const attackable = campaignRef!.getAttackableTerritories();
+        if (attackable.length === 0) {
+          console.log('[Agent] No attackable territories remaining. Stopping.');
+          stopAgent();
+          return;
+        }
+
+        const picked = pickTerritoryWithContext(
+          attackable,
+          campaignRef!.getState().territories,
+          phaseManagerRef!,
+          house.prefix as HousePrefix,
+        );
+        console.log(`[Agent] Selected territory: ${picked.name} (id=${picked.id})`);
+
+        // Update agent config with incremented mission count
+        agentConfig.missionCount++;
+        localStorage.setItem('ebfd_agent', JSON.stringify(agentConfig));
+
+        localStorage.setItem('ebfd_campaign_next', JSON.stringify({
+          territoryId: picked.id, difficulty: picked.difficulty, mapSeed: picked.mapSeed,
+        }));
+        window.location.reload();
+        return;
+      }
+
       const phState = phaseManagerRef!.getState();
       if (phState.isVictory) {
         const overlay = document.createElement('div');
@@ -578,6 +725,59 @@ async function main() {
     spawnFreshGame(ctx);
   }
 
+  // --- AGENT MODE: add AIPlayer for player 0 ---
+  if (isAgent && agentConfig) {
+    const agentAI = new AIPlayer(gameRules, ctx.combatSystem, 0, 200, 200, 60, 60);
+    agentAI.setUnitPool(house.prefix);
+    agentAI.setDifficulty('hard');
+    agentAI.setPersonality(2); // balanced
+    agentAI.setProductionSystem(ctx.productionSystem, ctx.harvestSystem);
+    agentAI.setBuildingTypeNames(typeRegistry.buildingTypeNames);
+    agentAI.setUnitTypeNames(typeRegistry.unitTypeNames);
+    agentAI.setSpatialGrid(ctx.movement.getSpatialGrid());
+    agentAI.setMapDimensions(mapW, mapH);
+    agentAI.setSpawnCallback((eid, typeName, owner, x, z) => {
+      const w = ctx.game.getWorld();
+      removeEntity(w, eid);
+      ctx.spawnUnit(w, typeName, owner, x, z);
+    });
+
+    // Find player 0's ConYard to set base position
+    const agentWorld = ctx.game.getWorld();
+    const agentBuildings = buildingQuery(agentWorld);
+    for (const eid of agentBuildings) {
+      if (Owner.playerId[eid] === 0) {
+        const bName = typeRegistry.buildingTypeNames[BT.id[eid]] ?? '';
+        if (bName.includes('ConYard')) {
+          agentAI.setBasePosition(Position.x[eid], Position.z[eid]);
+          break;
+        }
+      }
+    }
+    // Set target to nearest enemy base
+    for (const eid of agentBuildings) {
+      if (Owner.playerId[eid] !== 0) {
+        const bName = typeRegistry.buildingTypeNames[BT.id[eid]] ?? '';
+        if (bName.includes('ConYard')) {
+          agentAI.setTargetPosition(Position.x[eid], Position.z[eid]);
+          break;
+        }
+      }
+    }
+
+    ctx.game.addSystem(agentAI);
+
+    // Agent UI: disable fog, show label
+    ctx.fogOfWar.setEnabled(false);
+    const agentLabel = document.createElement('div');
+    agentLabel.id = 'agent-label';
+    agentLabel.style.cssText = 'position:fixed;top:8px;left:50%;transform:translateX(-50%);color:#f0c040;font-size:14px;font-family:inherit;z-index:100;pointer-events:none;text-shadow:0 1px 3px #000;letter-spacing:2px;';
+    agentLabel.textContent = `[AGENT] ${house.name} — Mission ${agentConfig.missionCount + 1}`;
+    document.body.appendChild(agentLabel);
+
+    console.log(`[Agent] Mission started. Playing as ${house.name} | Territory: ${house.campaignTerritoryId}`);
+  }
+
   // --- OBSERVER MODE SETUP ---
   if (house.gameMode === 'observer') {
     // Disable fog of war — spectator sees everything
@@ -626,6 +826,32 @@ async function main() {
   console.log('Game started - WASD to scroll, left-click to select, right-click to command');
   console.log('A: Attack-move | S: Stop | G: Guard | M: Mute music | Shift+click: Waypoints');
 
+  // --- AGENT: auto-click victory/defeat screen after outcome ---
+  if (isAgent) {
+    let agentFired = false;
+    ctx.game.addSystem({
+      update(_world: any, _dt: number) {
+        if (agentFired) return;
+        const outcome = ctx.victorySystem.getOutcome();
+        if (outcome !== 'playing') {
+          agentFired = true;
+          console.log(`[Agent] Mission ${outcome}. Auto-continuing in 3s...`);
+          setTimeout(() => {
+            const btn = [...document.querySelectorAll('button')]
+              .find(b => b.textContent === 'Continue Campaign');
+            if (btn) {
+              btn.click();
+            } else {
+              // Fallback: trigger campaign continue directly
+              console.log('[Agent] Continue button not found, reloading...');
+              window.location.reload();
+            }
+          }, 3000);
+        }
+      },
+    });
+  }
+
   // Debug helpers
   (window as any).game = ctx.game;
   (window as any).rules = gameRules;
@@ -633,6 +859,8 @@ async function main() {
   (window as any).spawnUnit = (name: string, owner: number, x: number, z: number) => ctx.spawnUnit(ctx.game.getWorld(), name, owner, x, z);
   (window as any).spawnBuilding = (name: string, owner: number, x: number, z: number) => ctx.spawnBuilding(ctx.game.getWorld(), name, owner, x, z);
   (window as any).sandworm = ctx.sandwormSystem;
+  (window as any).startAgent = startAgent;
+  (window as any).stopAgent = stopAgent;
   (window as any).debug = {
     modelReport() {
       const report = ctx.modelManager.getLoadReport();
