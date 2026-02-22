@@ -42,29 +42,24 @@ function proceduralHeight(t: TerrainType): number {
 }
 
 /**
- * CPF passability nibble (0-15) → TerrainType mapping.
- * Based on frequency analysis across 82 maps:
- *   10 = most common (~15-23%) → Sand (default walkable)
- *   0  = boundary (~2-5%) → Cliff (impassable)
- *   6  = moderate (~4-18%) → Rock
- *   2  = moderate (~5-17%) → InfantryRock
- *   8  = moderate (~3-16%) → Dunes
- *   12 = moderate (~1-15%) → SpiceLow
- *   14 = moderate (~2-5%) → SpiceHigh
- *   Others = transitional terrain
+ * CPF passability nibble (0-15) → visual TerrainType mapping.
+ * Corrected via cross-tabulation of CPF values vs texture indices:
+ *   CPF 2, 3, 4, 6, 8, 10 all share the same dominant texture (tex 57 = sand).
+ *   Only CPF 5 and 7 correspond to rocky/elevated terrain.
+ * Visual terrain is decoupled from passability — raw CPF drives movement checks.
  */
 const CPF_TO_TERRAIN: TerrainType[] = [
   TerrainType.Cliff,       // 0  - impassable boundary
-  TerrainType.Cliff,       // 1  - cliff variant
-  TerrainType.InfantryRock,// 2  - elevated rock (infantry bonus)
-  TerrainType.InfantryRock,// 3  - infantry rock variant
-  TerrainType.Rock,        // 4  - rock
-  TerrainType.Rock,        // 5  - rock variant
-  TerrainType.Rock,        // 6  - rock
-  TerrainType.Dunes,       // 7  - sand dunes
+  TerrainType.Cliff,       // 1  - cliff edge
+  TerrainType.Sand,        // 2  - open terrain (shares sand texture with CPF 10)
+  TerrainType.Sand,        // 3  - open terrain variant
+  TerrainType.Dunes,       // 4  - light dunes
+  TerrainType.Rock,        // 5  - rocky elevated (less common)
+  TerrainType.Sand,        // 6  - open terrain (most common CPF value)
+  TerrainType.InfantryRock,// 7  - infantry-only elevated rock
   TerrainType.Dunes,       // 8  - dunes
   TerrainType.Dunes,       // 9  - dunes variant
-  TerrainType.Sand,        // 10 - sand (most common, main walkable)
+  TerrainType.Sand,        // 10 - main open sand
   TerrainType.Sand,        // 11 - sand variant
   TerrainType.SpiceLow,    // 12 - spice field (low)
   TerrainType.SpiceLow,    // 13 - spice variant
@@ -133,9 +128,10 @@ const terrainFragmentShader = /* glsl */ `
 
 export class TerrainRenderer {
   private sceneManager: SceneManager;
-  private terrainData: Uint8Array; // TerrainType per tile
+  private terrainData: Uint8Array; // TerrainType per tile (visual only)
   private baseTerrain: Uint8Array; // Original terrain before spice overlay
   private spiceAmount: Float32Array; // Spice density 0-1 per tile
+  private rawPassability: Uint8Array | null = null; // Raw CPF values for movement checks
   private mesh: THREE.Mesh | null = null;
   private splatmapTexture: THREE.DataTexture | null = null;
   private splatmapData: Uint8Array | null = null;
@@ -251,11 +247,21 @@ export class TerrainRenderer {
   }
 
   isPassable(tx: number, tz: number): boolean {
+    if (tx < 0 || tx >= this.mapWidth || tz < 0 || tz >= this.mapHeight) return false;
+    if (this.rawPassability) {
+      const cpf = this.rawPassability[tz * this.mapWidth + tx];
+      return cpf > 1; // CPF 0-1 = impassable cliff
+    }
     const type = this.getTerrainType(tx, tz);
     return type !== TerrainType.Cliff;
   }
 
   isPassableVehicle(tx: number, tz: number): boolean {
+    if (tx < 0 || tx >= this.mapWidth || tz < 0 || tz >= this.mapHeight) return false;
+    if (this.rawPassability) {
+      const cpf = this.rawPassability[tz * this.mapWidth + tx];
+      return cpf > 1 && cpf !== 7; // CPF 0-1 = cliff, CPF 7 = infantry only
+    }
     const type = this.getTerrainType(tx, tz);
     return type !== TerrainType.Cliff && type !== TerrainType.InfantryRock;
   }
@@ -274,7 +280,11 @@ export class TerrainRenderer {
     // Copy height data
     this.heightData.set(data.heightMap);
 
-    // Convert CPF passability values to TerrainType enum
+    // Store raw CPF values for movement checks (decoupled from visual terrain)
+    this.rawPassability = new Uint8Array(tileCount);
+    this.rawPassability.set(data.passability);
+
+    // Convert CPF passability values to visual TerrainType enum
     for (let i = 0; i < tileCount; i++) {
       const cpfValue = data.passability[i];
       this.terrainData[i] = CPF_TO_TERRAIN[cpfValue] ?? TerrainType.Sand;

@@ -18,6 +18,16 @@ export interface LoadReport {
   total: number;
 }
 
+// Fallback aliases for buildings whose models were not converted.
+// Maps missing xaf name (lowercase) to an available substitute.
+const MODEL_ALIASES: Record<string, string> = {
+  'at_silo': 'AT_Refinery',
+  'hk_silo': 'HK_Refinery',
+  'or_silo': 'OR_Refinery',
+  'hk_repairpad': 'at_helipad',
+  'or_helipad': 'at_helipad',
+};
+
 export class ModelManager {
   private loader = new GLTFLoader();
   private cache = new Map<string, LoadedModel>();
@@ -78,7 +88,7 @@ export class ModelManager {
     '_L0': ['_L0', '_L1', '_L2'],
   };
 
-  private async tryLoad(xafName: string, suffix: string, key: string): Promise<LoadedModel | null> {
+  private async tryLoad(xafName: string, suffix: string, key: string, aliasAttempted = false): Promise<LoadedModel | null> {
     const fallbacks = ModelManager.LOD_FALLBACKS[suffix] || [suffix];
 
     // Try manifest lookup first (case-insensitive)
@@ -112,6 +122,18 @@ export class ModelManager {
           return model;
         } catch {
           // Try next
+        }
+      }
+    }
+
+    // Try alias fallback for missing building models (single hop only)
+    if (!aliasAttempted) {
+      const alias = MODEL_ALIASES[xafName.toLowerCase()];
+      if (alias) {
+        const aliasResult = await this.tryLoad(alias, suffix, key, true);
+        if (aliasResult) {
+          this.loadResults.set(xafName, { status: 'loaded', url: `alias:${alias}` });
+          return aliasResult;
         }
       }
     }
