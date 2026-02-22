@@ -14,6 +14,9 @@ import type { HarvestSystem } from '../simulation/HarvestSystem';
 import type { SpatialGrid } from '../utils/SpatialGrid';
 import { randomFloat, distance2D, worldToTile, TILE_SIZE } from '../utils/MathUtils';
 import { EventBus } from '../core/EventBus';
+import type { OriginalAIData, TechLevelParams } from './OriginalAIData';
+import { StrategyRunner } from './StrategyRunner';
+import type { StrategyWorldView } from './StrategyRunner';
 
 // Unit combat role classification
 type UnitRole = 'antiInf' | 'antiVeh' | 'antiBldg' | 'scout';
@@ -111,6 +114,16 @@ export class AIPlayer implements GameSystem {
   // Script-controlled behavior override (set by tok SideAIBehaviour* functions)
   private behaviorOverride: string | null = null;
 
+  // --- Original Data-Driven AI Mode ---
+  private originalData: OriginalAIData | null = null;
+  private strategyRunner: StrategyRunner | null = null;
+  private currentTechParams: TechLevelParams | null = null;
+  private lastStrategyPickTick = 0;
+  private firstAttackAllowed = false;
+  private buildingDelayAccum = 0;
+  private unitDelayAccum = 0;
+  private startScriptPhase = 0;
+
   /** Set a temporary behavior override from mission scripts. */
   setBehaviorOverride(behavior: string): void {
     this.behaviorOverride = behavior === 'normal' ? null : behavior;
@@ -119,6 +132,18 @@ export class AIPlayer implements GameSystem {
   /** Get the current behavior override (if any). */
   getBehaviorOverride(): string | null {
     return this.behaviorOverride;
+  }
+
+  /** Enable data-driven AI mode using original game data files. */
+  useOriginalData(data: OriginalAIData): void {
+    this.originalData = data;
+    this.strategyRunner = new StrategyRunner(data, this.factionPrefix);
+    this.startScriptPhase = 0;
+    this.firstAttackAllowed = false;
+    this.lastStrategyPickTick = 0;
+    this.buildingDelayAccum = 0;
+    this.unitDelayAccum = 0;
+    console.log(`[AI P${this.playerId}] Original data-driven mode enabled (${data.strategies.length} strategies, ${data.objectSets.size} object sets)`);
   }
 
   setDifficulty(level: 'easy' | 'normal' | 'hard'): void {
@@ -377,6 +402,11 @@ export class AIPlayer implements GameSystem {
     this.tickCounter++;
     this.currentWorld = world;
 
+    // One-time debug: confirm update is being called for agent
+    if (this.playerId === 0 && this.tickCounter === 1) {
+      console.log(`[Agent AI] First update tick! production=${!!this.production} harvestSystem=${!!this.harvestSystem}`);
+    }
+
     // Staggered tick for scheduling — distributes AI computation across frames
     const t = this.tickCounter + this.tickOffset;
 
@@ -389,12 +419,75 @@ export class AIPlayer implements GameSystem {
     // Scale difficulty over time (ramps up over 5 minutes)
     this.difficulty = 1.0 + Math.min(2.0, this.tickCounter / 7500);
 
+    // === DATA-DRIVEN MODE (original AI data) ===
+    if (this.originalData && this.production && this.harvestSystem) {
+      this.updateOriginalMode(world, t);
+    } else {
+      // === HEURISTIC MODE (existing behavior) ===
+      this.updateHeuristicMode(world, t);
+    }
+
+    // === SHARED SUBSYSTEMS (run unconditionally) ===
+
+    // Detect base attacks: check if AI buildings are taking damage
+    if (t % 25 === 0) {
+      this.checkBaseDefense(world);
+    }
+
+    // Manage army every 3 seconds
+    if (t % 75 === 0) {
+      this.manageArmy(world);
+    }
+
+    // Retreat wounded units every 2 seconds
+    if (t % 50 === 0) {
+      this.retreatWounded(world);
+    }
+
+    // Update target to player's most valuable cluster (every ~20 seconds)
+    if (t % 500 === 250) {
+      this.updateAttackTarget(world);
+    }
+
+    // --- Scouting ---
+    const scoutStartTick = this.difficultyLevel === 'easy' ? 1500
+      : this.difficultyLevel === 'normal' ? 750 : 0;
+
+    if (this.tickCounter >= scoutStartTick) {
+      if (t % 100 === 0) {
+        this.manageScouting(world);
+      }
+      if (t % 50 === 10) {
+        this.updateScoutKnowledge(world);
+      }
+    }
+
+    // --- Composition counter-adjustment every ~200 ticks (8 seconds) ---
+    if (t % 200 === 100) {
+      this.adjustCompositionForCounters();
+    }
+
+    // --- Repair damaged buildings every ~200 ticks (8 seconds) ---
+    if (t % 200 === 50 && this.harvestSystem) {
+      this.repairBuildings(world);
+    }
+
+    // --- Economy management every ~150 ticks (6 seconds) ---
+    if (t % 150 === 75 && this.production && this.harvestSystem) {
+      this.manageEconomy(world);
+    }
+  }
+
+  // ==========================================
+  // Heuristic Mode (existing AI logic)
+  // ==========================================
+
+  private updateHeuristicMode(world: World, t: number): void {
     // Difficulty-based income bonus/penalty (every 10 seconds)
     if (t % 250 === 0 && this.harvestSystem) {
       if (this.difficultyLevel === 'hard') {
         this.harvestSystem.addSolaris(this.playerId, Math.floor(50 * this.difficulty));
       } else if (this.difficultyLevel === 'easy') {
-        // Easy AI gets slower income ramp
         this.harvestSystem.addSolaris(this.playerId, 10);
       }
     }
@@ -431,11 +524,6 @@ export class AIPlayer implements GameSystem {
       this.deploySpecialUnits(world);
     }
 
-    // Detect base attacks: check if AI buildings are taking damage
-    if (t % 25 === 0) {
-      this.checkBaseDefense(world);
-    }
-
     // Spawn wave (fallback if production system isn't connected)
     if (!this.production && t % this.waveInterval === 0) {
       this.spawnWave(world);
@@ -443,56 +531,325 @@ export class AIPlayer implements GameSystem {
       if (this.waveInterval > 375) this.waveInterval -= 25;
     }
 
-    // Manage army every 3 seconds
-    if (t % 75 === 0) {
-      this.manageArmy(world);
-    }
-
-    // Retreat wounded units every 2 seconds
-    if (t % 50 === 0) {
-      this.retreatWounded(world);
-    }
-
     // Hunt player harvesters occasionally (every ~30 seconds)
     if (t % 750 === 0 && this.difficulty > 1.5) {
       this.huntHarvesters(world);
     }
+  }
 
-    // Update target to player's most valuable cluster (every ~20 seconds)
-    if (t % 500 === 250) {
-      this.updateAttackTarget(world);
+  // ==========================================
+  // Original Data-Driven Mode
+  // ==========================================
+
+  private updateOriginalMode(world: World, t: number): void {
+    const data = this.originalData!;
+    const production = this.production!;
+    const harvestSystem = this.harvestSystem!;
+
+    // Resolve current tech level from production system
+    const techLevel = Math.max(1, Math.min(8, production.getPlayerTechLevel(this.playerId)));
+    const techIdx = Math.min(techLevel - 1, data.techLevels.length - 1);
+    this.currentTechParams = data.techLevels[techIdx] ?? data.techLevels[0];
+    const tp = this.currentTechParams;
+
+    // Building decisions on original timer
+    this.buildingDelayAccum++;
+    if (this.buildingDelayAccum >= tp.buildingDelay) {
+      this.buildingDelayAccum = 0;
+      this.makeBuildDecisionOriginal(world, data, tp);
     }
 
-    // --- Scouting ---
-    // Difficulty-based scouting start: easy=1500, normal=750, hard=0
-    const scoutStartTick = this.difficultyLevel === 'easy' ? 1500
-      : this.difficultyLevel === 'normal' ? 750 : 0;
+    // Unit training on original timer
+    this.unitDelayAccum++;
+    if (this.unitDelayAccum >= tp.unitDelay) {
+      this.unitDelayAccum = 0;
+      this.trainUnitsOriginal(world, data, tp);
+    }
 
-    if (this.tickCounter >= scoutStartTick) {
-      // Manage scouting every ~100 ticks (4 seconds)
-      if (t % 100 === 0) {
-        this.manageScouting(world);
+    // Train aircraft periodically (slower than ground units)
+    if (t % 500 === 200 && this.aircraftPool.length > 0) {
+      this.trainAircraft();
+    }
+
+    // Use Starport for bulk purchases
+    if (t % 375 === 100) {
+      this.useStarport();
+    }
+
+    // Deploy special units toward enemy buildings
+    if (t % 300 === 150) {
+      this.deploySpecialUnits(world);
+    }
+
+    // Strategy script launching
+    if (!this.firstAttackAllowed) {
+      if (this.tickCounter >= tp.firstAttackDelay) {
+        this.firstAttackAllowed = true;
+        this.lastStrategyPickTick = this.tickCounter;
       }
-      // Update scout knowledge every ~50 ticks (2 seconds)
-      if (t % 50 === 10) {
-        this.updateScoutKnowledge(world);
+    }
+
+    if (this.firstAttackAllowed && this.tickCounter - this.lastStrategyPickTick >= tp.gapBetweenNewScripts) {
+      this.lastStrategyPickTick = this.tickCounter;
+      this.tryLaunchStrategyScript(world, techLevel, tp);
+    }
+
+    // Advance active strategies every 75 ticks
+    if (t % 75 === 0 && this.strategyRunner) {
+      const worldView = this.createStrategyWorldView(world);
+      this.strategyRunner.tick(
+        worldView, this.tickCounter,
+        { x: this.baseX, z: this.baseZ },
+        { x: this.targetX, z: this.targetZ },
+      );
+    }
+
+    // Hunt player harvesters occasionally
+    if (t % 750 === 0 && techLevel >= 3) {
+      this.huntHarvesters(world);
+    }
+  }
+
+  /** Build buildings using original data parameters */
+  private makeBuildDecisionOriginal(world: World, data: OriginalAIData, tp: TechLevelParams): void {
+    if (!this.production || !this.harvestSystem) return;
+
+    const solaris = this.harvestSystem.getSolaris(this.playerId);
+    const params = data.strategyParams;
+    const px = this.factionPrefix;
+
+    if (solaris < params.minMoneyToConstructBuildings) return;
+
+    // Emergency power check
+    const powerMult = this.production.getPowerMultiplier(this.playerId);
+    if (powerMult < 1.0 && solaris >= 250) {
+      const windtrapName = `${px}SmWindtrap`;
+      if (this.production.canBuild(this.playerId, windtrapName, true)) {
+        this.production.startProduction(this.playerId, windtrapName, true);
+        return;
       }
     }
 
-    // --- Composition counter-adjustment every ~200 ticks (8 seconds) ---
-    if (t % 200 === 100) {
-      this.adjustCompositionForCounters();
+    // Count total buildings
+    let totalBuildings = 0;
+    let turretCount = 0;
+    let refineryCount = 0;
+    const buildings = buildingQuery(world);
+    for (const eid of buildings) {
+      if (Owner.playerId[eid] !== this.playerId || Health.current[eid] <= 0) continue;
+      totalBuildings++;
+      const typeId = BuildingType.id[eid];
+      const name = this.buildingTypeNames[typeId] ?? '';
+      if (name.includes('Turret') || name.includes('turret') || name.includes('Pillbox')) turretCount++;
+      if (name.includes('Refinery')) refineryCount++;
     }
 
-    // --- Repair damaged buildings every ~200 ticks (8 seconds) ---
-    if (t % 200 === 50 && this.harvestSystem) {
-      this.repairBuildings(world);
+    // Enforce NumBuildings cap
+    if (totalBuildings >= tp.numBuildings + 5) return; // Allow some slack over the cap
+
+    // StartScript phase: follow the original build order sequence
+    if (this.startScriptPhase < params.startScript.length) {
+      const category = params.startScript[this.startScriptPhase];
+      const built = this.buildFromCategory(category, px, solaris);
+      if (built) this.startScriptPhase++;
+      return;
     }
 
-    // --- Economy management every ~150 ticks (6 seconds) ---
-    if (t % 150 === 75 && this.production && this.harvestSystem) {
-      this.manageEconomy(world);
+    // Post-startup: weighted random from building ratios
+    // Also handle upgrades first
+    if (solaris > 800) {
+      const allBuildings = [`${px}Factory`, `${px}Barracks`, `${px}ConYard`, `${px}Hanger`];
+      for (const bType of allBuildings) {
+        if (this.production.canUpgrade(this.playerId, bType)) {
+          this.production.startUpgrade(this.playerId, bType);
+          return;
+        }
+      }
     }
+
+    // Turret cap enforcement
+    const techLevel = Math.max(1, Math.min(8, this.production.getPlayerTechLevel(this.playerId)));
+    const turretCap = techLevel < 5 ? params.maxTurretsAtLowTech : tp.maxTurretsAllowed;
+
+    // Weighted random category selection
+    const ratios = params.buildingRatios;
+    const totalWeight = ratios.core + ratios.defence + ratios.manufacturing + ratios.resource;
+    let roll = simRng.random() * totalWeight;
+
+    let category: string;
+    if ((roll -= ratios.manufacturing) < 0) category = 'Manufacturing';
+    else if ((roll -= ratios.resource) < 0) category = 'Resource';
+    else if ((roll -= ratios.core) < 0) category = 'Core';
+    else category = 'Defence';
+
+    // Defence category: build turrets if under cap and tech allows
+    if (category === 'Defence') {
+      if (techLevel < params.firstTechLevelToBuildTurrets || turretCount >= turretCap) {
+        // Swap to another useful category
+        category = refineryCount < params.maxRefineries ? 'Resource' : 'Manufacturing';
+      }
+    }
+
+    // Resource cap enforcement
+    if (category === 'Resource' && refineryCount >= params.maxRefineries) {
+      category = 'Manufacturing';
+    }
+
+    this.buildFromCategory(category, px, solaris);
+  }
+
+  /** Build a building from a category. Returns true if production was started. */
+  private buildFromCategory(category: string, px: string, solaris: number): boolean {
+    if (!this.production) return false;
+
+    const candidates: string[] = [];
+    switch (category) {
+      case 'Resource':
+        candidates.push(`${px}Refinery`);
+        break;
+      case 'Manufacturing':
+        candidates.push(`${px}Factory`, `${px}Barracks`, `${px}Hanger`, `${px}Starport`);
+        break;
+      case 'Core':
+        candidates.push(`${px}Outpost`, `${px}SmWindtrap`, `${px}Palace`);
+        if (this.subhousePrefix) {
+          const subBuildings: Record<string, string[]> = {
+            'FR': ['FRFremenCamp'], 'IM': ['IMBarracks'], 'IX': ['IXResCentre'],
+            'TL': ['TLFleshVat'], 'GU': ['GUPalace'],
+          };
+          candidates.push(...(subBuildings[this.subhousePrefix] ?? []));
+        }
+        break;
+      case 'Defence':
+        candidates.push(
+          `${px}GunTurret`, `${px}RocketTurret`, `${px}Turret`,
+          `${px}Flameturret`, `${px}Gasturret`, `${px}PopUpTurret`, `${px}Pillbox`,
+        );
+        break;
+    }
+
+    for (const name of candidates) {
+      const def = this.rules.buildings.get(name);
+      if (!def) continue;
+      if (def.cost > solaris) continue;
+      if (this.production.canBuild(this.playerId, name, true)) {
+        this.production.startProduction(this.playerId, name, true);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Train units using original data parameters */
+  private trainUnitsOriginal(_world: World, data: OriginalAIData, tp: TechLevelParams): void {
+    if (!this.production || !this.harvestSystem) return;
+
+    const solaris = this.harvestSystem.getSolaris(this.playerId);
+    if (solaris < 200) return;
+
+    // Count current units
+    const unitCount = this.countOwnedUnits();
+    if (unitCount >= tp.maxAiUnits) return;
+
+    // Use original unit ratios: Foot:20, Tank:80
+    const ratios = data.strategyParams.unitRatios;
+    const totalWeight = ratios.foot + ratios.tank;
+    const roll = simRng.random() * totalWeight;
+
+    let pool: string[];
+    if (roll < ratios.foot) {
+      pool = this.infantryPool.length > 0 ? this.infantryPool : this.unitPool;
+    } else {
+      pool = this.vehiclePool.length > 0 ? this.vehiclePool : this.unitPool;
+    }
+    if (pool.length === 0) pool = this.unitPool;
+    if (pool.length === 0) return;
+
+    // Filter to buildable units
+    const buildable = pool.filter(name => this.production!.canBuild(this.playerId, name, false));
+    if (buildable.length === 0) {
+      const anyBuildable = this.unitPool.filter(name => this.production!.canBuild(this.playerId, name, false));
+      if (anyBuildable.length === 0) return;
+      const typeName = anyBuildable[Math.floor(simRng.random() * anyBuildable.length)];
+      this.production.startProduction(this.playerId, typeName, false);
+      return;
+    }
+
+    const typeName = buildable[Math.floor(simRng.random() * buildable.length)];
+    this.production.startProduction(this.playerId, typeName, false);
+  }
+
+  /** Count owned living units (fallback when production system doesn't expose the method) */
+  private countOwnedUnits(): number {
+    if (!this.currentWorld) return 0;
+    const units = unitQuery(this.currentWorld);
+    let count = 0;
+    for (const eid of units) {
+      if (Owner.playerId[eid] === this.playerId && Health.current[eid] > 0) count++;
+    }
+    return count;
+  }
+
+  /** Try to launch a strategy script using the StrategyRunner */
+  private tryLaunchStrategyScript(world: World, techLevel: number, tp: TechLevelParams): void {
+    if (!this.strategyRunner) return;
+
+    // Gather available units grouped by type name
+    const availableUnits = new Map<string, number[]>();
+    const units = unitQuery(world);
+    const stratAssigned = this.strategyRunner.getAssignedUnits();
+
+    for (const eid of units) {
+      if (Owner.playerId[eid] !== this.playerId) continue;
+      if (Health.current[eid] <= 0) continue;
+      if (hasComponent(world, Harvester, eid)) continue;
+      if (this.scoutEntities.has(eid)) continue;
+      if (this.defenders.has(eid)) continue;
+      if (this.specialEntities.has(eid)) continue;
+      if (stratAssigned.has(eid)) continue;
+
+      const typeName = this.getUnitTypeName(eid);
+      if (!typeName) continue;
+
+      let arr = availableUnits.get(typeName);
+      if (!arr) { arr = []; availableUnits.set(typeName, arr); }
+      arr.push(eid);
+    }
+
+    const worldView = this.createStrategyWorldView(world);
+    this.strategyRunner.tryLaunchStrategy(
+      worldView, techLevel,
+      { x: this.baseX, z: this.baseZ },
+      { x: this.targetX, z: this.targetZ },
+      availableUnits,
+      this.tickCounter,
+      tp.maxScriptsToRunAtOnce,
+    );
+  }
+
+  /** Create a StrategyWorldView adapter for the StrategyRunner */
+  private createStrategyWorldView(world: World): StrategyWorldView {
+    const combatSystem = this.combatSystem;
+    return {
+      getUnitPosition(eid: number) {
+        if (Health.current[eid] <= 0) return null;
+        return { x: Position.x[eid], z: Position.z[eid] };
+      },
+      getUnitHealth(eid: number) {
+        return Health.current[eid] ?? 0;
+      },
+      isUnitAlive(eid: number) {
+        return (Health.current[eid] ?? 0) > 0;
+      },
+      moveUnit(eid: number, x: number, z: number) {
+        MoveTarget.x[eid] = x;
+        MoveTarget.z[eid] = z;
+        MoveTarget.active[eid] = 1;
+      },
+      setAttackMove(eids: number[]) {
+        combatSystem.setAttackMove(eids);
+      },
+    };
   }
 
   // ==========================================
@@ -1776,41 +2133,69 @@ export class AIPlayer implements GameSystem {
   }
 
   private manageArmy(world: World): void {
+    if (this.playerId === 0) {
+      console.log(`[Agent Army] manageArmy called tick=${this.tickCounter} override=${this.behaviorOverride}`);
+    }
     const units = unitQuery(world);
     const idleUnits: number[] = [];
     const nearBaseUnits: number[] = [];
     let totalUnits = 0;
 
+    // In original mode, also skip strategy-assigned units
+    const stratAssigned = this.strategyRunner?.getAssignedUnits();
+
     for (const eid of units) {
       if (Owner.playerId[eid] !== this.playerId) continue;
       if (Health.current[eid] <= 0) continue;
-      // Skip harvesters
       if (hasComponent(world, Harvester, eid)) continue;
-      // Skip scouts - they have their own orders
       if (this.scoutEntities.has(eid)) continue;
-      // Skip special units (engineers, saboteurs, etc.) - they have their own deployment
       if (this.specialEntities.has(eid)) continue;
+      if (stratAssigned?.has(eid)) continue;
       totalUnits++;
 
       if (MoveTarget.active[eid] === 0) {
         idleUnits.push(eid);
-        // Check if near base (wider radius for larger armies)
         const dist = distance2D(Position.x[eid], Position.z[eid], this.baseX, this.baseZ);
         if (dist < 60) nearBaseUnits.push(eid);
       }
     }
 
-    // Scale max defenders with difficulty
-    const scaledMaxDefenders = Math.max(2, Math.floor(this.maxDefenders * this.difficulty * this.defenseBias));
+    // Clean stale defenders (dead or no longer near base)
+    const nearBaseSet = new Set(nearBaseUnits);
+    for (const eid of this.defenders) {
+      if (Health.current[eid] <= 0 || !nearBaseSet.has(eid)) {
+        this.defenders.delete(eid);
+      }
+    }
+
+    // Defender count: use original data percentage when available
+    let scaledMaxDefenders: number;
+    if (this.originalData && this.currentTechParams) {
+      const pct = this.originalData.strategyParams.percentageOfUnitsForDefence / 100;
+      const rawDef = Math.floor(totalUnits * pct);
+      scaledMaxDefenders = Math.max(
+        this.currentTechParams.minimumUnitsForDefence,
+        Math.min(this.currentTechParams.maximumUnitsForDefence, rawDef),
+      );
+    } else {
+      const rawMaxDefenders = Math.max(2, Math.floor(this.maxDefenders * this.difficulty * this.defenseBias));
+      scaledMaxDefenders = Math.min(rawMaxDefenders, Math.floor(nearBaseUnits.length * 0.4));
+    }
 
     // Ensure we have some defenders near base
-    if (this.defenders.size < scaledMaxDefenders && nearBaseUnits.length > scaledMaxDefenders) {
+    if (this.defenders.size < scaledMaxDefenders) {
       for (const eid of nearBaseUnits) {
         if (this.defenders.size >= scaledMaxDefenders) break;
         if (!this.defenders.has(eid)) {
           this.defenders.add(eid);
         }
       }
+    }
+    // Prune excess defenders
+    while (this.defenders.size > scaledMaxDefenders) {
+      const first = this.defenders.values().next().value;
+      if (first !== undefined) this.defenders.delete(first);
+      else break;
     }
 
     // Apply behavior override from mission scripts
@@ -1830,6 +2215,27 @@ export class AIPlayer implements GameSystem {
       return; // Skip attack logic entirely
     }
 
+    // In original data mode, attacks are handled by StrategyRunner — skip heuristic attack waves
+    // but still rally idle units toward base front
+    if (this.originalData) {
+      if (idleUnits.length > 0) {
+        const toTargetX = this.targetX - this.baseX;
+        const toTargetZ = this.targetZ - this.baseZ;
+        const tDist = Math.sqrt(toTargetX * toTargetX + toTargetZ * toTargetZ) || 1;
+        const rallyDirX = toTargetX / tDist;
+        const rallyDirZ = toTargetZ / tDist;
+        for (const eid of idleUnits) {
+          if (this.defenders.has(eid)) continue;
+          const rallyX = this.baseX + rallyDirX * 15 + randomFloat(-8, 8);
+          const rallyZ = this.baseZ + rallyDirZ * 15 + randomFloat(-8, 8);
+          MoveTarget.x[eid] = rallyX;
+          MoveTarget.z[eid] = rallyZ;
+          MoveTarget.active[eid] = 1;
+        }
+      }
+      return;
+    }
+
     // Dynamic attack threshold: higher difficulty = attack sooner with fewer units
     const attackThreshold = Math.max(2, Math.floor(this.attackGroupSize / (this.difficulty * this.aggressionBias * behaviorAggMult)));
     const effectiveAttackCooldown = Math.max(150, Math.floor(this.attackCooldown / (this.aggressionBias * behaviorAggMult)));
@@ -1838,8 +2244,16 @@ export class AIPlayer implements GameSystem {
     // Filter out designated defenders from attack group
     const attackableUnits = nearBaseUnits.filter(eid => !this.defenders.has(eid));
 
+    // Debug: log army state for player 0 (agent)
+    if (this.playerId === 0 && this.tickCounter % 300 === 0) {
+      console.log(`[Agent Army] total=${totalUnits} idle=${idleUnits.length} nearBase=${nearBaseUnits.length} attackable=${attackableUnits.length} threshold=${attackThreshold} canAttack=${canAttack} defenders=${this.defenders.size} override=${this.behaviorOverride}`);
+    }
+
     if (attackableUnits.length >= attackThreshold && canAttack) {
       this.lastAttackTick = this.tickCounter;
+      if (this.playerId === 0) {
+        console.log(`[Agent] ATTACKING with ${attackableUnits.length} units → target (${this.targetX.toFixed(0)}, ${this.targetZ.toFixed(0)})`);
+      }
 
       // Hard difficulty: split off 2-3 fast units for harvester harassment
       let harassUnits: number[] = [];
@@ -2137,9 +2551,9 @@ export class AIPlayer implements GameSystem {
     // Need at least 3 units for a meaningful counterattack
     if (attackForce.length < 3) return;
 
-    // Keep some defenders behind (half of scaled maxDefenders)
-    const scaledMaxDefenders = Math.max(2, Math.floor(this.maxDefenders * this.difficulty * this.defenseBias));
-    const keepBack = Math.floor(scaledMaxDefenders / 2);
+    // Keep some defenders behind (half of scaled maxDefenders, capped at 40% of force)
+    const rawMaxDef = Math.max(2, Math.floor(this.maxDefenders * this.difficulty * this.defenseBias));
+    const keepBack = Math.min(Math.floor(rawMaxDef / 2), Math.floor(attackForce.length * 0.4));
     this.defenders.clear();
     for (let i = 0; i < keepBack && i < attackForce.length; i++) {
       this.defenders.add(attackForce[i]);

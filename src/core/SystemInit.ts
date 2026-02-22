@@ -6,6 +6,7 @@ import type { MissionConfigData } from '../campaign/MissionConfig';
 import type { MissionRuntimeSettings } from '../campaign/MissionRuntime';
 import type { GameContext } from './GameContext';
 import type { TypeRegistry } from './TypeRegistry';
+import type { OriginalAIData } from '../ai/OriginalAIData';
 import { Game } from './Game';
 import { SceneManager } from '../rendering/SceneManager';
 import { TerrainRenderer, TerrainType } from '../rendering/TerrainRenderer';
@@ -60,6 +61,7 @@ export interface SystemInitConfig {
   activeMissionConfig: MissionConfigData | null;
   activeMapId: string | null;
   missionRuntime: MissionRuntimeSettings | null;
+  originalAIData?: OriginalAIData | null;
 }
 
 export function initializeSystems(config: SystemInitConfig): GameContext {
@@ -265,6 +267,13 @@ export function initializeSystems(config: SystemInitConfig): GameContext {
     productionSystem.setDifficulty(1, ai1Difficulty, true);
   }
 
+  // Wire original AI data to enemy AIs (player 0 agent keeps heuristic mode)
+  if (config.originalAIData) {
+    for (const ai of aiPlayers) {
+      ai.useOriginalData(config.originalAIData);
+    }
+  }
+
   // Shared mutable state
   const aircraftAmmo = new Map<number, number>();
   const rearmingAircraft = new Set<number>();
@@ -459,6 +468,7 @@ export function initializeSystems(config: SystemInitConfig): GameContext {
     sandwormSystem, abilitySystem, superweaponSystem, wallSystem,
     audioManager, buildingPlacement, victorySystem, gameStats,
     selectionPanel, sidebar, iconRenderer, aiPlayers,
+    agentAI: null,
 
     missionScriptRunner: null,
 

@@ -29,17 +29,34 @@ import { hasComponent, Harvester, Owner, Position, BuildingType as BT, buildingQ
 import { loadDisplayNames } from './config/DisplayNames';
 import { isAgentMode, getAgentConfig, pickTerritoryWithContext, startAgent, stopAgent } from './ai/CampaignAgent';
 import { AIPlayer } from './ai/AIPlayer';
+import { startConsoleCapture, createTelemetrySystem } from './ai/AgentTelemetry';
+import { loadOriginalAIData } from './ai/OriginalAIData';
 
 async function main() {
-  // Check for ?agent=XX URL param to start agent mode
+  // Check for ?agent=XX URL param to start agent mode (without reload)
   const urlParams = new URLSearchParams(window.location.search);
-  const agentParam = urlParams.get('agent');
-  if (agentParam && !isAgentMode()) {
-    startAgent(agentParam);
-    return;
+  const agentParam = urlParams.get('agent')?.toUpperCase();
+
+  // Start console capture ASAP so loading errors are captured
+  if (agentParam || isAgentMode()) {
+    startConsoleCapture();
+  }
+
+  if (agentParam && (agentParam === 'AT' || agentParam === 'HK' || agentParam === 'OR')) {
+    // Always force-set config when URL param is present
+    if (!isAgentMode()) {
+      localStorage.removeItem('ebfd_campaign');
+      localStorage.removeItem('ebfd_campaign_next');
+    }
+    localStorage.setItem('ebfd_agent', JSON.stringify({
+      house: agentParam, strategy: 'balanced', civilWarChoice: 'copec',
+      missionCount: getAgentConfig()?.missionCount ?? 0,
+    }));
+    console.log(`[Agent] Activated via URL param: House ${agentParam}`);
   }
   const isAgent = isAgentMode();
   const agentConfig = getAgentConfig();
+  if (isAgent) console.log('[Agent] Mode detected. Config:', JSON.stringify(agentConfig));
   console.log('Emperor: Battle for Dune - Initializing...');
   updateLoading(5, 'Loading game data...');
 
@@ -58,6 +75,12 @@ async function main() {
 
   // Load extracted game data (display names, etc.) — non-blocking
   loadDisplayNames();
+
+  // Load original AI data files in background (non-blocking)
+  const originalAIDataPromise = loadOriginalAIData().catch(err => {
+    console.warn('[OriginalAI] Failed to load AI data:', err);
+    return null;
+  });
 
   // Build type registries
   const typeRegistry = buildTypeRegistries(gameRules);
@@ -126,6 +149,8 @@ async function main() {
     if (loadScreen) loadScreen.style.display = 'flex';
   } else if (isAgent && agentConfig) {
     // --- AGENT MODE: bypass all UI ---
+    console.log('[Agent] Entering agent mode bypass. Config:', agentConfig);
+    try {
     await loadCampaignStrings();
     await loadPhaseRules();
 
@@ -197,6 +222,11 @@ async function main() {
 
     const loadScreenEl = document.getElementById('loading-screen');
     if (loadScreenEl) loadScreenEl.style.display = 'flex';
+    } catch (err) {
+      console.error('[Agent] Error in agent startup, falling back to manual:', err);
+      stopAgent();
+      return;
+    }
   } else {
     const loadScreenEl = document.getElementById('loading-screen');
     const uiOverlay = document.getElementById('ui-overlay');
@@ -271,6 +301,7 @@ async function main() {
   audioManager.setPlayerFaction(house.prefix);
   audioManager.startGameMusic();
   audioManager.startAmbientWind();
+  if (isAgent) audioManager.toggleMute();
 
   // Ensure renderer exists
   if (!sharedRenderer) {
@@ -323,6 +354,9 @@ async function main() {
   // --- INITIALIZE ALL SYSTEMS ---
   updateLoading(30, 'Initializing game systems...');
 
+  // Await original AI data (loaded in background during house selection)
+  const originalAIData = await originalAIDataPromise;
+
   // Seed deterministic RNG before system init so storm timer etc. use correct seed
   // Hash map ID string into a numeric seed (simple DJB2 hash)
   let mapIdSeed = activeMapId ? 5381 : 0;
@@ -337,7 +371,7 @@ async function main() {
   const ctx = initializeSystems({
     gameRules, artMap, typeRegistry, house, audioManager,
     sharedRenderer,
-    activeMissionConfig, activeMapId, missionRuntime,
+    activeMissionConfig, activeMapId, missionRuntime, originalAIData,
   });
 
   // Wire campaign callbacks to victory system
@@ -727,7 +761,46 @@ async function main() {
 
   // --- AGENT MODE: add AIPlayer for player 0 ---
   if (isAgent && agentConfig) {
-    const agentAI = new AIPlayer(gameRules, ctx.combatSystem, 0, 200, 200, 60, 60);
+    // Use the same spawn positions as the enemy AI — read from the existing AI players
+    // AI player 0 (enemy) targets the player base and has its own base position.
+    // Our agent is the reverse: base = where AI targets (player base), target = AI's base.
+    let agentBaseX = 128, agentBaseZ = 128;
+    let agentTargetX = 64, agentTargetZ = 64;
+
+    // Read ConYard positions from spawned entities
+    const agentWorld = ctx.game.getWorld();
+    const agentBuildings = buildingQuery(agentWorld);
+    let foundBase = false, foundTarget = false;
+    for (const eid of agentBuildings) {
+      const bName = typeRegistry.buildingTypeNames[BT.id[eid]] ?? '';
+      if (!bName.includes('ConYard')) continue;
+      const px = Position.x[eid], pz = Position.z[eid];
+      const owner = Owner.playerId[eid];
+      console.log(`[Agent] Found ConYard: ${bName} owner=${owner} pos=(${px}, ${pz})`);
+      if (owner === 0 && !foundBase) {
+        agentBaseX = px;
+        agentBaseZ = pz;
+        foundBase = true;
+      } else if (owner !== 0 && !foundTarget) {
+        agentTargetX = px;
+        agentTargetZ = pz;
+        foundTarget = true;
+      }
+    }
+    // Fallback: read enemy AI's base position directly
+    if (!foundTarget && ctx.aiPlayers.length > 0) {
+      const enemyBase = ctx.aiPlayers[0].getBasePosition();
+      agentTargetX = enemyBase.x;
+      agentTargetZ = enemyBase.z;
+      foundTarget = true;
+      console.log(`[Agent] Using enemy AI base position as target: (${enemyBase.x}, ${enemyBase.z})`);
+    }
+    if (!foundBase) console.warn('[Agent] WARNING: Could not find player 0 ConYard!');
+    if (!foundTarget) console.warn('[Agent] WARNING: Could not find any enemy target!');
+
+    console.log(`[Agent] Base: (${agentBaseX}, ${agentBaseZ}), Target: (${agentTargetX}, ${agentTargetZ})`);
+
+    const agentAI = new AIPlayer(gameRules, ctx.combatSystem, 0, agentBaseX, agentBaseZ, agentTargetX, agentTargetZ);
     agentAI.setUnitPool(house.prefix);
     agentAI.setDifficulty('hard');
     agentAI.setPersonality(2); // balanced
@@ -742,30 +815,8 @@ async function main() {
       ctx.spawnUnit(w, typeName, owner, x, z);
     });
 
-    // Find player 0's ConYard to set base position
-    const agentWorld = ctx.game.getWorld();
-    const agentBuildings = buildingQuery(agentWorld);
-    for (const eid of agentBuildings) {
-      if (Owner.playerId[eid] === 0) {
-        const bName = typeRegistry.buildingTypeNames[BT.id[eid]] ?? '';
-        if (bName.includes('ConYard')) {
-          agentAI.setBasePosition(Position.x[eid], Position.z[eid]);
-          break;
-        }
-      }
-    }
-    // Set target to nearest enemy base
-    for (const eid of agentBuildings) {
-      if (Owner.playerId[eid] !== 0) {
-        const bName = typeRegistry.buildingTypeNames[BT.id[eid]] ?? '';
-        if (bName.includes('ConYard')) {
-          agentAI.setTargetPosition(Position.x[eid], Position.z[eid]);
-          break;
-        }
-      }
-    }
-
     ctx.game.addSystem(agentAI);
+    ctx.agentAI = agentAI;
 
     // Agent UI: disable fog, show label
     ctx.fogOfWar.setEnabled(false);
@@ -774,6 +825,10 @@ async function main() {
     agentLabel.style.cssText = 'position:fixed;top:8px;left:50%;transform:translateX(-50%);color:#f0c040;font-size:14px;font-family:inherit;z-index:100;pointer-events:none;text-shadow:0 1px 3px #000;letter-spacing:2px;';
     agentLabel.textContent = `[AGENT] ${house.name} — Mission ${agentConfig.missionCount + 1}`;
     document.body.appendChild(agentLabel);
+
+    // Agent telemetry: report game state to telemetry server + document.title
+    const telemetry = createTelemetrySystem(ctx, agentConfig);
+    ctx.game.addSystem(telemetry);
 
     console.log(`[Agent] Mission started. Playing as ${house.name} | Territory: ${house.campaignTerritoryId}`);
   }
@@ -812,6 +867,7 @@ async function main() {
   }
 
   // --- START ---
+  if (isAgent) ctx.game.setHeadless(true); // Use setInterval for background-tab-safe ticking
   ctx.game.start();
   updateLoading(100, 'Ready!');
   setTimeout(() => {
@@ -835,18 +891,21 @@ async function main() {
         const outcome = ctx.victorySystem.getOutcome();
         if (outcome !== 'playing') {
           agentFired = true;
-          console.log(`[Agent] Mission ${outcome}. Auto-continuing in 3s...`);
-          setTimeout(() => {
+          console.log(`[Agent] Mission ${outcome}. Auto-clicking continue in 3s...`);
+          const tryClick = (attempts: number) => {
             const btn = [...document.querySelectorAll('button')]
               .find(b => b.textContent === 'Continue Campaign');
             if (btn) {
               btn.click();
+            } else if (attempts > 0) {
+              // Retry — victory screen may not have rendered yet
+              setTimeout(() => tryClick(attempts - 1), 1000);
             } else {
-              // Fallback: trigger campaign continue directly
-              console.log('[Agent] Continue button not found, reloading...');
+              console.error('[Agent] Continue button not found after retries, reloading...');
               window.location.reload();
             }
-          }, 3000);
+          };
+          setTimeout(() => tryClick(5), 3000);
         }
       },
     });
