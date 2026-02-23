@@ -64,9 +64,15 @@ export function spawnFreshGame(ctx: GameContext): void {
     ctx.spawnBuilding(world, `${px}Factory`, 0, playerBase.x, playerBase.z + 6);
     ctx.spawnBuilding(world, `${px}Refinery`, 0, playerBase.x + 6, playerBase.z + 6);
 
-    // Starting player units
-    const playerInfantry = [...gameRules.units.keys()].filter(n => n.startsWith(px) && gameRules.units.get(n)?.infantry);
-    const playerVehicles = [...gameRules.units.keys()].filter(n => n.startsWith(px) && !gameRules.units.get(n)?.infantry && gameRules.units.get(n)!.cost > 0);
+    // Starting player units — exclude campaign-only (aiSpecial), high-tech, and flying
+    const playerInfantry = [...gameRules.units.keys()].filter(n => {
+      const def = gameRules.units.get(n);
+      return n.startsWith(px) && def?.infantry && !def.aiSpecial && def.techLevel <= 2;
+    });
+    const playerVehicles = [...gameRules.units.keys()].filter(n => {
+      const def = gameRules.units.get(n);
+      return n.startsWith(px) && def && !def.infantry && def.cost > 0 && !def.aiSpecial && def.techLevel <= 2 && !def.canFly;
+    });
 
     for (let i = 0; i < 3 && i < playerInfantry.length; i++) {
       ctx.spawnUnit(world, playerInfantry[i], 0, playerBase.x - 5 + i * 2, playerBase.z + 10);
@@ -110,8 +116,14 @@ export function spawnFreshGame(ctx: GameContext): void {
     ctx.spawnBuilding(world, `${ex}SmWindtrap`, owner, aiBase.x + 6, aiBase.z + 6);
     ctx.spawnBuilding(world, `${ex}Refinery`, owner, aiBase.x - 6, aiBase.z + 6);
 
-    const enemyInfantry = [...gameRules.units.keys()].filter(n => n.startsWith(ex) && gameRules.units.get(n)?.infantry);
-    const enemyVehicles = [...gameRules.units.keys()].filter(n => n.startsWith(ex) && !gameRules.units.get(n)?.infantry && gameRules.units.get(n)!.cost > 0 && !gameRules.units.get(n)!.canFly);
+    const enemyInfantry = [...gameRules.units.keys()].filter(n => {
+      const def = gameRules.units.get(n);
+      return n.startsWith(ex) && def?.infantry && !def.aiSpecial && def.techLevel <= 2;
+    });
+    const enemyVehicles = [...gameRules.units.keys()].filter(n => {
+      const def = gameRules.units.get(n);
+      return n.startsWith(ex) && def && !def.infantry && def.cost > 0 && !def.canFly && !def.aiSpecial && def.techLevel <= 2;
+    });
 
     for (let j = 0; j < 3 && j < enemyInfantry.length; j++) {
       ctx.spawnUnit(world, enemyInfantry[j], owner, aiBase.x - 5 + j * 2, aiBase.z + 10);

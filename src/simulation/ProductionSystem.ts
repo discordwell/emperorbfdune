@@ -355,6 +355,13 @@ export class ProductionSystem {
   getBuildBlockReason(playerId: number, typeName: string, isBuilding: boolean): { reason: 'cost' | 'prereq' | 'tech' | 'cap'; detail: string } | null {
     const def = isBuilding ? this.rules.buildings.get(typeName) : this.rules.units.get(typeName);
     if (!def) return { reason: 'prereq', detail: 'Unknown type' };
+
+    // Campaign-only units (aiSpecial) are never player-buildable.
+    // In campaign, .tok scripts spawn them directly via NewObject().
+    if (!isBuilding && (def as UnitDef).aiSpecial) {
+      return { reason: 'prereq', detail: 'Campaign only' };
+    }
+
     const owned = this.playerBuildings.get(playerId);
     const hasReq = (name: string) => owned && owned.has(name) && (owned.get(name) ?? 0) > 0;
 

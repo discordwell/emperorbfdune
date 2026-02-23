@@ -381,6 +381,7 @@ export class Sidebar {
     for (const [name, def] of this.rules.units) {
       if (!this.hasValidPrefix(name)) continue;
       if (def.cost <= 0) continue;
+      if (def.aiSpecial) continue;
       if (infantryOnly && !def.infantry) continue;
       if (!infantryOnly && def.infantry) continue;
       units.push({ name, def });

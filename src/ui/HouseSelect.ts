@@ -247,26 +247,41 @@ export class HouseSelect {
       try {
         const next = JSON.parse(nextMission);
         const state = JSON.parse(campaignState);
-        const houseMap: Record<string, { name: string; enemyPrefix: string; enemyName: string }> = {
-          'AT': { name: 'Atreides', enemyPrefix: 'HK', enemyName: 'Harkonnen' },
-          'HK': { name: 'Harkonnen', enemyPrefix: 'AT', enemyName: 'Atreides' },
-          'OR': { name: 'Ordos', enemyPrefix: 'HK', enemyName: 'Harkonnen' },
-        };
-        const info = houseMap[state.housePrefix] ?? houseMap['AT'];
-        return {
-          id: state.housePrefix.toLowerCase(),
-          name: info.name,
-          prefix: state.housePrefix,
-          color: '#f0c040',
-          description: '',
-          enemyPrefix: state.enemyPrefix ?? info.enemyPrefix,
-          enemyName: state.enemyHouse ?? info.enemyName,
-          difficulty: next.difficulty ?? 'normal',
-          gameMode: 'campaign',
-          campaignTerritoryId: next.territoryId,
-          mapChoice: { id: `campaign-${next.territoryId}`, name: 'Campaign Mission', seed: next.mapSeed, description: '' },
-        };
-      } catch { /* fall through to normal menu */ }
+
+        // Validate required fields to prevent stale/malformed data from bypassing picker
+        const validPrefixes = ['AT', 'HK', 'OR'];
+        if (typeof next.territoryId !== 'number' ||
+            typeof state.housePrefix !== 'string' ||
+            !validPrefixes.includes(state.housePrefix)) {
+          localStorage.removeItem('ebfd_campaign_next');
+          localStorage.removeItem('ebfd_campaign');
+          // fall through to normal menu
+        } else {
+          const houseMap: Record<string, { name: string; enemyPrefix: string; enemyName: string }> = {
+            'AT': { name: 'Atreides', enemyPrefix: 'HK', enemyName: 'Harkonnen' },
+            'HK': { name: 'Harkonnen', enemyPrefix: 'AT', enemyName: 'Atreides' },
+            'OR': { name: 'Ordos', enemyPrefix: 'HK', enemyName: 'Harkonnen' },
+          };
+          const info = houseMap[state.housePrefix]!;
+          return {
+            id: state.housePrefix.toLowerCase(),
+            name: info.name,
+            prefix: state.housePrefix,
+            color: '#f0c040',
+            description: '',
+            enemyPrefix: state.enemyPrefix ?? info.enemyPrefix,
+            enemyName: state.enemyHouse ?? info.enemyName,
+            difficulty: next.difficulty ?? 'normal',
+            gameMode: 'campaign',
+            campaignTerritoryId: next.territoryId,
+            mapChoice: { id: `campaign-${next.territoryId}`, name: 'Campaign Mission', seed: next.mapSeed, description: '' },
+          };
+        }
+      } catch {
+        localStorage.removeItem('ebfd_campaign_next');
+        localStorage.removeItem('ebfd_campaign');
+        /* fall through to normal menu */
+      }
     }
 
     this.audioManager.playMenuMusic();
