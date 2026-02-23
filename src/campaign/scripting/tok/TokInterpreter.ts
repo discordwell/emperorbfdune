@@ -40,6 +40,16 @@ export class TokInterpreter {
     this.scriptId = scriptId;
     this.ctx = ctx;
 
+    // Derive house prefix from script ID for message lookups
+    const upper = scriptId.toUpperCase();
+    if (upper.startsWith('HK')) {
+      this.functions.setHousePrefix('HK');
+    } else if (upper.startsWith('OR')) {
+      this.functions.setHousePrefix('OR');
+    } else {
+      this.functions.setHousePrefix('AT');
+    }
+
     // Build string table from type registry
     const stringTable = buildStringTable(ctx.typeRegistry);
     this.functions.setStringTable(stringTable);

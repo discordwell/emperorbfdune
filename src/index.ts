@@ -6,7 +6,7 @@ import { AudioManager } from './audio/AudioManager';
 import { HouseSelect, type HouseChoice, type GameMode, type Difficulty } from './ui/HouseSelect';
 import { loadMap, loadMapManifest, getMapMetadata, getCampaignMapId, getSpecialMissionMapId } from './config/MapLoader';
 import { CampaignMap } from './ui/CampaignMap';
-import { loadCampaignStrings, type HousePrefix, JUMP_POINTS, getForcedMission } from './campaign/CampaignData';
+import { loadCampaignStrings, loadMissionMessages, type HousePrefix, JUMP_POINTS, getForcedMission } from './campaign/CampaignData';
 import { CampaignPhaseManager, loadPhaseRules } from './campaign/CampaignPhaseManager';
 import { SubHouseSystem, type AllianceSubHouse } from './campaign/SubHouseSystem';
 import { showMissionBriefing } from './ui/MissionBriefing';
@@ -144,7 +144,7 @@ async function main() {
       subhouse: savedGame.subhouse,
     };
 
-    if (house.gameMode === 'campaign') { await loadCampaignStrings(); await loadPhaseRules(); }
+    if (house.gameMode === 'campaign') { await loadCampaignStrings(); await loadMissionMessages(); await loadPhaseRules(); }
     const loadScreen = document.getElementById('loading-screen');
     if (loadScreen) loadScreen.style.display = 'flex';
   } else if (isAgent && agentConfig) {
@@ -152,6 +152,7 @@ async function main() {
     console.log('[Agent] Entering agent mode bypass. Config:', agentConfig);
     try {
     await loadCampaignStrings();
+    await loadMissionMessages();
     await loadPhaseRules();
 
     const nextMission = localStorage.getItem('ebfd_campaign_next');
@@ -236,7 +237,7 @@ async function main() {
     house = await houseSelect.show();
     if (uiOverlay) uiOverlay.style.display = '';
 
-    if (house.gameMode === 'campaign') { await loadCampaignStrings(); await loadPhaseRules(); }
+    if (house.gameMode === 'campaign') { await loadCampaignStrings(); await loadMissionMessages(); await loadPhaseRules(); }
 
     // Show mission briefing for campaign mode
     if (house.gameMode === 'campaign' && house.campaignTerritoryId !== undefined) {

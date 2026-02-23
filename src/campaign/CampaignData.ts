@@ -345,6 +345,26 @@ export const SECOND_SCORE_BADGE: Record<HousePrefix, HousePrefix> = {
   OR: 'HK',
 };
 
+// ── Mission Messages ──────────────────────────────────────────────
+
+let _missionMessages: Record<string, Record<string, string>> | null = null;
+
+/** Load per-house mission messages from JSON. Cached after first load. */
+export async function loadMissionMessages(): Promise<void> {
+  if (_missionMessages) return;
+  try {
+    const resp = await fetch('/assets/data/mission-messages.json');
+    _missionMessages = await resp.json();
+  } catch {
+    console.warn('[CampaignData] Failed to load mission-messages.json');
+  }
+}
+
+/** Get a mission message by house prefix and numeric ID. */
+export function getMissionMessage(house: string, msgId: number): string | undefined {
+  return _missionMessages?.[house]?.[String(msgId)];
+}
+
 // ── String Loading ─────────────────────────────────────────────────
 
 let _campaignStrings: Record<string, string> | null = null;

@@ -17,7 +17,7 @@ import {
   unitQuery, buildingQuery, UnitType, BuildingType, Veterancy,
   hasComponent, addComponent,
 } from '../../../core/ECS';
-import { getCampaignString } from '../../CampaignData';
+import { getCampaignString, getMissionMessage } from '../../CampaignData';
 import { EventBus } from '../../../core/EventBus';
 import { simRng } from '../../../utils/DeterministicRNG';
 import { TILE_SIZE, tileToWorld, worldToTile } from '../../../utils/MathUtils';
@@ -27,6 +27,7 @@ type CameraSpinState = { active: boolean; speed: number; direction: number };
 
 export class TokFunctionDispatch {
   private stringTable: string[] = [];
+  private housePrefix: string = 'AT';
   // Air strike tracking: strikeId → { units, targetX, targetZ }
   private airStrikes = new Map<number, { units: number[]; targetX: number; targetZ: number }>();
   // Tooltip storage (cosmetic, no UI hook yet)
@@ -46,6 +47,10 @@ export class TokFunctionDispatch {
 
   setStringTable(table: string[]): void {
     this.stringTable = table;
+  }
+
+  setHousePrefix(prefix: string): void {
+    this.housePrefix = prefix;
   }
 
   serialize(eidToIndex: Map<number, number>): TokDispatchSaveState {
@@ -238,18 +243,47 @@ export class TokFunctionDispatch {
         return { x: 0, z: 0 };
       }
 
-      case FUNC.GetEntrancePointByIndex:
+      case FUNC.GetEntrancePointByIndex: {
+        const idx = args.length > 0 ? asInt(args[0]) : 0;
+        return this.getEntrancePointByIndex(ctx, idx);
+      }
+
       case FUNC.GetEntranceNearToPos:
-      case FUNC.GetEntrancNearToPos:
-      case FUNC.GetEntranceFarFromPos:
-        return this.getNeutralEntrancePoint(ctx);
+      case FUNC.GetEntrancNearToPos: {
+        const pos = args.length > 0 && isPos(args[0]) ? asPos(args[0]) : this.getSidePosition(ctx, ev, 0);
+        return this.getEntranceNearToPos(ctx, pos);
+      }
+
+      case FUNC.GetEntranceFarFromPos: {
+        const pos = args.length > 0 && isPos(args[0]) ? asPos(args[0]) : this.getSidePosition(ctx, ev, 0);
+        return this.getEntranceFarFromPos(ctx, pos);
+      }
 
       case FUNC.GetIsolatedEntrance:
+        return this.getIsolatedEntrance(ctx, ev);
+
       case FUNC.GetHideOut:
-      case FUNC.GetConvoyWayPointFunction:
       case FUNC.GetValley:
-      case FUNC.GetIsolatedInfantryRock:
+      case FUNC.GetIsolatedInfantryRock: {
+        // Map script points (Script1-Script24 markers) — use first available
+        const meta = ctx.mapMetadata;
+        if (meta) {
+          for (const pt of meta.scriptPoints) {
+            if (pt) return { x: pt.x * TILE_SIZE, z: pt.z * TILE_SIZE };
+          }
+        }
         return this.getUnusedBasePoint(ctx);
+      }
+
+      case FUNC.GetConvoyWayPointFunction: {
+        // Convoy waypoints use AI waypoints from map metadata
+        const meta = ctx.mapMetadata;
+        if (meta && meta.aiWaypoints.length > 0) {
+          const wp = meta.aiWaypoints[simRng.int(0, meta.aiWaypoints.length - 1)];
+          return { x: wp.x * TILE_SIZE, z: wp.z * TILE_SIZE };
+        }
+        return this.getUnusedBasePoint(ctx);
+      }
 
       // -------------------------------------------------------------------
       // Side management
@@ -786,21 +820,27 @@ export class TokFunctionDispatch {
       // -------------------------------------------------------------------
       case FUNC.Message: {
         const msgId = asInt(args[0]);
-        const text = getCampaignString(`#${msgId}`) ?? `[Message ${msgId}]`;
+        const text = getMissionMessage(this.housePrefix, msgId)
+          ?? getCampaignString(`#${msgId}`)
+          ?? `[Message ${msgId}]`;
         ctx.selectionPanel.addMessage(text, '#ffcc44');
         return 0;
       }
 
       case FUNC.GiftingMessage: {
         const msgId = asInt(args[0]);
-        const text = getCampaignString(`#${msgId}`) ?? `[Message ${msgId}]`;
+        const text = getMissionMessage(this.housePrefix, msgId)
+          ?? getCampaignString(`#${msgId}`)
+          ?? `[Message ${msgId}]`;
         ctx.selectionPanel.addMessage(text, '#44ff44');
         return 0;
       }
 
       case FUNC.TimerMessage: {
         const msgId = asInt(args[0]);
-        const text = getCampaignString(`#${msgId}`) ?? `[Timer ${msgId}]`;
+        const text = getMissionMessage(this.housePrefix, msgId)
+          ?? getCampaignString(`#${msgId}`)
+          ?? `[Timer ${msgId}]`;
         ctx.selectionPanel.addMessage(text, '#ffaa00');
         return 0;
       }
@@ -989,9 +1029,16 @@ export class TokFunctionDispatch {
       // Victory / Defeat
       // -------------------------------------------------------------------
       case FUNC.MissionOutcome: {
-        const win = asInt(args[0]);
-        if (win) {
-          ctx.victorySystem.setVictoryCondition('survival');
+        // MissionOutcome(TRUE/FALSE): Called as a statement (never queried).
+        // TRUE = player wins, FALSE = player loses.
+        const val = asInt(args[0]);
+        if (val) {
+          // MissionOutcome(TRUE) — player victory
+          ctx.victorySystem.setVictoryCondition('annihilate');
+          ctx.victorySystem.forceVictory();
+        } else {
+          // MissionOutcome(FALSE) — player defeat
+          ctx.victorySystem.forceDefeat();
         }
         return 0;
       }
@@ -1462,7 +1509,21 @@ export class TokFunctionDispatch {
   private setSideReinforcements(ctx: GameContext, side: number, level: number): void {
     const ai = ctx.aiPlayers.find(a => (a as any).playerId === side) as any;
     if (!ai) return;
-    const tunedWaveInterval = Math.max(150, level * 5);
+
+    if (level === 0) {
+      // Disable reinforcements
+      ai.reinforcementsEnabled = false;
+      return;
+    }
+
+    // Enable reinforcements at the given level
+    ai.reinforcementsEnabled = true;
+    ai.reinforcementLevel = level;
+    // Higher level = shorter interval between waves
+    ai.reinforcementInterval = Math.max(200, 600 - level * 50);
+
+    // Also tune wave timing for immediate AI behavior
+    const tunedWaveInterval = Math.max(150, 600 - level * 30);
     ai.waveInterval = tunedWaveInterval;
     if (typeof ai.attackCooldown === 'number') {
       ai.attackCooldown = Math.max(100, Math.floor(tunedWaveInterval * 0.8));
@@ -1620,6 +1681,67 @@ export class TokFunctionDispatch {
       case 2: return { x: 5, z: simRng.int(5, mapH - 5) };
       default: return { x: mapW - 5, z: simRng.int(5, mapH - 5) };
     }
+  }
+
+  private getEntrancePointByIndex(ctx: GameContext, index: number): TokPos {
+    const meta = ctx.mapMetadata;
+    if (meta && meta.entrances.length > 0) {
+      const idx = Math.max(0, Math.min(index, meta.entrances.length - 1));
+      const e = meta.entrances[idx];
+      return { x: e.x * TILE_SIZE, z: e.z * TILE_SIZE };
+    }
+    return this.getNeutralEntrancePoint(ctx);
+  }
+
+  private getEntranceNearToPos(ctx: GameContext, pos: TokPos): TokPos {
+    const meta = ctx.mapMetadata;
+    if (meta && meta.entrances.length > 0) {
+      let best = meta.entrances[0];
+      let bestDist = Infinity;
+      for (const e of meta.entrances) {
+        const wx = e.x * TILE_SIZE;
+        const wz = e.z * TILE_SIZE;
+        const dx = wx - pos.x;
+        const dz = wz - pos.z;
+        const dist = dx * dx + dz * dz;
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = e;
+        }
+      }
+      return { x: best.x * TILE_SIZE, z: best.z * TILE_SIZE };
+    }
+    return this.getNeutralEntrancePoint(ctx);
+  }
+
+  private getEntranceFarFromPos(ctx: GameContext, pos: TokPos): TokPos {
+    return this.getFarthestEntrancePoint(ctx, pos);
+  }
+
+  private getIsolatedEntrance(ctx: GameContext, ev: TokEvaluator): TokPos {
+    const meta = ctx.mapMetadata;
+    if (meta && meta.entrances.length > 0) {
+      // Find entrance farthest from ALL bases
+      let bestEntrance = meta.entrances[0];
+      let bestMinDist = -1;
+      for (const e of meta.entrances) {
+        const wx = e.x * TILE_SIZE;
+        const wz = e.z * TILE_SIZE;
+        let minDist = Infinity;
+        for (let s = 0; s < Math.max(2, ev.sides.nextSideId); s++) {
+          const sPos = this.getSidePosition(ctx, ev, s);
+          const dx = wx - sPos.x;
+          const dz = wz - sPos.z;
+          minDist = Math.min(minDist, dx * dx + dz * dz);
+        }
+        if (minDist > bestMinDist) {
+          bestMinDist = minDist;
+          bestEntrance = e;
+        }
+      }
+      return { x: bestEntrance.x * TILE_SIZE, z: bestEntrance.z * TILE_SIZE };
+    }
+    return this.getUnusedBasePoint(ctx);
   }
 
   private getExitPoint(ctx: GameContext, side: number): TokPos {

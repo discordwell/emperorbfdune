@@ -346,12 +346,20 @@ describe('TokFunctionDispatch', () => {
   });
 
   describe('victory', () => {
-    it('dispatches mission/victory/defeat calls', () => {
+    it('dispatches MissionOutcome(TRUE) as victory', () => {
       call(FUNC.MissionOutcome, [lit(1)]);
+      expect(ctx.victorySystem.setVictoryCondition).toHaveBeenCalledWith('annihilate');
+      expect(ctx.victorySystem.forceVictory).toHaveBeenCalledTimes(1);
+    });
+
+    it('dispatches MissionOutcome(FALSE) as defeat', () => {
+      call(FUNC.MissionOutcome, [lit(0)]);
+      expect(ctx.victorySystem.forceDefeat).toHaveBeenCalledTimes(1);
+    });
+
+    it('dispatches EndGameWin / EndGameLose', () => {
       call(FUNC.EndGameWin, []);
       call(FUNC.EndGameLose, []);
-
-      expect(ctx.victorySystem.setVictoryCondition).toHaveBeenCalledWith('survival');
       expect(ctx.victorySystem.forceVictory).toHaveBeenCalledTimes(1);
       expect(ctx.victorySystem.forceDefeat).toHaveBeenCalledTimes(1);
     });
@@ -448,8 +456,12 @@ describe('TokFunctionDispatch', () => {
       const ai = { playerId: 4, waveInterval: 750, attackCooldown: 500 } as any;
       ctx.aiPlayers = [ai];
       call(FUNC.SetReinforcements, [lit(4), lit(120)]);
-      expect(ai.waveInterval).toBe(600);
-      expect(ai.attackCooldown).toBe(480);
+      // level=120 → waveInterval = max(150, 600-120*30) = 150
+      // attackCooldown = max(100, floor(150*0.8)) = 120
+      expect(ai.waveInterval).toBe(150);
+      expect(ai.attackCooldown).toBe(120);
+      expect(ai.reinforcementsEnabled).toBe(true);
+      expect(ai.reinforcementLevel).toBe(120);
     });
   });
 
