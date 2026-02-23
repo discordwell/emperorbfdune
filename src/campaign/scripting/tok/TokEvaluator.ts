@@ -41,8 +41,11 @@ export class SideManager {
 
   isEnemy(a: number, b: number): boolean {
     if (a === b) return false;
-    const rel = this.relationships.get(`${a}:${b}`);
-    if (rel !== undefined) return rel === 'enemy';
+    // Check both directions — scripts may only set one
+    const relAB = this.relationships.get(`${a}:${b}`);
+    if (relAB !== undefined) return relAB === 'enemy';
+    const relBA = this.relationships.get(`${b}:${a}`);
+    if (relBA !== undefined) return relBA === 'enemy';
     // Default: player (0) is enemy to enemy (1) and vice versa
     if ((a === 0 && b === 1) || (a === 1 && b === 0)) return true;
     return false;
@@ -50,8 +53,11 @@ export class SideManager {
 
   isFriend(a: number, b: number): boolean {
     if (a === b) return true;
-    const rel = this.relationships.get(`${a}:${b}`);
-    if (rel !== undefined) return rel === 'friend';
+    // Check both directions
+    const relAB = this.relationships.get(`${a}:${b}`);
+    if (relAB !== undefined) return relAB === 'friend';
+    const relBA = this.relationships.get(`${b}:${a}`);
+    if (relBA !== undefined) return relBA === 'friend';
     return false;
   }
 

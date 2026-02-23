@@ -87,34 +87,37 @@ describe('TokFunctionDispatch', () => {
       expect(Owner.playerId[buildingEid]).toBe(2);
     });
 
-    it('spawns with NewObjectOffsetOrientation', () => {
+    it('spawns with NewObjectOffsetOrientation applying tile offsets', () => {
       setPosVar(ev, 0, 30, 45);
       const unitType = indexOfType('TLScientist');
 
       const eid = call(FUNC.NewObjectOffsetOrientation, [
-        lit(3), lit(unitType), posVar(0), lit(5), lit(2),
+        lit(3), lit(unitType), posVar(0), lit(5), lit(2), lit(1),
       ]);
 
       expect(hasComponent(ctx.game.getWorld(), UnitType, eid)).toBe(true);
-      expect(Position.x[eid]).toBe(30);
-      expect(Position.z[eid]).toBe(45);
+      // Base (30,45) + offset (5,2) * TILE_SIZE(2) = (40, 49)
+      expect(Position.x[eid]).toBe(40);
+      expect(Position.z[eid]).toBe(49);
     });
   });
 
   describe('object mutation', () => {
-    it('converts entities via ObjectInfect and ObjectDetonate', () => {
+    it('morphs entities in-place via ObjectInfect and ObjectDetonate', () => {
       const original = spawnMockUnit(ctx, 'CubScout', 2, 8, 9);
       const saboteurType = indexOfType('ORSaboteur');
       const carryallType = indexOfType('ORADVCarryall');
 
+      // ObjectInfect morphs in-place: same entity ID, new type/owner
       const infected = call(FUNC.ObjectInfect, [lit(original), lit(saboteurType), lit(4)]);
-      expect(infected).toBeGreaterThanOrEqual(0);
-      expect(Health.current[original]).toBe(0);
+      expect(infected).toBe(original); // Preserves entity ID
+      expect(Health.current[infected]).toBeGreaterThan(0);
       expect(Owner.playerId[infected]).toBe(4);
 
+      // ObjectDetonate also morphs in-place
       const detonated = call(FUNC.ObjectDetonate, [lit(infected), lit(carryallType)]);
-      expect(detonated).toBeGreaterThanOrEqual(0);
-      expect(Health.current[infected]).toBe(0);
+      expect(detonated).toBe(infected); // Still same entity ID
+      expect(Health.current[detonated]).toBeGreaterThan(0);
       expect(Owner.playerId[detonated]).toBe(4);
     });
 

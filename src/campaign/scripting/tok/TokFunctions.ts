@@ -13,9 +13,9 @@ import { FUNC, FUNC_NAMES, VarType } from './TokTypes';
 import type { TokEvaluator } from './TokEvaluator';
 import type { GameContext } from '../../../core/GameContext';
 import {
-  Health, Owner, Position, MoveTarget,
+  Health, Owner, Position, MoveTarget, Rotation, AttackTarget,
   unitQuery, buildingQuery, UnitType, BuildingType, Veterancy,
-  hasComponent, addComponent,
+  hasComponent, addComponent, removeComponent,
 } from '../../../core/ECS';
 import { getCampaignString, getMissionMessage } from '../../CampaignData';
 import { EventBus } from '../../../core/EventBus';
@@ -24,6 +24,13 @@ import { TILE_SIZE, tileToWorld, worldToTile } from '../../../utils/MathUtils';
 
 type CameraSnapshot = { x: number; z: number; zoom: number; rotation: number };
 type CameraSpinState = { active: boolean; speed: number; direction: number };
+
+// Proximity thresholds in world units (TILE_SIZE=2).
+// Original game thresholds are undocumented; these are calibrated for 128-tile maps.
+const NEAR_OBJECT_TO_SIDE = 30;  // ~15 tiles — object near a base
+const NEAR_OBJECT_TO_OBJECT = 20; // ~10 tiles — two objects close together
+const NEAR_SIDE_TO_SIDE = 40;     // ~20 tiles — two armies close
+const NEAR_SIDE_TO_POINT = 40;    // ~20 tiles — army near a waypoint
 
 export class TokFunctionDispatch {
   private stringTable: string[] = [];
@@ -34,6 +41,8 @@ export class TokFunctionDispatch {
   private tooltipMap = new Map<number, number>();
   // Script-assigned side color overrides.
   private sideColors = new Map<number, number>();
+  // Cached base position per side (set on first building/NewObject for the side).
+  private sideBasePositions = new Map<number, TokPos>();
   // Script-assigned threat levels by type name.
   private typeThreatLevels = new Map<string, number>();
   // Script camera state.
@@ -77,6 +86,7 @@ export class TokFunctionDispatch {
       pipCameraSpin: { ...this.pipCameraSpin },
       mainCameraStored: this.mainCameraStored ? { ...this.mainCameraStored } : null,
       pipCameraStored: this.pipCameraStored ? { ...this.pipCameraStored } : null,
+      sideBasePositions: Array.from(this.sideBasePositions.entries()).map(([side, pos]) => ({ side, x: pos.x, z: pos.z })),
     };
   }
 
@@ -87,6 +97,7 @@ export class TokFunctionDispatch {
     this.airStrikes.clear();
     this.tooltipMap.clear();
     this.sideColors.clear();
+    this.sideBasePositions.clear();
     this.typeThreatLevels.clear();
     this.lastCameraTick = -1;
     this.mainCameraTrackEid = null;
@@ -144,6 +155,10 @@ export class TokFunctionDispatch {
 
     this.mainCameraStored = state.mainCameraStored ? { ...state.mainCameraStored } : null;
     this.pipCameraStored = state.pipCameraStored ? { ...state.pipCameraStored } : null;
+
+    for (const entry of (state as any).sideBasePositions ?? []) {
+      this.sideBasePositions.set(entry.side, { x: entry.x, z: entry.z });
+    }
   }
 
   /** Resolve a string table index to a type name. */
@@ -191,8 +206,13 @@ export class TokFunctionDispatch {
       // -------------------------------------------------------------------
       // Position functions
       // -------------------------------------------------------------------
-      case FUNC.GetSideBasePoint:
+      case FUNC.GetSideBasePoint: {
+        // Returns the fixed base position for a side (stable reference point)
+        const side = asInt(args[0]);
+        return this.getSideBasePosition(ctx, ev, side);
+      }
       case FUNC.GetSidePosition: {
+        // Returns the current centroid of a side's forces
         const side = asInt(args[0]);
         return this.getSidePosition(ctx, ev, side);
       }
@@ -320,26 +340,55 @@ export class TokFunctionDispatch {
       }
 
       case FUNC.NewObjectInAPC: {
+        // Spawn a unit inside an APC as a passenger (hidden until unloaded)
         const side = asInt(args[0]);
         const typeIdx = asInt(args[1]);
         const apcEid = asInt(args[2]);
         const typeName = this.resolveString(typeIdx);
-        // Spawn near APC position
+        // Spawn at APC position (will be hidden off-map as passenger)
         let x = 50, z = 50;
         if (apcEid >= 0 && hasComponent(ctx.game.getWorld(), Position, apcEid)) {
-          x = Position.x[apcEid] + (simRng.int(0, 4) - 2);
-          z = Position.z[apcEid] + (simRng.int(0, 4) - 2);
+          x = Position.x[apcEid];
+          z = Position.z[apcEid];
         }
-        return this.spawnObject(ctx, typeName, side, x, z);
+        const unitEid = this.spawnObject(ctx, typeName, side, x, z);
+        // Load into APC via ability system's transport passenger list
+        if (unitEid >= 0 && apcEid >= 0) {
+          const ability = ctx.abilitySystem as any;
+          if (typeof ability?.getTransportPassengers === 'function') {
+            const passengers: Map<number, number[]> = ability.getTransportPassengers();
+            const list = passengers.get(apcEid) ?? [];
+            list.push(unitEid);
+            passengers.set(apcEid, list);
+            // Hide off-map
+            Position.x[unitEid] = -999;
+            Position.z[unitEid] = -999;
+            if (hasComponent(ctx.game.getWorld(), MoveTarget, unitEid)) {
+              MoveTarget.active[unitEid] = 0;
+            }
+          }
+        }
+        return unitEid;
       }
 
       case FUNC.NewObjectOffsetOrientation: {
+        // NewObjectOffsetOrientation(side, type, basePos, offsetX, offsetZ, orientation)
         const side = asInt(args[0]);
         const typeIdx = asInt(args[1]);
         const pos = asPos(args[2]);
-        // Additional args: offset, orientation — use position directly
+        const offsetX = args.length > 3 ? asInt(args[3]) : 0;
+        const offsetZ = args.length > 4 ? asInt(args[4]) : 0;
+        const orientation = args.length > 5 ? asInt(args[5]) : 0;
         const typeName = this.resolveString(typeIdx);
-        return this.spawnObject(ctx, typeName, side, pos.x, pos.z);
+        // Offsets are in tiles
+        const spawnX = pos.x + offsetX * TILE_SIZE;
+        const spawnZ = pos.z + offsetZ * TILE_SIZE;
+        const eid = this.spawnObject(ctx, typeName, side, spawnX, spawnZ);
+        // Apply orientation (0=N, 1=E, 2=S, 3=W → radians)
+        if (eid >= 0 && hasComponent(ctx.game.getWorld(), Rotation, eid)) {
+          Rotation.y[eid] = (orientation & 3) * (Math.PI / 2);
+        }
+        return eid;
       }
 
       // -------------------------------------------------------------------
@@ -374,15 +423,23 @@ export class TokFunctionDispatch {
         return 0;
       }
 
-      case FUNC.ObjectNearToSide:
-      case FUNC.ObjectNearToSideBase: {
+      case FUNC.ObjectNearToSide: {
         const eid = asInt(args[0]);
         const side = asInt(args[1]);
         if (eid < 0 || !hasComponent(ctx.game.getWorld(), Position, eid)) return 0;
         const sidePos = this.getSidePosition(ctx, ev, side);
         const dx = Position.x[eid] - sidePos.x;
         const dz = Position.z[eid] - sidePos.z;
-        return Math.sqrt(dx * dx + dz * dz) < 30 ? 1 : 0;
+        return Math.sqrt(dx * dx + dz * dz) < NEAR_OBJECT_TO_SIDE ? 1 : 0;
+      }
+      case FUNC.ObjectNearToSideBase: {
+        const eid = asInt(args[0]);
+        const side = asInt(args[1]);
+        if (eid < 0 || !hasComponent(ctx.game.getWorld(), Position, eid)) return 0;
+        const sidePos = this.getSideBasePosition(ctx, ev, side);
+        const dx = Position.x[eid] - sidePos.x;
+        const dz = Position.z[eid] - sidePos.z;
+        return Math.sqrt(dx * dx + dz * dz) < NEAR_OBJECT_TO_SIDE ? 1 : 0;
       }
 
       case FUNC.ObjectNearToObject: {
@@ -393,7 +450,7 @@ export class TokFunctionDispatch {
         if (!hasComponent(w, Position, eid1) || !hasComponent(w, Position, eid2)) return 0;
         const dx = Position.x[eid1] - Position.x[eid2];
         const dz = Position.z[eid1] - Position.z[eid2];
-        return Math.sqrt(dx * dx + dz * dz) < 20 ? 1 : 0;
+        return Math.sqrt(dx * dx + dz * dz) < NEAR_OBJECT_TO_OBJECT ? 1 : 0;
       }
 
       case FUNC.ObjectVisibleToSide: {
@@ -453,13 +510,13 @@ export class TokFunctionDispatch {
       }
 
       case FUNC.ObjectChange: {
-        // ObjectChange(obj, typeName, side) — morph a unit to a different type
+        // ObjectChange(obj, typeName, side) — morph entity in-place (preserves entity ID)
         const eid = asInt(args[0]);
         const typeIdx = asInt(args[1]);
         const side = args.length > 2 ? asInt(args[2]) : -1;
         const typeName = this.resolveString(typeIdx);
         const owner = side >= 0 ? side : (hasComponent(ctx.game.getWorld(), Owner, eid) ? Owner.playerId[eid] : 0);
-        return this.replaceObject(ctx, eid, typeName, owner);
+        return this.morphObject(ctx, eid, typeName, owner);
       }
 
       case FUNC.ObjectRemove: {
@@ -524,11 +581,11 @@ export class TokFunctionDispatch {
       }
 
       case FUNC.ObjectInfect: {
-        // ObjectInfect(obj, typeName, side): convert an existing object.
+        // ObjectInfect(obj, typeName, side): morph in-place (preserves entity ID)
         const eid = asInt(args[0]);
         const typeName = this.resolveString(asInt(args[1]));
         const side = args.length > 2 ? asInt(args[2]) : (hasComponent(ctx.game.getWorld(), Owner, eid) ? Owner.playerId[eid] : 0);
-        return this.replaceObject(ctx, eid, typeName, side);
+        return this.morphObject(ctx, eid, typeName, side);
       }
 
       case FUNC.ObjectDetonate: {
@@ -543,7 +600,7 @@ export class TokFunctionDispatch {
         }
         const owner = hasComponent(ctx.game.getWorld(), Owner, eid) ? Owner.playerId[eid] : 0;
         const typeName = this.resolveString(asInt(args[1]));
-        return this.replaceObject(ctx, eid, typeName, owner);
+        return this.morphObject(ctx, eid, typeName, owner);
       }
 
       case FUNC.ObjectToolTip: {
@@ -573,13 +630,15 @@ export class TokFunctionDispatch {
       }
 
       case FUNC.SideAIDone: {
-        // Returns TRUE when the AI side has no pending move orders
+        // Returns TRUE when the AI side has completed its current command
+        // (no pending moves AND not actively attacking)
         const aiSide = asInt(args[0]);
         const w = ctx.game.getWorld();
         for (const eid of unitQuery(w)) {
           if (Owner.playerId[eid] !== aiSide) continue;
           if (Health.current[eid] <= 0) continue;
           if (MoveTarget.active[eid] === 1) return 0;
+          if (hasComponent(w, AttackTarget, eid) && AttackTarget.active[eid] === 1) return 0;
         }
         return 1;
       }
@@ -604,15 +663,25 @@ export class TokFunctionDispatch {
         return 0;
       }
 
-      case FUNC.SideNearToSide:
-      case FUNC.SideNearToSideBase: {
+      case FUNC.SideNearToSide: {
+        // Check if any unit of sideA is near any unit of sideB
         const sideA = asInt(args[0]);
         const sideB = asInt(args[1]);
         const posA = this.getSidePosition(ctx, ev, sideA);
         const posB = this.getSidePosition(ctx, ev, sideB);
         const dx = posA.x - posB.x;
         const dz = posA.z - posB.z;
-        return Math.sqrt(dx * dx + dz * dz) < 40 ? 1 : 0;
+        return Math.sqrt(dx * dx + dz * dz) < NEAR_SIDE_TO_SIDE ? 1 : 0;
+      }
+      case FUNC.SideNearToSideBase: {
+        // Check if sideA is near sideB's BASE position (fixed)
+        const sideA = asInt(args[0]);
+        const sideB = asInt(args[1]);
+        const posA = this.getSidePosition(ctx, ev, sideA);
+        const posB = this.getSideBasePosition(ctx, ev, sideB);
+        const dx = posA.x - posB.x;
+        const dz = posA.z - posB.z;
+        return Math.sqrt(dx * dx + dz * dz) < NEAR_SIDE_TO_SIDE ? 1 : 0;
       }
 
       case FUNC.SideNearToPoint: {
@@ -621,7 +690,7 @@ export class TokFunctionDispatch {
         const sidePos = this.getSidePosition(ctx, ev, side);
         const dx = sidePos.x - pos.x;
         const dz = sidePos.z - pos.z;
-        return Math.sqrt(dx * dx + dz * dz) < 40 ? 1 : 0;
+        return Math.sqrt(dx * dx + dz * dz) < NEAR_SIDE_TO_POINT ? 1 : 0;
       }
 
       // -------------------------------------------------------------------
@@ -711,18 +780,33 @@ export class TokFunctionDispatch {
       }
 
       case FUNC.SideAIGuardObject: {
+        // Move units to guard an object (attack-move so they engage nearby threats)
         const side = asInt(args[0]);
         const targetEid = asInt(args[1]);
         if (targetEid >= 0 && hasComponent(ctx.game.getWorld(), Position, targetEid)) {
-          this.aiMoveUnits(ctx, side, Position.x[targetEid], Position.z[targetEid], false);
+          this.aiMoveUnits(ctx, side, Position.x[targetEid], Position.z[targetEid], true);
         }
         return 0;
       }
 
       case FUNC.SideAIExitMap: {
+        // Move all units of this side toward the nearest map edge
         const side = asInt(args[0]);
-        const mapW = ctx.terrain.getMapWidth() * 2;
-        this.aiMoveUnits(ctx, side, mapW, 0, false);
+        const mapW = ctx.terrain.getMapWidth() * TILE_SIZE;
+        const mapH = ctx.terrain.getMapHeight() * TILE_SIZE;
+        const sidePos = this.getSidePosition(ctx, ev, side);
+        // Find nearest edge
+        const distLeft = sidePos.x;
+        const distRight = mapW - sidePos.x;
+        const distTop = sidePos.z;
+        const distBottom = mapH - sidePos.z;
+        const minDist = Math.min(distLeft, distRight, distTop, distBottom);
+        let exitX = sidePos.x, exitZ = sidePos.z;
+        if (minDist === distLeft) exitX = 0;
+        else if (minDist === distRight) exitX = mapW;
+        else if (minDist === distTop) exitZ = 0;
+        else exitZ = mapH;
+        this.aiMoveUnits(ctx, side, exitX, exitZ, false);
         return 0;
       }
 
@@ -1557,6 +1641,58 @@ export class TokFunctionDispatch {
     return this.spawnObject(ctx, typeName, side, x, z);
   }
 
+  /**
+   * Morph an entity in-place: change its type without destroying/recreating.
+   * Preserves entity ID so script variable references remain valid.
+   */
+  private morphObject(ctx: GameContext, eid: number, typeName: string, side: number): number {
+    const w = ctx.game.getWorld();
+    if (eid < 0) return -1;
+    if (!hasComponent(w, Position, eid) || !hasComponent(w, Health, eid)) return -1;
+    if (Health.current[eid] <= 0) return -1;
+
+    // Determine the new type
+    const isBuilding = ctx.typeRegistry.buildingTypeIdMap.has(typeName);
+    const isUnit = ctx.typeRegistry.unitTypeIdMap.has(typeName);
+
+    if (!isBuilding && !isUnit) {
+      // Unknown type — fall back to replace
+      return this.replaceObject(ctx, eid, typeName, side);
+    }
+
+    // Swap type component: remove old, add new
+    const hadUnitType = hasComponent(w, UnitType, eid);
+    const hadBuildingType = hasComponent(w, BuildingType, eid);
+
+    if (isUnit) {
+      if (hadBuildingType) removeComponent(w, BuildingType, eid);
+      if (!hadUnitType) addComponent(w, UnitType, eid);
+      UnitType.id[eid] = ctx.typeRegistry.unitTypeIdMap.get(typeName)!;
+      // Update health to new type's max
+      const def = ctx.gameRules.units.get(typeName);
+      if (def && typeof def.health === 'number') {
+        Health.max[eid] = def.health;
+        Health.current[eid] = def.health;
+      }
+    } else {
+      if (hadUnitType) removeComponent(w, UnitType, eid);
+      if (!hadBuildingType) addComponent(w, BuildingType, eid);
+      BuildingType.id[eid] = ctx.typeRegistry.buildingTypeIdMap.get(typeName)!;
+      const def = ctx.gameRules.buildings.get(typeName);
+      if (def && typeof def.health === 'number') {
+        Health.max[eid] = def.health;
+        Health.current[eid] = def.health;
+      }
+    }
+
+    // Update owner
+    if (hasComponent(w, Owner, eid)) {
+      Owner.playerId[eid] = side;
+    }
+
+    return eid;
+  }
+
   private setScriptUiEnabled(ctx: GameContext, enabled: boolean): void {
     const input = ctx.input as any;
     if (typeof input?.setEnabled === 'function') input.setEnabled(enabled);
@@ -1593,12 +1729,15 @@ export class TokFunctionDispatch {
 
   private spawnObject(ctx: GameContext, typeName: string, side: number, x: number, z: number): number {
     const world = ctx.game.getWorld();
-    // Check if it's a building or unit
-    if (ctx.typeRegistry.buildingTypeIdMap.has(typeName)) {
-      return ctx.spawnBuilding(world, typeName, side, x, z);
-    } else {
-      return ctx.spawnUnit(world, typeName, side, x, z);
+    const isBuilding = ctx.typeRegistry.buildingTypeIdMap.has(typeName);
+    const eid = isBuilding
+      ? ctx.spawnBuilding(world, typeName, side, x, z)
+      : ctx.spawnUnit(world, typeName, side, x, z);
+    // Cache first spawn position as the side's base position
+    if (eid >= 0 && !this.sideBasePositions.has(side)) {
+      this.sideBasePositions.set(side, { x, z });
     }
+    return eid;
   }
 
   private countSideUnits(ctx: GameContext, side: number): number {
@@ -1617,8 +1756,27 @@ export class TokFunctionDispatch {
     return count;
   }
 
+  /** Returns the fixed base position for a side (first building/spawn location). */
+  private getSideBasePosition(ctx: GameContext, ev: TokEvaluator, side: number): TokPos {
+    // 1. Cached base position (set on first spawn)
+    const cached = this.sideBasePositions.get(side);
+    if (cached) return cached;
+    // 2. Fall back to first living building of the side
+    const w = ctx.game.getWorld();
+    for (const eid of buildingQuery(w)) {
+      if (Owner.playerId[eid] === side && Health.current[eid] > 0) {
+        const pos: TokPos = { x: Position.x[eid], z: Position.z[eid] };
+        this.sideBasePositions.set(side, pos);
+        return pos;
+      }
+    }
+    // 3. Fall back to centroid
+    return this.getSidePosition(ctx, ev, side);
+  }
+
+  /** Returns the current centroid of a side's forces (dynamic). */
   private getSidePosition(ctx: GameContext, ev: TokEvaluator, side: number): TokPos {
-    // Find the centroid of all units belonging to this side
+    // Use cached base if no living units/buildings can provide a centroid
     let sumX = 0, sumZ = 0, count = 0;
     const w = ctx.game.getWorld();
 
@@ -1640,6 +1798,10 @@ export class TokFunctionDispatch {
     if (count > 0) {
       return { x: sumX / count, z: sumZ / count };
     }
+
+    // Fallback: use cached base position
+    const cached = this.sideBasePositions.get(side);
+    if (cached) return cached;
 
     // Fallback: use AI player base position if available
     const ai = ctx.aiPlayers.find(a => (a as any).playerId === side);
