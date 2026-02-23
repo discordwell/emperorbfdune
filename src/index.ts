@@ -25,7 +25,7 @@ import { setupGameUI } from './ui/GameUI';
 import { spawnFreshGame } from './core/FreshGameSpawn';
 import { simRng } from './utils/DeterministicRNG';
 import { restoreFromSave } from './core/SaveLoadSystem';
-import { hasComponent, Harvester, Owner, Position, BuildingType as BT, buildingQuery, removeEntity } from './core/ECS';
+import { hasComponent, Harvester, Owner, Position, Health, BuildingType as BT, buildingQuery, unitQuery, removeEntity } from './core/ECS';
 import { loadDisplayNames } from './config/DisplayNames';
 import { isAgentMode, getAgentConfig, pickTerritoryWithContext, startAgent, stopAgent } from './ai/CampaignAgent';
 import { AIPlayer } from './ai/AIPlayer';
@@ -933,6 +933,7 @@ async function main() {
 
   // Debug helpers
   (window as any).game = ctx.game;
+  (window as any).ctx = ctx;
   (window as any).rules = gameRules;
   (window as any).fogOfWar = ctx.fogOfWar;
   (window as any).spawnUnit = (name: string, owner: number, x: number, z: number) => ctx.spawnUnit(ctx.game.getWorld(), name, owner, x, z);
@@ -940,6 +941,23 @@ async function main() {
   (window as any).sandworm = ctx.sandwormSystem;
   (window as any).startAgent = startAgent;
   (window as any).stopAgent = stopAgent;
+  (window as any).getEnemyPositions = () => {
+    const world = ctx.game.getWorld();
+    const buildings: { x: number; z: number }[] = [];
+    const units: { x: number; z: number }[] = [];
+    for (const eid of buildingQuery(world)) {
+      if (Owner.playerId[eid] >= 1 && Health.current[eid] > 0) {
+        buildings.push({ x: Position.x[eid], z: Position.z[eid] });
+      }
+    }
+    for (const eid of unitQuery(world)) {
+      if (Owner.playerId[eid] >= 1 && Health.current[eid] > 0) {
+        units.push({ x: Position.x[eid], z: Position.z[eid] });
+      }
+    }
+    return { buildings, units };
+  };
+  (window as any)._ecsRefs = { buildingQuery, unitQuery, Health, Owner };
   (window as any).debug = {
     modelReport() {
       const report = ctx.modelManager.getLoadReport();

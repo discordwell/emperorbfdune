@@ -120,6 +120,7 @@ export function initializeSystems(config: SystemInitConfig): GameContext {
   commandManager.setFormationSystem(formationSystem);
   const effectsManager = new EffectsManager(scene);
   commandManager.setMoveMarkerFn((x, z) => effectsManager.spawnMoveMarker(x, z));
+  commandManager.setAttackMarkerFn((x, z) => effectsManager.spawnAttackMarker(x, z));
   const harvestSystem = new HarvestSystem(terrain);
   commandManager.setForceReturnFn((eid) => harvestSystem.forceReturn(eid));
   const productionSystem = new ProductionSystem(gameRules, harvestSystem);

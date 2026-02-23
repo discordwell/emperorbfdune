@@ -290,8 +290,8 @@ export function registerTickHandler(ctx: GameContext): void {
 
     superweaponSystem.update(world, currentTick);
 
-    // Dust trails for moving ground units
-    if (currentTick % 3 === 0) {
+    // Continuous dust trails for moving ground vehicles (~1 per 5 ticks)
+    if (currentTick % 5 === 0) {
       const dustUnits = unitQuery(world);
       for (const eid of dustUnits) {
         if (Health.current[eid] <= 0) continue;
@@ -300,7 +300,14 @@ export function registerTickHandler(ctx: GameContext): void {
         const typeName = unitTypeNames[typeId];
         const def = typeName ? gameRules.units.get(typeName) : null;
         if (!def || def.canFly || def.infantry) continue;
-        effectsManager.spawnDustPuff(Position.x[eid], Position.z[eid]);
+        // Compute movement direction toward target for dust trail offset
+        const px = Position.x[eid];
+        const pz = Position.z[eid];
+        const tx = MoveTarget.x[eid];
+        const tz = MoveTarget.z[eid];
+        const vx = tx - px;
+        const vz = tz - pz;
+        effectsManager.spawnVehicleDust(px, pz, vx, vz);
       }
     }
 
@@ -512,6 +519,9 @@ export function registerTickHandler(ctx: GameContext): void {
         controlGroupsEl.innerHTML = html;
       }
 
+      // Store power info for sidebar UI
+      productionSystem.setPowerInfo(0, powerGen, powerUsed);
+
       // Power affects gameplay
       const lowPower = powerGen < powerUsed;
       const powerMult = lowPower ? 0.5 : 1.0;
@@ -566,6 +576,7 @@ export function registerTickHandler(ctx: GameContext): void {
             else aiPowerUsed += Math.abs(amt);
           }
         }
+        productionSystem.setPowerInfo(ai, aiPowerGen, aiPowerUsed);
         const aiLowPower = aiPowerGen < aiPowerUsed;
         const aiPowerMult = aiLowPower ? 0.5 : 1.0;
         productionSystem.setPowerMultiplier(ai, aiPowerMult);

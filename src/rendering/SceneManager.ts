@@ -77,7 +77,7 @@ export class SceneManager implements RenderSystem {
     this.scene.background = skyTex;
 
     // Distance fog for heat haze effect
-    this.scene.fog = new THREE.FogExp2(0xc09050, 0.003);
+    this.scene.fog = new THREE.FogExp2(0xc09050, 0.007);
 
     // Perspective camera with slight ortho feel (narrow FOV)
     this.camera = new THREE.PerspectiveCamera(
@@ -132,7 +132,7 @@ export class SceneManager implements RenderSystem {
   }
 
   private createSandParticles(): void {
-    const count = 600;
+    const count = 1500;
     const positions = new Float32Array(count * 3);
     for (let i = 0; i < count; i++) {
       positions[i * 3] = Math.random() * 300 - 50;
@@ -146,7 +146,7 @@ export class SceneManager implements RenderSystem {
       color: 0xd4b06a,
       size: 0.3,
       transparent: true,
-      opacity: 0.4,
+      opacity: 0.55,
       depthWrite: false,
     });
     this.sandParticles = new THREE.Points(geo, mat);
@@ -258,7 +258,7 @@ export class SceneManager implements RenderSystem {
 
     // Update fog to match ambient tone
     const fogColor = this.baseAmbientColor.clone().lerp(this.baseSunColor, 0.3);
-    this.scene.fog = new THREE.FogExp2(fogColor.getHex(), 0.003);
+    this.scene.fog = new THREE.FogExp2(fogColor.getHex(), 0.007);
   }
 
   /** Smoothly pan the camera to a world position (clamped to map bounds) */

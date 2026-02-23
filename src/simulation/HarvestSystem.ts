@@ -67,10 +67,16 @@ export class HarvestSystem implements GameSystem {
     this.terrain = terrain;
 
     // Harvesters flee when damaged (unless already returning/unloading)
+    // Only flee if health drops below 50% — a stray bullet shouldn't send them home
     EventBus.on('unit:damaged', ({ entityId }) => {
       if (!this.knownHarvesters.has(entityId)) return;
       const state = Harvester.state[entityId];
-      if (state !== RETURNING && state !== UNLOADING) {
+      if (state === RETURNING || state === UNLOADING) return;
+      // Debounce: skip if already fleeing (prevents rapid hits from spamming return commands)
+      if (this.fleeing.has(entityId)) return;
+      // Only flee if health is below 50%
+      const healthRatio = Health.current[entityId] / Health.max[entityId];
+      if (healthRatio < 0.5) {
         Harvester.state[entityId] = RETURNING;
         this.returnToRefinery(entityId);
         this.fleeing.set(entityId, this.tickCounter + 250); // ~10 seconds at 25 tps

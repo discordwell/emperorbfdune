@@ -274,9 +274,11 @@ export class HouseSelect {
     // Title screen
     await this.showTitleScreen();
 
-    // Use 3D house selection if canvas and renderer are available
+    const forceFallback = new URLSearchParams(window.location.search).get('ui') === '2d';
+
+    // Use 3D house selection if canvas/renderer are available (unless forced to fallback)
     let selectedHouseId: string;
-    if (this.canvas && this.renderer) {
+    if (!forceFallback && this.canvas && this.renderer) {
       try {
         const houseSelect3D = new HouseSelect3D(this.canvas, this.renderer);
         selectedHouseId = await houseSelect3D.show();

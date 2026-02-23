@@ -525,7 +525,7 @@ export class CombatSystem implements GameSystem {
           let angleDiff = desiredAngle - TurretRotation.y[eid];
           if (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
           if (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-          if (Math.abs(angleDiff) > 0.35) continue;
+          if (Math.abs(angleDiff) > 0.25) continue;
         } else {
           // No turret: rotate whole hull using unit TurnRate (radians per tick)
           const turnRate = hasComponent(world, Speed, eid) ? Speed.turnRate[eid] : 0.15;
@@ -533,7 +533,7 @@ export class CombatSystem implements GameSystem {
           let angleDiff = desiredAngle - Rotation.y[eid];
           if (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
           if (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-          if (Math.abs(angleDiff) > 0.35) continue;
+          if (Math.abs(angleDiff) > 0.25) continue;
         }
       }
 

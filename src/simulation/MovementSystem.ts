@@ -429,13 +429,14 @@ export class MovementSystem implements GameSystem {
         }
       }
 
-      // Stuck detection: if unit hasn't moved for 15 ticks, force repath
+      // Stuck detection: if unit hasn't moved for 30 ticks, force repath
+      // (was 15, but slow units navigating obstacles got false-flagged causing zigzag)
       const lastP = this.lastPos.get(eid);
       const cx = Position.x[eid], cz = Position.z[eid];
       if (lastP && Math.abs(cx - lastP.x) < 0.05 && Math.abs(cz - lastP.z) < 0.05) {
         const stuck = (this.stuckTicks.get(eid) ?? 0) + 1;
         this.stuckTicks.set(eid, stuck);
-        if (stuck >= 15) {
+        if (stuck >= 30) {
           this.paths.delete(eid);
           this.pathIndex.delete(eid);
           this.stuckTicks.set(eid, 0);

@@ -44,9 +44,8 @@ export function setupGameUI(ctx: GameContext): void {
     });
   });
 
-  setInterval(() => {
-    sidebar.updateProgress();
-    sidebar.refresh();
-  }, 2000);
-  setInterval(() => sidebar.updateProgress(), 200);
+  // Refresh sidebar buttons + progress every 500ms for responsive UI
+  setInterval(() => sidebar.refresh(), 500);
+  // Update progress bar more frequently for smooth animation
+  setInterval(() => sidebar.updateProgress(), 100);
 }

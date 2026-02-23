@@ -58,6 +58,16 @@ const HOUSE_COLORS: THREE.Color[] = [
   new THREE.Color(0xFFA3E0), // 7: Guild pink
 ];
 
+// Faction-specific material properties for visual distinction
+const FACTION_MATERIALS: Record<number, { roughness: number; metalness: number }> = {
+  0: { roughness: 0.7, metalness: 0.3 },   // Atreides: refined desert military
+  1: { roughness: 0.85, metalness: 0.2 },   // Harkonnen: industrial brutal (matte/rusty)
+  2: { roughness: 0.35, metalness: 0.7 },   // Ordos: sleek technological (polished)
+  5: { roughness: 0.9, metalness: 0.1 },    // Fremen: weathered/sandy
+  6: { roughness: 0.5, metalness: 0.5 },    // Sardaukar (Imperial): military precision
+  [-1]: { roughness: 0.6, metalness: 0.4 }, // Default fallback
+};
+
 export class UnitRenderer {
   private static readonly _hbGreen = new THREE.Color(0x00ff00);
   private static readonly _hbYellow = new THREE.Color(0xffff00);
@@ -126,6 +136,11 @@ export class UnitRenderer {
   private mindControlTinted = new Set<number>();
   // Infantry squad rendering: entity ID -> squad data
   private squadData = new Map<number, SquadData>();
+  // Original material colors for damage tinting: eid -> array of { color, roughness } per mesh child
+  private originalMaterials = new Map<number, Array<{ color: THREE.Color; roughness: number }>>();
+  // Reusable temporaries for damage calculations (avoid per-frame allocations)
+  private static readonly _charColor = new THREE.Color(0x2a2015);
+  private static readonly _tmpDamageColor = new THREE.Color();
 
   constructor(sceneManager: SceneManager, modelManager: ModelManager, artMap: Map<string, ArtEntry>) {
     this.sceneManager = sceneManager;
@@ -589,6 +604,9 @@ export class UnitRenderer {
           });
         }
       }
+
+      // Progressive visual damage: darken materials and add fire glow as HP drops
+      this.applyDamageVisuals(eid, obj);
     }
   }
 
@@ -739,15 +757,18 @@ export class UnitRenderer {
     clone.scale.setScalar(scale);
     group.add(clone);
 
-    // Apply team color
+    // Apply team color and faction-specific material properties
     const ownerId = Owner.playerId[eid];
     const color = HOUSE_COLORS[ownerId] ?? HOUSE_COLORS[0];
+    const factionMat = FACTION_MATERIALS[ownerId] ?? FACTION_MATERIALS[-1];
     clone.traverse(child => {
       if (child instanceof THREE.Mesh) {
         child.castShadow = true;
         child.receiveShadow = true;
         if (child.material instanceof THREE.MeshStandardMaterial) {
-          child.material.color.lerp(color, 0.3);
+          child.material.color.lerp(color, 0.6);
+          child.material.roughness = factionMat.roughness;
+          child.material.metalness = factionMat.metalness;
         }
       }
     });
@@ -759,6 +780,9 @@ export class UnitRenderer {
         this.turretNodes.set(eid, child);
       }
     });
+
+    // Cache original material colors for progressive damage tinting
+    this.cacheOriginalMaterials(eid, group);
   }
 
   /** Create an infantry squad with multiple model clones in formation */
@@ -788,13 +812,16 @@ export class UnitRenderer {
       clone.position.x = baseOffset.x + jx;
       clone.position.z = baseOffset.z + jz;
 
-      // Apply team color tinting
+      // Apply team color tinting and faction-specific material properties
+      const factionMat = FACTION_MATERIALS[ownerId] ?? FACTION_MATERIALS[-1];
       clone.traverse(child => {
         if (child instanceof THREE.Mesh) {
           child.castShadow = true;
           child.receiveShadow = true;
           if (child.material instanceof THREE.MeshStandardMaterial) {
-            child.material.color.lerp(color, 0.3);
+            child.material.color.lerp(color, 0.6);
+            child.material.roughness = factionMat.roughness;
+            child.material.metalness = factionMat.metalness;
           }
         }
       });
@@ -807,6 +834,81 @@ export class UnitRenderer {
       memberModels,
       jitterOffsets,
       visibleCount: SQUAD_MAX_MEMBERS,
+    });
+
+    // Cache original material colors for progressive damage tinting
+    this.cacheOriginalMaterials(eid, group);
+  }
+
+  /** Cache original material properties (color, roughness) for an entity's meshes.
+   *  Called once after model is set up with team color, so damage tinting
+   *  can interpolate from these originals toward a charred appearance. */
+  private cacheOriginalMaterials(eid: number, group: THREE.Group): void {
+    const originals: Array<{ color: THREE.Color; roughness: number }> = [];
+    group.traverse(child => {
+      if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshStandardMaterial) {
+        originals.push({
+          color: child.material.color.clone(),
+          roughness: child.material.roughness,
+        });
+      }
+    });
+    if (originals.length > 0) {
+      this.originalMaterials.set(eid, originals);
+    }
+  }
+
+  /** Apply progressive visual damage to an entity's materials based on health ratio.
+   *  - Below 70% HP: progressively darken/desaturate toward a charred look
+   *  - Below 30% HP: add red/orange emissive glow to suggest fire/heat damage
+   *  Skips entities under mind-control tint (which overrides emissive). */
+  private applyDamageVisuals(eid: number, obj: THREE.Group): void {
+    const maxHp = Health.max[eid];
+    if (maxHp <= 0) return;
+    const healthRatio = Health.current[eid] / maxHp;
+
+    const originals = this.originalMaterials.get(eid);
+    if (!originals) return;
+
+    // Don't override mind-control purple emissive
+    const isMindControlled = this.mindControlTinted.has(eid);
+
+    let matIndex = 0;
+    obj.traverse(child => {
+      if (!(child instanceof THREE.Mesh) || !(child.material instanceof THREE.MeshStandardMaterial)) return;
+      if (matIndex >= originals.length) return;
+      const orig = originals[matIndex];
+      matIndex++;
+
+      const mat = child.material as THREE.MeshStandardMaterial;
+
+      if (healthRatio < 0.7) {
+        // damageFactor: 0 at 70% HP, 1 at 0% HP
+        const damageFactor = (0.7 - healthRatio) / 0.7;
+
+        // Darken color: lerp from original toward charred brown/black
+        UnitRenderer._tmpDamageColor.copy(orig.color);
+        UnitRenderer._tmpDamageColor.lerp(UnitRenderer._charColor, damageFactor * 0.6);
+        mat.color.copy(UnitRenderer._tmpDamageColor);
+
+        // Increase roughness: damaged surfaces are rougher
+        mat.roughness = Math.min(1.0, orig.roughness + damageFactor * 0.3);
+      } else {
+        // Healthy: restore original values
+        mat.color.copy(orig.color);
+        mat.roughness = orig.roughness;
+      }
+
+      // Emissive glow for critical damage (<30% HP): subtle red/orange fire glow
+      if (!isMindControlled) {
+        if (healthRatio < 0.3) {
+          mat.emissive.set(0xff4400);
+          mat.emissiveIntensity = ((0.3 - healthRatio) / 0.3) * 0.15;
+        } else {
+          mat.emissive.set(0x000000);
+          mat.emissiveIntensity = 0;
+        }
+      }
     });
   }
 
@@ -1183,6 +1285,7 @@ export class UnitRenderer {
     const ihc = this.idleHarvesterCircles.get(eid);
     if (ihc) { this.sceneManager.scene.remove(ihc); ihc.geometry.dispose(); (ihc.material as THREE.Material).dispose(); this.idleHarvesterCircles.delete(eid); }
     this.mindControlTinted.delete(eid);
+    this.originalMaterials.delete(eid);
   }
 
   /** Animate dying entities (call each frame) */

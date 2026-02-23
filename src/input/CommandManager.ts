@@ -22,6 +22,7 @@ export class CommandManager {
 
   private commandMode: CommandMode = 'normal';
   private moveMarkerFn: ((x: number, z: number) => void) | null = null;
+  private attackMarkerFn: ((x: number, z: number) => void) | null = null;
   private unitClassifier: ((eid: number) => UnitCategory) | null = null;
   private forceReturnFn: ((eid: number) => void) | null = null;
   private formationSystem: FormationSystem | null = null;
@@ -52,6 +53,10 @@ export class CommandManager {
 
   setMoveMarkerFn(fn: (x: number, z: number) => void): void {
     this.moveMarkerFn = fn;
+  }
+
+  setAttackMarkerFn(fn: (x: number, z: number) => void): void {
+    this.attackMarkerFn = fn;
   }
 
   setForceReturnFn(fn: (eid: number) => void): void {
@@ -471,6 +476,10 @@ export class CommandManager {
       this.waypointQueues.delete(eid);
       this.formationSystem?.removeFromFormation(eid);
     }
+    // Immediate audio feedback so attack commands feel snappy
+    this.audioManager?.playSfx('attack');
+    // Visual target indicator on the enemy
+    this.attackMarkerFn?.(Position.x[targetEid], Position.z[targetEid]);
     EventBus.emit('unit:attack', { attackerIds: [...entityIds], targetId: targetEid });
   }
 

@@ -46,6 +46,8 @@ export class ProductionSystem {
 
   // Power multiplier per player: 1.0 = full power, 0.5 = low power
   private powerMultipliers = new Map<number, number>();
+  // Actual power generation/consumption values per player (for UI display)
+  private powerInfo = new Map<number, { produced: number; consumed: number }>();
   // Unit count callback for population cap
   private unitCountCallback: ((playerId: number) => number) | null = null;
   private maxUnits = 50;
@@ -137,6 +139,19 @@ export class ProductionSystem {
 
   getPowerMultiplier(playerId: number): number {
     return this.powerMultipliers.get(playerId) ?? 1.0;
+  }
+
+  /** Store actual power generation/consumption values (called by GameTickHandler) */
+  setPowerInfo(playerId: number, produced: number, consumed: number): void {
+    this.powerInfo.set(playerId, { produced, consumed });
+  }
+
+  /** Get power generation/consumption info for UI display */
+  getPowerInfo(playerId: number): { produced: number; consumed: number; ratio: number } {
+    const info = this.powerInfo.get(playerId);
+    if (!info) return { produced: 0, consumed: 0, ratio: 1.0 };
+    const ratio = info.consumed > 0 ? info.produced / info.consumed : (info.produced > 0 ? 2.0 : 1.0);
+    return { produced: info.produced, consumed: info.consumed, ratio };
   }
 
   setUnitCountCallback(cb: (playerId: number) => number): void {

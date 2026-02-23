@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "playwright test",
     "manifest": "node tools/generate-manifest.js",
     "oracle:fast": "vitest run tests/campaign/tok/TokMissionOracle.test.ts tests/campaign/tok/TokBranchOracle.test.ts tests/campaign/tok/TokSimulationHashOracle.test.ts",
     "oracle:full": "TOK_ORACLE_FULL=1 vitest run tests/campaign/tok/TokMissionOracle.test.ts tests/campaign/tok/TokBranchOracle.test.ts tests/campaign/tok/TokSimulationHashOracle.test.ts",
@@ -39,6 +40,7 @@
     "three": "^0.170.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "@types/three": "^0.170.0",
     "esbuild": "^0.24.0",
     "typescript": "^5.7.0",

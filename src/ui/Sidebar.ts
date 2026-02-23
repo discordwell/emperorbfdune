@@ -106,8 +106,53 @@ export class Sidebar {
     }
   };
 
+  /** Compute power bar display values from power info */
+  private getPowerBarStyle(powerInfo: { produced: number; consumed: number; ratio: number }): { textColor: string; pct: number; barColor: string } {
+    const ratio = powerInfo.consumed > 0 ? Math.min(powerInfo.produced / powerInfo.consumed, 2.0) : (powerInfo.produced > 0 ? 2.0 : 1.0);
+    const pct = Math.min(ratio / 2.0 * 100, 100);
+    let barColor: string;
+    if (ratio >= 1.5) barColor = '#4f4';
+    else if (ratio >= 1.0) barColor = '#ff8';
+    else barColor = '#f44';
+    let textColor: string;
+    if (powerInfo.consumed > 0 && powerInfo.produced < powerInfo.consumed) textColor = '#f44';
+    else if (powerInfo.ratio < 1.5 && powerInfo.consumed > 0) textColor = '#ff8';
+    else textColor = '#4f4';
+    return { textColor, pct, barColor };
+  }
+
   private render(): void {
     this.container.innerHTML = '';
+
+    // Power bar (above tabs)
+    const powerWrap = document.createElement('div');
+    powerWrap.id = 'sidebar-power';
+    powerWrap.style.cssText = 'padding:4px 6px;border-bottom:1px solid #333;background:#0d0d1a;';
+
+    const powerRow = document.createElement('div');
+    powerRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin-bottom:2px;';
+    const powerLabel = document.createElement('span');
+    powerLabel.style.cssText = 'font-size:10px;color:#888;';
+    powerLabel.textContent = 'POWER';
+    const powerText = document.createElement('span');
+    powerText.id = 'sidebar-power-text';
+    powerText.style.cssText = 'font-size:11px;font-weight:bold;font-family:monospace;';
+    const powerInfo = this.production.getPowerInfo(this.playerId);
+    const style = this.getPowerBarStyle(powerInfo);
+    powerText.textContent = `${powerInfo.produced}/${powerInfo.consumed}`;
+    powerText.style.color = style.textColor;
+    powerRow.appendChild(powerLabel);
+    powerRow.appendChild(powerText);
+    powerWrap.appendChild(powerRow);
+
+    const powerBarOuter = document.createElement('div');
+    powerBarOuter.style.cssText = 'height:6px;background:#111;border-radius:2px;overflow:hidden;position:relative;';
+    const powerBarFill = document.createElement('div');
+    powerBarFill.id = 'sidebar-power-bar';
+    powerBarFill.style.cssText = `height:100%;width:${style.pct}%;background:${style.barColor};transition:width 0.3s,background 0.3s;border-radius:2px;`;
+    powerBarOuter.appendChild(powerBarFill);
+    powerWrap.appendChild(powerBarOuter);
+    this.container.appendChild(powerWrap);
 
     // Tabs
     const tabBar = document.createElement('div');
@@ -677,10 +722,25 @@ export class Sidebar {
         label.textContent = '';
       }
     }
+
+    // Update sidebar power bar
+    const powerInfo = this.production.getPowerInfo(this.playerId);
+    const style = this.getPowerBarStyle(powerInfo);
+    const powerText = document.getElementById('sidebar-power-text');
+    const powerBar = document.getElementById('sidebar-power-bar');
+    if (powerText) {
+      powerText.textContent = `${powerInfo.produced}/${powerInfo.consumed}`;
+      powerText.style.color = style.textColor;
+    }
+    if (powerBar) {
+      powerBar.style.width = `${style.pct}%`;
+      powerBar.style.background = style.barColor;
+    }
   }
 
   refresh(): void {
     this.render();
+    this.updateProgress();
   }
 
   dispose(): void {

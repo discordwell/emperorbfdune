@@ -30,3 +30,7 @@ tools/xanlib/
 .claude/.ralph-loop.local.md
 claudepad.md
 oldpad.md
+
+# Playwright
+playwright-report/
+test-results/

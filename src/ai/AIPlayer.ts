@@ -76,7 +76,13 @@ export class AIPlayer implements GameSystem {
   private attackCooldown = 500; // 20 seconds between major attacks
   private difficulty = 1.0; // Scales with game time
   private difficultyLevel: 'easy' | 'normal' | 'hard' = 'normal';
-  private maxAttackFronts = 2; // Multi-front: easy=1, normal=2, hard=3
+  private maxAttackFronts = 2; // Multi-front: easy=1, normal=2, hard=4
+
+  // Wave composition variety: rotates each attack to emphasize different unit types
+  // 'mixed' = default balanced, 'infantry' = mostly infantry, 'vehicle' = mostly vehicles, 'counter' = counter-composition
+  private nextWaveEmphasis: 'mixed' | 'infantry' | 'vehicle' | 'counter' = 'mixed';
+  private waveEmphasisRotation: ('mixed' | 'infantry' | 'vehicle' | 'counter')[] = ['mixed', 'vehicle', 'infantry', 'counter'];
+  private waveEmphasisIndex = 0;
 
   // Campaign personality tuning (0..4)
   private personality = 2;
@@ -161,23 +167,30 @@ export class AIPlayer implements GameSystem {
   setDifficulty(level: 'easy' | 'normal' | 'hard'): void {
     this.difficultyLevel = level;
     if (level === 'easy') {
-      this.waveInterval = 1200;
+      this.waveInterval = 1000;
       this.waveSize = 2;
       this.buildCooldown = 350;
       this.attackGroupSize = 3;
       this.attackCooldown = 800;
       this.maxScouts = 1;
       this.maxAttackFronts = 1;
-    } else if (level === 'hard') {
-      this.waveInterval = 500;
-      this.waveSize = 5;
-      this.buildCooldown = 120;
-      this.attackGroupSize = 6;
-      this.attackCooldown = 300;
+    } else if (level === 'normal') {
+      this.waveInterval = 750;
+      this.waveSize = 3;
+      this.buildCooldown = 200;
+      this.attackGroupSize = 4;
+      this.attackCooldown = 500;
       this.maxScouts = 2;
-      this.maxAttackFronts = 3;
+      this.maxAttackFronts = 2;
+    } else if (level === 'hard') {
+      this.waveInterval = 400;
+      this.waveSize = 6;
+      this.buildCooldown = 100;
+      this.attackGroupSize = 7;
+      this.attackCooldown = 250;
+      this.maxScouts = 3;
+      this.maxAttackFronts = 4;
     }
-    // 'normal' uses defaults (maxScouts = 2, maxAttackFronts = 2)
   }
 
   /** 0=fortifier, 1=economic, 2=balanced, 3=raider, 4=berserker */
@@ -543,8 +556,12 @@ export class AIPlayer implements GameSystem {
       if (this.waveInterval > 375) this.waveInterval -= 25;
     }
 
-    // Hunt player harvesters occasionally (every ~30 seconds)
-    if (t % 750 === 0 && this.difficulty > 1.5) {
+    // Hunt player harvesters: Hard=every ~16s from start, Normal=every ~30s after ramp, Easy=every ~40s late game
+    const harvHuntInterval = this.difficultyLevel === 'hard' ? 400
+      : this.difficultyLevel === 'normal' ? 750 : 1000;
+    const harvHuntMinDifficulty = this.difficultyLevel === 'hard' ? 1.0
+      : this.difficultyLevel === 'normal' ? 1.3 : 1.8;
+    if (t % harvHuntInterval === 0 && this.difficulty >= harvHuntMinDifficulty) {
       this.huntHarvesters(world);
     }
   }
@@ -616,8 +633,11 @@ export class AIPlayer implements GameSystem {
       );
     }
 
-    // Hunt player harvesters occasionally
-    if (t % 750 === 0 && techLevel >= 3) {
+    // Hunt player harvesters: more aggressive on Hard difficulty
+    const origHarvInterval = this.difficultyLevel === 'hard' ? 375
+      : this.difficultyLevel === 'normal' ? 600 : 750;
+    const origHarvMinTech = this.difficultyLevel === 'hard' ? 2 : 3;
+    if (t % origHarvInterval === 0 && techLevel >= origHarvMinTech) {
       this.huntHarvesters(world);
     }
   }
@@ -2263,22 +2283,83 @@ export class AIPlayer implements GameSystem {
 
     if (attackableUnits.length >= attackThreshold && canAttack) {
       this.lastAttackTick = this.tickCounter;
-      if (this.playerId === 0) {
-        console.log(`[Agent] ATTACKING with ${attackableUnits.length} units → target (${this.targetX.toFixed(0)}, ${this.targetZ.toFixed(0)})`);
-      }
 
-      // Hard difficulty: split off 2-3 fast units for harvester harassment
+      // --- Harvester targeting: chance to redirect a portion of units toward enemy harvesters ---
+      // Hard=30%, Normal=15%, Easy=0%
+      const harvesterTargetChance = this.difficultyLevel === 'hard' ? 0.30
+        : this.difficultyLevel === 'normal' ? 0.15 : 0;
       let harassUnits: number[] = [];
       let mainUnits = attackableUnits;
-      if (this.difficultyLevel === 'hard' && attackableUnits.length > 5) {
-        harassUnits = attackableUnits.slice(-3);
-        mainUnits = attackableUnits.slice(0, -3);
+
+      if (simRng.random() < harvesterTargetChance && attackableUnits.length > 4) {
+        // Split off 2-4 units for harvester hunting (more on Hard)
+        const harassCount = this.difficultyLevel === 'hard'
+          ? Math.min(4, Math.floor(attackableUnits.length * 0.3))
+          : Math.min(2, Math.floor(attackableUnits.length * 0.2));
+        harassUnits = attackableUnits.slice(-harassCount);
+        mainUnits = attackableUnits.slice(0, -harassCount);
+      } else if (this.difficultyLevel === 'hard' && attackableUnits.length > 5) {
+        // Hard always splits off at least a small harass squad even when not targeting harvesters
+        harassUnits = attackableUnits.slice(-2);
+        mainUnits = attackableUnits.slice(0, -2);
+      }
+
+      // --- Wave composition variety: rotate emphasis each attack ---
+      this.nextWaveEmphasis = this.waveEmphasisRotation[this.waveEmphasisIndex % this.waveEmphasisRotation.length];
+      this.waveEmphasisIndex++;
+
+      if (this.playerId === 0) {
+        console.log(`[Agent] ATTACKING with ${attackableUnits.length} units (emphasis=${this.nextWaveEmphasis}) → target (${this.targetX.toFixed(0)}, ${this.targetZ.toFixed(0)})`);
+      }
+
+      // Reorder mainUnits so emphasis-preferred units are sent first (they lead the charge)
+      if (this.nextWaveEmphasis !== 'mixed') {
+        mainUnits = this.sortUnitsByEmphasis(mainUnits, this.nextWaveEmphasis);
       }
 
       // Plan multi-front attack objectives from scout data
       const objectives = this.planAttackObjectives();
 
-      if (objectives.length <= 1) {
+      // --- Hard difficulty multi-front splitting: even with a single objective,
+      //     50% chance to split forces and attack from 2 directions simultaneously ---
+      const forceMultiFront = this.difficultyLevel === 'hard'
+        && objectives.length <= 1
+        && mainUnits.length >= 6
+        && simRng.random() < 0.5;
+
+      if (forceMultiFront) {
+        // Split into 2 groups approaching from different angles
+        const target = objectives[0] ?? { x: this.targetX, z: this.targetZ };
+        const angle1 = Math.atan2(target.z - this.baseZ, target.x - this.baseX);
+        // Wide flank angle for a genuine pincer
+        const flankOffset = (simRng.random() * 0.4 + 0.6); // 0.6-1.0 radians (~35-57 degrees)
+        const angle2 = angle1 + flankOffset;
+        const angle3 = angle1 - flankOffset;
+
+        const half = Math.ceil(mainUnits.length / 2);
+        const group1 = mainUnits.slice(0, half);
+        const group2 = mainUnits.slice(half);
+
+        // Group 1: approach from left flank
+        const flankDist1 = 15 + simRng.random() * 10;
+        for (const eid of group1) {
+          const spread = randomFloat(-6, 6);
+          MoveTarget.x[eid] = target.x + Math.cos(angle2) * flankDist1 + Math.cos(angle2 + 1.57) * spread;
+          MoveTarget.z[eid] = target.z + Math.sin(angle2) * flankDist1 + Math.sin(angle2 + 1.57) * spread;
+          MoveTarget.active[eid] = 1;
+        }
+        this.combatSystem.setAttackMove([...group1]);
+
+        // Group 2: approach from right flank
+        const flankDist2 = 15 + simRng.random() * 10;
+        for (const eid of group2) {
+          const spread = randomFloat(-6, 6);
+          MoveTarget.x[eid] = target.x + Math.cos(angle3) * flankDist2 + Math.cos(angle3 + 1.57) * spread;
+          MoveTarget.z[eid] = target.z + Math.sin(angle3) * flankDist2 + Math.sin(angle3 + 1.57) * spread;
+          MoveTarget.active[eid] = 1;
+        }
+        this.combatSystem.setAttackMove([...group2]);
+      } else if (objectives.length <= 1) {
         // Single objective: original 2-group flank behavior
         const target = objectives[0] ?? { x: this.targetX, z: this.targetZ };
         const groupSize = Math.ceil(mainUnits.length / 2);
@@ -2346,7 +2427,7 @@ export class AIPlayer implements GameSystem {
         }
       }
 
-      // Dispatch harassment group concurrently (hard difficulty)
+      // Dispatch harassment group concurrently
       if (harassUnits.length > 0) {
         this.sendHarassGroup(world, harassUnits);
       }
@@ -2367,6 +2448,39 @@ export class AIPlayer implements GameSystem {
         MoveTarget.active[eid] = 1;
       }
     }
+  }
+
+  /** Sort units so that emphasis-preferred unit types are first in the array.
+   *  'infantry' = infantry first, 'vehicle' = vehicles first, 'counter' = counter-composition first */
+  private sortUnitsByEmphasis(units: number[], emphasis: 'infantry' | 'vehicle' | 'counter'): number[] {
+    return [...units].sort((a, b) => {
+      const aName = this.getUnitTypeName(a);
+      const bName = this.getUnitTypeName(b);
+      const aDef = aName ? this.rules.units.get(aName) : null;
+      const bDef = bName ? this.rules.units.get(bName) : null;
+
+      let aScore = 0;
+      let bScore = 0;
+
+      if (emphasis === 'infantry') {
+        // Prioritize infantry units
+        aScore = aDef?.infantry ? 1 : 0;
+        bScore = bDef?.infantry ? 1 : 0;
+      } else if (emphasis === 'vehicle') {
+        // Prioritize non-infantry (vehicles/tanks)
+        aScore = aDef && !aDef.infantry ? 1 : 0;
+        bScore = bDef && !bDef.infantry ? 1 : 0;
+      } else if (emphasis === 'counter') {
+        // Prioritize units matching the most-needed counter role
+        const neededRole = this.currentWorld ? this.getMostNeededRole(this.currentWorld) : 'antiVeh';
+        const aRole = aName ? this.unitRoles.get(aName) : null;
+        const bRole = bName ? this.unitRoles.get(bName) : null;
+        aScore = aRole === neededRole ? 1 : 0;
+        bScore = bRole === neededRole ? 1 : 0;
+      }
+
+      return bScore - aScore; // Higher score = earlier in array
+    });
   }
 
   /** Send a small harassment group to target enemy harvesters concurrently with main attack */
@@ -2692,7 +2806,9 @@ export class AIPlayer implements GameSystem {
 
     if (targetHarvester < 0) return;
 
-    // Send 2-3 fast units to intercept the harvester
+    // Send fast units to intercept the harvester (more on Hard)
+    const maxHunters = this.difficultyLevel === 'hard' ? 5
+      : this.difficultyLevel === 'normal' ? 3 : 2;
     const hunters: number[] = [];
     for (const eid of units) {
       if (Owner.playerId[eid] !== this.playerId) continue;
@@ -2702,7 +2818,7 @@ export class AIPlayer implements GameSystem {
       if (this.specialEntities.has(eid)) continue;
       if (MoveTarget.active[eid] === 0) {
         hunters.push(eid);
-        if (hunters.length >= 3) break;
+        if (hunters.length >= maxHunters) break;
       }
     }
 

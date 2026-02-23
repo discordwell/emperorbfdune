@@ -415,6 +415,42 @@ describe('ProductionSystem', () => {
     });
   });
 
+  describe('power info', () => {
+    it('returns default values when no power info set', () => {
+      const info = production.getPowerInfo(0);
+      expect(info.produced).toBe(0);
+      expect(info.consumed).toBe(0);
+      expect(info.ratio).toBe(1.0);
+    });
+
+    it('stores and retrieves power generation/consumption', () => {
+      production.setPowerInfo(0, 300, 200);
+      const info = production.getPowerInfo(0);
+      expect(info.produced).toBe(300);
+      expect(info.consumed).toBe(200);
+      expect(info.ratio).toBe(1.5);
+    });
+
+    it('handles zero consumption (ratio = 2.0)', () => {
+      production.setPowerInfo(0, 100, 0);
+      const info = production.getPowerInfo(0);
+      expect(info.ratio).toBe(2.0);
+    });
+
+    it('handles low power (ratio < 1)', () => {
+      production.setPowerInfo(0, 50, 200);
+      const info = production.getPowerInfo(0);
+      expect(info.ratio).toBe(0.25);
+    });
+
+    it('tracks per-player power independently', () => {
+      production.setPowerInfo(0, 300, 100);
+      production.setPowerInfo(1, 50, 200);
+      expect(production.getPowerInfo(0).ratio).toBe(3.0);
+      expect(production.getPowerInfo(1).ratio).toBe(0.25);
+    });
+  });
+
   describe('save/load', () => {
     it('round-trips production state', () => {
       production.setDifficulty(0, 'hard');

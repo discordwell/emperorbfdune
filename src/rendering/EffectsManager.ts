@@ -90,6 +90,7 @@ export class EffectsManager {
   private beams: Beam[] = [];
   private wreckages: { mesh: THREE.Mesh; age: number; maxAge: number }[] = [];
   private moveMarkers: { mesh: THREE.Mesh; age: number }[] = [];
+  private attackMarkers: { mesh: THREE.Mesh; age: number }[] = [];
   private wormVisuals = new Map<number, WormVisual>();
   // Rally point markers per player
   private rallyMarkers = new Map<number, THREE.Group>();
@@ -98,7 +99,7 @@ export class EffectsManager {
   // Sandstorm overlay
   private sandstormParticles: THREE.Mesh[] = [];
   private sandstormActive = false;
-  private preSandstormFog = { density: 0.003, color: 0xc09050 };
+  private preSandstormFog = { density: 0.007, color: 0xc09050 };
   // Weapon-specific impact lingering effects (gas clouds, ground fire)
   private lingeringImpacts: { meshes: THREE.Mesh[]; life: number; maxLife: number; type: ImpactType }[] = [];
   // Sonic ripple rings
@@ -451,6 +452,19 @@ export class EffectsManager {
     mesh.position.set(x, 0.15, z);
     this.sceneManager.scene.add(mesh);
     this.moveMarkers.push({ mesh, age: 0 });
+  }
+
+  /** Spawn a brief red target indicator on an enemy when attack-commanded */
+  spawnAttackMarker(x: number, z: number): void {
+    const geo = new THREE.RingGeometry(0.4, 0.7, 16);
+    geo.rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xff3333, transparent: true, opacity: 0.8, side: THREE.DoubleSide,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(x, 0.2, z);
+    this.sceneManager.scene.add(mesh);
+    this.attackMarkers.push({ mesh, age: 0 });
   }
 
   spawnWreckage(x: number, y: number, z: number, isBuilding: boolean): void {
@@ -839,6 +853,23 @@ export class EffectsManager {
       }
     }
 
+    // Animate attack markers (shrink + fade out over ~0.4s = 10 ticks)
+    for (let i = this.attackMarkers.length - 1; i >= 0; i--) {
+      const m = this.attackMarkers[i];
+      m.age++;
+      const t = m.age / 10;
+      if (t >= 1) {
+        this.sceneManager.scene.remove(m.mesh);
+        m.mesh.geometry.dispose();
+        (m.mesh.material as THREE.Material).dispose();
+        this.attackMarkers.splice(i, 1);
+      } else {
+        const scale = 1.5 - t * 0.8; // Start large, shrink to focus on target
+        m.mesh.scale.set(scale, 1, scale);
+        (m.mesh.material as THREE.MeshBasicMaterial).opacity = 0.8 * (1 - t);
+      }
+    }
+
     // Animate wreckages (fade out during last 20% of life, sink into ground)
     for (let i = this.wreckages.length - 1; i >= 0; i--) {
       const w = this.wreckages[i];
@@ -922,14 +953,24 @@ export class EffectsManager {
       }
       for (const m of linger.meshes) {
         const mat = m.material as THREE.MeshBasicMaterial;
-        mat.opacity = t * 0.6;
         if (linger.type === ImpactType.Flame) {
-          // Flickering fire effect
+          // Flickering fire effect with stronger opacity
+          mat.opacity = t * 0.7;
           const flicker = 0.8 + Math.sin(Date.now() * 0.01 + m.position.x * 3) * 0.2;
           mat.color.setRGB(1.0 * flicker, 0.3 * flicker, 0.05);
-          m.position.y = 0.2 + Math.sin(Date.now() * 0.008 + m.position.z * 2) * 0.15;
+          m.position.y = 0.15 + Math.sin(Date.now() * 0.008 + m.position.z * 2) * 0.2;
+        } else if (linger.type === ImpactType.Gas) {
+          // Gas: slowly rise, expand outward, and drift laterally
+          mat.opacity = t * 0.55;
+          m.position.y += dtSec * 0.2;
+          // Drift outward from center for spreading effect
+          m.position.x += (Math.sin(m.position.z * 2.7 + Date.now() * 0.001)) * dtSec * 0.15;
+          m.position.z += (Math.cos(m.position.x * 2.3 + Date.now() * 0.001)) * dtSec * 0.15;
+          const gasScale = 1.0 + (1 - t) * 1.5; // Expand to 2.5x (was 1.8x)
+          m.scale.setScalar(gasScale);
         } else {
-          // Gas: slowly rise and expand
+          // Default lingering: fade opacity
+          mat.opacity = t * 0.6;
           m.position.y += dtSec * 0.3;
           const scale = 1.0 + (1 - t) * 0.8;
           m.scale.setScalar(scale);
@@ -971,7 +1012,7 @@ export class EffectsManager {
 
   /** Spawn a small dust puff at the given position (for moving ground units) */
   spawnDustPuff(x: number, z: number): void {
-    if (this.dustPuffs.length > 100) return; // Cap dust particles
+    if (this.dustPuffs.length > 200) return; // Cap dust particles
     if (!this.dustGeo) this.dustGeo = new THREE.SphereGeometry(0.15, 3, 3);
     const mat = new THREE.MeshBasicMaterial({
       color: 0xc8a060, transparent: true, opacity: 0.4, depthWrite: false,
@@ -986,9 +1027,49 @@ export class EffectsManager {
     this.dustPuffs.push({ mesh, life: 0.8, vy: 0.3 + Math.random() * 0.3 });
   }
 
+  /**
+   * Spawn continuous vehicle dust trail behind a moving entity.
+   * Uses sandy color, small size, short lifetime, and low opacity to
+   * create a subtle persistent dust wake behind moving vehicles.
+   * @param x Current world X position
+   * @param z Current world Z position
+   * @param vx Movement velocity X component (or direction toward target)
+   * @param vz Movement velocity Z component (or direction toward target)
+   */
+  spawnVehicleDust(x: number, z: number, vx: number, vz: number): void {
+    if (this.dustPuffs.length > 200) return; // Cap dust particles
+    if (!this.dustGeo) this.dustGeo = new THREE.SphereGeometry(0.15, 3, 3);
+
+    // Normalize movement direction to offset dust behind the vehicle
+    const len = Math.sqrt(vx * vx + vz * vz);
+    const offsetX = len > 0.01 ? -(vx / len) * 0.6 : 0;
+    const offsetZ = len > 0.01 ? -(vz / len) * 0.6 : 0;
+
+    // Spawn 1-2 small puffs behind the vehicle
+    const puffCount = 1 + (Math.random() > 0.5 ? 1 : 0);
+    for (let i = 0; i < puffCount; i++) {
+      const size = 0.3 + Math.random() * 0.2; // 0.3-0.5 scale
+      const opacity = 0.2 + Math.random() * 0.2; // 0.2-0.4 opacity
+      const life = 0.5 + Math.random() * 0.5; // 0.5-1.0 seconds
+
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0xd4a574, transparent: true, opacity, depthWrite: false,
+      });
+      const mesh = new THREE.Mesh(this.dustGeo, mat);
+      mesh.position.set(
+        x + offsetX + (Math.random() - 0.5) * 0.4,
+        0.05 + Math.random() * 0.1,
+        z + offsetZ + (Math.random() - 0.5) * 0.4,
+      );
+      mesh.scale.setScalar(size);
+      this.sceneManager.scene.add(mesh);
+      this.dustPuffs.push({ mesh, life, vy: 0.15 + Math.random() * 0.2 });
+    }
+  }
+
   /** Spawn a green repair sparkle above a building */
   spawnRepairSparkle(x: number, y: number, z: number): void {
-    if (this.dustPuffs.length > 100) return;
+    if (this.dustPuffs.length > 200) return;
     if (!this.dustGeo) this.dustGeo = new THREE.SphereGeometry(0.15, 3, 3);
     const mat = new THREE.MeshBasicMaterial({
       color: 0x44ff44, transparent: true, opacity: 0.7, depthWrite: false,
@@ -1307,12 +1388,15 @@ export class EffectsManager {
     this.waypointLines.clear();
   }
 
-  /** Update building damage smoke/fire based on health ratio */
+  /** Update building damage smoke/fire based on health ratio.
+   *  - Above 50% HP: no visible damage effects
+   *  - 50-25% HP: visible smoke columns (1-3, scaling with damage)
+   *  - Below 25% HP: smoke AND fire particles, more columns, larger/brighter */
   updateBuildingDamage(eid: number, x: number, y: number, z: number, healthRatio: number): void {
     const existing = this.buildingDamageEffects.get(eid);
 
-    // Full health or dead: remove effects
-    if (healthRatio >= 0.75 || healthRatio <= 0) {
+    // No damage effects above 50% HP or when dead
+    if (healthRatio >= 0.5 || healthRatio <= 0) {
       if (existing) {
         for (const smoke of existing) {
           this.sceneManager.scene.remove(smoke.mesh);
@@ -1323,22 +1407,35 @@ export class EffectsManager {
       return;
     }
 
-    // Determine how many smoke columns based on damage
-    let targetCount = 0;
+    // Determine smoke/fire column count and whether fire is active
+    // Scale progressively: more damage = more effects
+    let targetCount: number;
     let isOnFire = false;
-    if (healthRatio < 0.25) {
+    if (healthRatio < 0.10) {
+      // Near-death: maximum visual intensity
+      targetCount = 5;
+      isOnFire = true;
+    } else if (healthRatio < 0.25) {
+      // Critical: heavy smoke + fire
+      targetCount = 4;
+      isOnFire = true;
+    } else if (healthRatio < 0.35) {
+      // Serious damage: moderate smoke
       targetCount = 3;
-      isOnFire = true;
-    } else if (healthRatio < 0.5) {
+    } else if (healthRatio < 0.45) {
+      // Moderate damage: light smoke
       targetCount = 2;
-      isOnFire = true;
     } else {
+      // Light damage: single smoke wisp
       targetCount = 1;
     }
 
-    // Create effects if needed
+    // Damage intensity factor (0 at 50%, 1 at 0%) — drives scale and opacity
+    const damageIntensity = (0.5 - healthRatio) / 0.5;
+
+    // Create effects if column count changed
     if (!existing || existing.length !== targetCount) {
-      // Remove old
+      // Remove old effects
       if (existing) {
         for (const smoke of existing) {
           this.sceneManager.scene.remove(smoke.mesh);
@@ -1348,34 +1445,60 @@ export class EffectsManager {
 
       const smokes: DamageSmoke[] = [];
       for (let i = 0; i < targetCount; i++) {
-        const color = isOnFire ? 0xff4400 : 0x444444;
-        const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.6 });
+        const color = isOnFire ? 0xff4400 : 0x555555;
+        const mat = new THREE.MeshBasicMaterial({
+          color,
+          transparent: true,
+          opacity: 0.5 + damageIntensity * 0.3,
+          depthWrite: false,
+        });
         const mesh = new THREE.Mesh(this.smokeGeo, mat);
-        const offsetX = (Math.random() - 0.5) * 2;
-        const offsetZ = (Math.random() - 0.5) * 2;
-        mesh.position.set(x + offsetX, y + 2, z + offsetZ);
+        // Spread columns across the building footprint
+        const offsetX = (Math.random() - 0.5) * 3;
+        const offsetZ = (Math.random() - 0.5) * 3;
+        const baseY = y + 1.5 + Math.random() * 1.5;
+        mesh.position.set(x + offsetX, baseY, z + offsetZ);
         this.sceneManager.scene.add(mesh);
-        smokes.push({ mesh, baseY: y + 2, phase: Math.random() * Math.PI * 2 });
+        smokes.push({ mesh, baseY, phase: Math.random() * Math.PI * 2 });
       }
       this.buildingDamageEffects.set(eid, smokes);
     }
 
-    // Animate existing smoke
+    // Animate existing smoke/fire columns
     const effects = this.buildingDamageEffects.get(eid)!;
     const t = Date.now() * 0.001;
-    for (const smoke of effects) {
-      // Bob up and down, pulse scale
-      smoke.mesh.position.y = smoke.baseY + Math.sin(t * 2 + smoke.phase) * 0.5 + 0.5;
-      const scale = 0.5 + Math.sin(t * 3 + smoke.phase) * 0.2;
+    for (let i = 0; i < effects.length; i++) {
+      const smoke = effects[i];
+      // Rise and bob — damaged buildings have taller, more turbulent plumes
+      const riseHeight = 0.5 + damageIntensity * 1.5;
+      smoke.mesh.position.y = smoke.baseY + Math.sin(t * 2 + smoke.phase) * 0.4 + riseHeight;
+
+      // Scale pulses larger with more damage
+      const baseScale = 0.4 + damageIntensity * 0.8;
+      const scale = baseScale + Math.sin(t * 3 + smoke.phase) * 0.2;
       smoke.mesh.scale.setScalar(scale);
+
       const mat = smoke.mesh.material as THREE.MeshBasicMaterial;
-      mat.opacity = 0.4 + Math.sin(t * 4 + smoke.phase) * 0.2;
-      // Fire flickers between orange and red; reset to grey smoke when healed
+      // Opacity: denser smoke at lower health
+      mat.opacity = (0.35 + damageIntensity * 0.35) + Math.sin(t * 4 + smoke.phase) * 0.15;
+
       if (isOnFire) {
-        const flicker = Math.sin(t * 8 + smoke.phase) * 0.5 + 0.5;
-        mat.color.setRGB(1.0, 0.2 + flicker * 0.3, flicker * 0.1);
+        // Fire columns: alternate between fire and smoke visuals
+        // Even-indexed columns are fire (orange/red flicker), odd are dark smoke
+        if (i % 2 === 0) {
+          const flicker = Math.sin(t * 10 + smoke.phase) * 0.5 + 0.5;
+          mat.color.setRGB(1.0, 0.15 + flicker * 0.35, flicker * 0.08);
+          mat.opacity = Math.min(1.0, mat.opacity + 0.15); // Fire is brighter
+        } else {
+          // Dark billowing smoke rising above fire
+          const smokeShade = 0.15 + Math.sin(t * 2.5 + smoke.phase) * 0.05;
+          mat.color.setRGB(smokeShade, smokeShade, smokeShade);
+          smoke.mesh.position.y += 0.8; // Smoke rises higher than fire
+        }
       } else {
-        mat.color.setRGB(0.27, 0.27, 0.27); // 0x444444
+        // Grey smoke only — slightly varying shade for visual interest
+        const shade = 0.3 + Math.sin(t * 1.5 + smoke.phase) * 0.05;
+        mat.color.setRGB(shade, shade, shade);
       }
     }
   }
@@ -1684,67 +1807,75 @@ export class EffectsManager {
     }
   }
 
-  /** Missile/rocket: Medium explosion with smoke trail lingering at impact point */
+  /** Missile/rocket: Bigger explosion with debris particles and smoke trail */
   private spawnMissileImpact(x: number, z: number, scale: number): void {
-    // Core explosion (smaller than HE but sharper)
-    const particleCount = Math.round(7 * scale);
+    // Core explosion — more particles than before for a bigger blast
+    const particleCount = Math.round(12 * scale);
     const y = 0.2;
 
     for (let i = 0; i < particleCount; i++) {
-      const isFire = i < particleCount * 0.6;
+      const isFire = i < particleCount * 0.5;
+      const isDebris = !isFire && i > particleCount * 0.7;
       const color = isFire
         ? new THREE.Color(1.0, 0.3 + Math.random() * 0.3, 0.0)
-        : new THREE.Color(0.5, 0.45, 0.4); // Lighter grey smoke
-      const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9 });
+        : isDebris
+          ? new THREE.Color(0.3, 0.25, 0.2) // Dark debris chunks
+          : new THREE.Color(0.5, 0.45, 0.4); // Lighter grey smoke
+      const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: isFire ? 1.0 : 0.85 });
       const mesh = new THREE.Mesh(this.particleGeo, mat);
       mesh.position.set(x, y + 0.5, z);
-      mesh.scale.setScalar((0.12 + Math.random() * 0.2) * scale);
+      const meshScale = isDebris
+        ? (0.08 + Math.random() * 0.12) * scale // Small debris
+        : (0.15 + Math.random() * 0.25) * scale;
+      mesh.scale.setScalar(meshScale);
       this.sceneManager.scene.add(mesh);
 
       const angle = Math.random() * Math.PI * 2;
-      const spd = (3 + Math.random() * 4) * scale;
+      const elevation = Math.random() * Math.PI * 0.4 + 0.2;
+      const spd = isDebris
+        ? (6 + Math.random() * 5) * scale // Debris flies farther
+        : (3 + Math.random() * 4) * scale;
       this.explosions.push({
         particles: [{
           mesh,
           velocity: new THREE.Vector3(
-            Math.cos(angle) * spd,
-            (2 + Math.random() * 3) * scale,
-            Math.sin(angle) * spd
+            Math.cos(angle) * Math.cos(elevation) * spd,
+            (Math.sin(elevation) * spd * 1.3) * scale,
+            Math.sin(angle) * Math.cos(elevation) * spd
           ),
-          life: 0.3 + Math.random() * 0.3,
-          maxLife: 0.6,
-          gravity: 5,
+          life: isDebris ? 0.5 + Math.random() * 0.3 : 0.3 + Math.random() * 0.3,
+          maxLife: isDebris ? 0.8 : 0.6,
+          gravity: isDebris ? 12 : 5,
         }],
         flash: null, flashLife: 0,
       });
     }
 
-    // Lingering smoke column at impact point (3-4 smoke puffs rising)
-    for (let i = 0; i < 3; i++) {
+    // Lingering smoke column at impact point (4-5 smoke puffs rising, denser)
+    const smokeCount = Math.round(4 + scale);
+    for (let i = 0; i < smokeCount; i++) {
       const smokeMat = new THREE.MeshBasicMaterial({
-        color: 0x555555, transparent: true, opacity: 0.5, depthWrite: false,
+        color: 0x444444, transparent: true, opacity: 0.55, depthWrite: false,
       });
       const smokeMesh = new THREE.Mesh(this.smokeGeo, smokeMat);
       smokeMesh.position.set(
-        x + (Math.random() - 0.5) * 0.5 * scale,
-        0.3 + i * 0.3,
-        z + (Math.random() - 0.5) * 0.5 * scale,
+        x + (Math.random() - 0.5) * 0.8 * scale,
+        0.3 + i * 0.25,
+        z + (Math.random() - 0.5) * 0.8 * scale,
       );
-      smokeMesh.scale.setScalar(0.3 * scale);
+      smokeMesh.scale.setScalar((0.3 + Math.random() * 0.15) * scale);
       this.sceneManager.scene.add(smokeMesh);
-      this.dustPuffs.push({ mesh: smokeMesh, life: 1.2 + Math.random() * 0.4, vy: 0.6 + Math.random() * 0.3 });
+      this.dustPuffs.push({ mesh: smokeMesh, life: 1.5 + Math.random() * 0.5, vy: 0.5 + Math.random() * 0.4 });
     }
 
-    // Flash
-    const flash = new THREE.PointLight(0xff4400, 6 * scale, 8 * scale);
-    flash.position.set(x, y + 0.8, z);
+    // Bright flash (stronger)
+    const flash = new THREE.PointLight(0xff4400, 10 * scale, 12 * scale);
+    flash.position.set(x, y + 1.0, z);
     this.sceneManager.scene.add(flash);
-    this.explosions.push({ particles: [], flash, flashLife: 0.1 });
+    this.explosions.push({ particles: [], flash, flashLife: 0.12 });
 
-    // Scorch mark
-    if (scale >= 0.6) {
-      this.spawnDecal(x, z, 'small');
-    }
+    // Scorch mark (always for missiles)
+    this.spawnDecal(x, z, scale >= 1.0 ? 'medium' : 'small');
   }
 
   /** Sonic: Blue/purple ripple wave expanding outward (Atreides sonic tank) */
@@ -1754,59 +1885,59 @@ export class EffectsManager {
       this.impactRingGeo = new THREE.RingGeometry(0.3, 0.6, 24);
     }
 
-    // Spawn 2-3 concentric ripples with staggered timing
-    const rippleCount = Math.round(2 + scale);
+    // Spawn 3-5 concentric ripples with staggered timing for dramatic effect
+    const rippleCount = Math.round(3 + scale * 1.5);
     for (let i = 0; i < rippleCount; i++) {
-      const ringGeo = new THREE.RingGeometry(0.2 + i * 0.15, 0.5 + i * 0.15, 24);
+      const ringGeo = new THREE.RingGeometry(0.3 + i * 0.2, 0.8 + i * 0.2, 32);
       ringGeo.rotateX(-Math.PI / 2);
-      const color = i % 2 === 0 ? 0x6644ff : 0x4488ff; // Alternate blue/purple
+      const color = i % 2 === 0 ? 0x8866ff : 0x55aaff; // Vivid blue/purple alternation
       const mat = new THREE.MeshBasicMaterial({
-        color, transparent: true, opacity: 0.7, side: THREE.DoubleSide, depthWrite: false,
+        color, transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false,
       });
       const mesh = new THREE.Mesh(ringGeo, mat);
-      mesh.position.set(x, 0.15, z);
-      mesh.scale.set(0.2, 0.2, 1);
+      mesh.position.set(x, 0.2, z);
+      mesh.scale.set(0.3, 0.3, 1);
       this.sceneManager.scene.add(mesh);
 
-      const maxScale = (3 + scale * 2) * (1 + i * 0.3);
-      const life = 0.4 + i * 0.1;
+      const maxScale = (5 + scale * 3) * (1 + i * 0.35);
+      const life = 0.6 + i * 0.12;
       this.sonicRipples.push({ mesh, life, maxLife: life, maxScale });
     }
 
-    // Brief blue-purple flash
-    const flash = new THREE.PointLight(0x6644ff, 4 * scale, 6 * scale);
-    flash.position.set(x, 0.8, z);
+    // Bright blue-purple flash (stronger)
+    const flash = new THREE.PointLight(0x8866ff, 8 * scale, 10 * scale);
+    flash.position.set(x, 1.0, z);
     this.sceneManager.scene.add(flash);
-    this.explosions.push({ particles: [], flash, flashLife: 0.1 });
+    this.explosions.push({ particles: [], flash, flashLife: 0.15 });
 
-    // A few shimmering particles
-    for (let i = 0; i < Math.round(4 * scale); i++) {
-      const color = new THREE.Color(0.4 + Math.random() * 0.3, 0.3, 0.8 + Math.random() * 0.2);
-      const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8 });
+    // More visible shimmering particles
+    for (let i = 0; i < Math.round(6 * scale); i++) {
+      const color = new THREE.Color(0.5 + Math.random() * 0.3, 0.3 + Math.random() * 0.2, 0.9 + Math.random() * 0.1);
+      const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9 });
       const mesh = new THREE.Mesh(this.particleGeo, mat);
       mesh.position.set(x, 0.5, z);
-      mesh.scale.setScalar(0.08 * scale);
+      mesh.scale.setScalar(0.12 * scale);
       this.sceneManager.scene.add(mesh);
 
       const angle = Math.random() * Math.PI * 2;
-      const spd = (3 + Math.random() * 2) * scale;
+      const spd = (4 + Math.random() * 3) * scale;
       this.explosions.push({
         particles: [{
           mesh,
-          velocity: new THREE.Vector3(Math.cos(angle) * spd, 0.5 + Math.random(), Math.sin(angle) * spd),
-          life: 0.3 + Math.random() * 0.2,
-          maxLife: 0.5,
-          gravity: 2,
+          velocity: new THREE.Vector3(Math.cos(angle) * spd, 0.8 + Math.random() * 1.5, Math.sin(angle) * spd),
+          life: 0.4 + Math.random() * 0.3,
+          maxLife: 0.7,
+          gravity: 1.5,
         }],
         flash: null, flashLife: 0,
       });
     }
   }
 
-  /** Laser: Red/green flash with brief beam glow at impact */
+  /** Laser: Bright flash + brief vertical beam line at impact */
   private spawnLaserImpact(x: number, z: number, scale: number): void {
     const y = 0.5;
-    const particleCount = Math.round(4 * scale);
+    const particleCount = Math.round(6 * scale);
 
     // Bright red/green spark particles that scatter quickly
     for (let i = 0; i < particleCount; i++) {
@@ -1817,7 +1948,7 @@ export class EffectsManager {
       const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1.0 });
       const mesh = new THREE.Mesh(this.particleGeo, mat);
       mesh.position.set(x, y, z);
-      mesh.scale.setScalar(0.06 * scale);
+      mesh.scale.setScalar(0.08 * scale);
       this.sceneManager.scene.add(mesh);
 
       const angle = Math.random() * Math.PI * 2;
@@ -1826,73 +1957,85 @@ export class EffectsManager {
         particles: [{
           mesh,
           velocity: new THREE.Vector3(Math.cos(angle) * spd, 2 + Math.random() * 3, Math.sin(angle) * spd),
-          life: 0.1 + Math.random() * 0.1,
-          maxLife: 0.2,
+          life: 0.12 + Math.random() * 0.12,
+          maxLife: 0.25,
           gravity: 15,
         }],
         flash: null, flashLife: 0,
       });
     }
 
-    // Bright flash — red tinted
-    const flash = new THREE.PointLight(0xff2200, 5 * scale, 5 * scale);
+    // Bright flash — red tinted (bigger and brighter)
+    const flash = new THREE.PointLight(0xff2200, 8 * scale, 8 * scale);
     flash.position.set(x, y, z);
     this.sceneManager.scene.add(flash);
-    this.explosions.push({ particles: [], flash, flashLife: 0.08 });
+    this.explosions.push({ particles: [], flash, flashLife: 0.1 });
 
-    // Brief impact glow (emissive sphere that fades fast)
+    // Brief vertical beam line at impact point (laser column effect)
+    const beamHeight = 3.0 * scale;
+    const beamStart = new THREE.Vector3(x, y, z);
+    const beamEnd = new THREE.Vector3(x, y + beamHeight, z);
+    const beamGeo = new THREE.BufferGeometry().setFromPoints([beamStart, beamEnd]);
+    const beamMat = new THREE.LineBasicMaterial({
+      color: 0xff4422, transparent: true, opacity: 0.9, linewidth: 2,
+    });
+    const beamLine = new THREE.Line(beamGeo, beamMat);
+    this.sceneManager.scene.add(beamLine);
+    this.beams.push({ line: beamLine, life: 0.18 });
+
+    // Impact glow (emissive sphere that fades fast)
     const glowMat = new THREE.MeshBasicMaterial({
-      color: 0xff4422, transparent: true, opacity: 0.8, depthWrite: false,
+      color: 0xff4422, transparent: true, opacity: 0.9, depthWrite: false,
     });
     const glowMesh = new THREE.Mesh(this.particleGeo, glowMat);
     glowMesh.position.set(x, y, z);
-    glowMesh.scale.setScalar(0.5 * scale);
+    glowMesh.scale.setScalar(0.6 * scale);
     this.sceneManager.scene.add(glowMesh);
     this.explosions.push({
       particles: [{
         mesh: glowMesh,
-        velocity: new THREE.Vector3(0, 0.2, 0),
-        life: 0.12,
-        maxLife: 0.12,
+        velocity: new THREE.Vector3(0, 0.3, 0),
+        life: 0.15,
+        maxLife: 0.15,
         gravity: 0,
       }],
       flash: null, flashLife: 0,
     });
   }
 
-  /** Gas/chemical: Green cloud that lingers 1-2 seconds (Tleilaxu) */
+  /** Gas/chemical: Green cloud that spreads outward and fades slowly (Tleilaxu) */
   private spawnGasImpact(x: number, z: number, scale: number): void {
     // Cap lingering effects to prevent performance issues
     if (this.lingeringImpacts.length > 20) return;
 
     const meshes: THREE.Mesh[] = [];
-    const cloudCount = Math.round(4 * scale);
-    const life = 1.5 + scale * 0.5;
+    const cloudCount = Math.round(6 * scale); // More cloud puffs for denser coverage
+    const life = 2.5 + scale * 0.8; // Longer lingering (was 1.5 + 0.5)
 
     for (let i = 0; i < cloudCount; i++) {
-      const green = 0.5 + Math.random() * 0.3;
+      const green = 0.45 + Math.random() * 0.35;
       const mat = new THREE.MeshBasicMaterial({
-        color: new THREE.Color(0.15, green, 0.1),
-        transparent: true, opacity: 0.5, depthWrite: false,
+        color: new THREE.Color(0.12, green, 0.08),
+        transparent: true, opacity: 0.55, depthWrite: false,
       });
       const mesh = new THREE.Mesh(this.smokeGeo, mat);
       mesh.position.set(
-        x + (Math.random() - 0.5) * 1.5 * scale,
-        0.3 + Math.random() * 0.5,
-        z + (Math.random() - 0.5) * 1.5 * scale,
+        x + (Math.random() - 0.5) * 2.0 * scale,
+        0.25 + Math.random() * 0.6,
+        z + (Math.random() - 0.5) * 2.0 * scale,
       );
-      mesh.scale.setScalar((0.4 + Math.random() * 0.3) * scale);
+      mesh.scale.setScalar((0.5 + Math.random() * 0.4) * scale);
       this.sceneManager.scene.add(mesh);
       meshes.push(mesh);
     }
 
     this.lingeringImpacts.push({ meshes, life, maxLife: life, type: ImpactType.Gas });
 
-    // Initial puff burst
-    const flash = new THREE.PointLight(0x22aa22, 3 * scale, 5 * scale);
+    // Initial puff burst (brighter, wider)
+    const flash = new THREE.PointLight(0x33cc33, 5 * scale, 7 * scale);
     flash.position.set(x, 0.8, z);
     this.sceneManager.scene.add(flash);
-    this.explosions.push({ particles: [], flash, flashLife: 0.15 });
+    this.explosions.push({ particles: [], flash, flashLife: 0.2 });
   }
 
   /** Electric: Blue-white sparks arcing outward (Ix weapons, Ordos Berserk) */
@@ -1956,64 +2099,73 @@ export class EffectsManager {
     this.explosions.push({ particles: [], flash, flashLife: 0.1 });
   }
 
-  /** Flame: Persistent ground fire effect for 1-2 seconds */
+  /** Flame: Persistent ground fire with lingering orange fire particles */
   private spawnFlameImpact(x: number, z: number, scale: number): void {
     // Cap lingering effects
     if (this.lingeringImpacts.length > 20) return;
 
     const meshes: THREE.Mesh[] = [];
-    const flameCount = Math.round(3 * scale);
-    const life = 1.2 + scale * 0.5;
+    const flameCount = Math.round(5 * scale); // More ground fire patches
+    const life = 1.8 + scale * 0.7; // Longer lingering (was 1.2 + 0.5)
 
     for (let i = 0; i < flameCount; i++) {
+      const orangeVariant = 0.3 + Math.random() * 0.35;
       const mat = new THREE.MeshBasicMaterial({
-        color: new THREE.Color(1.0, 0.4 + Math.random() * 0.2, 0.05),
-        transparent: true, opacity: 0.6, depthWrite: false,
+        color: new THREE.Color(1.0, orangeVariant, 0.05),
+        transparent: true, opacity: 0.7, depthWrite: false,
       });
       const mesh = new THREE.Mesh(this.smokeGeo, mat);
       mesh.position.set(
-        x + (Math.random() - 0.5) * 1.0 * scale,
-        0.2,
-        z + (Math.random() - 0.5) * 1.0 * scale,
+        x + (Math.random() - 0.5) * 1.5 * scale,
+        0.15 + Math.random() * 0.15,
+        z + (Math.random() - 0.5) * 1.5 * scale,
       );
-      mesh.scale.setScalar((0.25 + Math.random() * 0.2) * scale);
+      mesh.scale.setScalar((0.3 + Math.random() * 0.25) * scale);
       this.sceneManager.scene.add(mesh);
       meshes.push(mesh);
     }
 
     this.lingeringImpacts.push({ meshes, life, maxLife: life, type: ImpactType.Flame });
 
-    // Initial burst of fire particles shooting upward
-    for (let i = 0; i < Math.round(5 * scale); i++) {
-      const color = new THREE.Color(1.0, 0.2 + Math.random() * 0.4, 0.0);
-      const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9 });
+    // Initial burst of fire particles shooting upward (more and larger)
+    for (let i = 0; i < Math.round(8 * scale); i++) {
+      const color = new THREE.Color(1.0, 0.15 + Math.random() * 0.45, 0.0);
+      const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95 });
       const mesh = new THREE.Mesh(this.particleGeo, mat);
-      mesh.position.set(x, 0.3, z);
-      mesh.scale.setScalar(0.1 * scale);
+      mesh.position.set(
+        x + (Math.random() - 0.5) * 0.5 * scale,
+        0.3,
+        z + (Math.random() - 0.5) * 0.5 * scale,
+      );
+      mesh.scale.setScalar((0.1 + Math.random() * 0.08) * scale);
       this.sceneManager.scene.add(mesh);
 
       const angle = Math.random() * Math.PI * 2;
-      const spd = (1.5 + Math.random() * 2) * scale;
+      const spd = (1.5 + Math.random() * 2.5) * scale;
       this.explosions.push({
         particles: [{
           mesh,
-          velocity: new THREE.Vector3(Math.cos(angle) * spd, 3 + Math.random() * 3, Math.sin(angle) * spd),
-          life: 0.3 + Math.random() * 0.2,
-          maxLife: 0.5,
-          gravity: 4,
+          velocity: new THREE.Vector3(
+            Math.cos(angle) * spd,
+            2.5 + Math.random() * 3.5,
+            Math.sin(angle) * spd
+          ),
+          life: 0.4 + Math.random() * 0.3,
+          maxLife: 0.7,
+          gravity: 3,
         }],
         flash: null, flashLife: 0,
       });
     }
 
-    // Orange flash
-    const flash = new THREE.PointLight(0xff6600, 5 * scale, 6 * scale);
-    flash.position.set(x, 0.5, z);
+    // Orange flash (brighter)
+    const flash = new THREE.PointLight(0xff6600, 8 * scale, 8 * scale);
+    flash.position.set(x, 0.6, z);
     this.sceneManager.scene.add(flash);
-    this.explosions.push({ particles: [], flash, flashLife: 0.12 });
+    this.explosions.push({ particles: [], flash, flashLife: 0.15 });
 
     // Scorch decal
-    this.spawnDecal(x, z, 'small');
+    this.spawnDecal(x, z, scale >= 1.0 ? 'medium' : 'small');
   }
 
   // --- Death Animation Variant Effects ---
