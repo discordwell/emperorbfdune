@@ -106,6 +106,12 @@ export async function loadPhaseRules(): Promise<void> {
 
 // ── Phase State ────────────────────────────────────────────────────
 
+/** Per-territory attempt tracking for D/Fail/Win variant selection. */
+export interface TerritoryAttempt {
+  attempts: number;
+  lastOutcome: 'none' | 'victory' | 'defeat';
+}
+
 export interface PhaseState {
   currentPhase: number;
   battlesInPhase: number;
@@ -120,6 +126,8 @@ export interface PhaseState {
   isVictory: boolean;
   civilWarChoice: 'copec' | 'gunseng' | null; // For HK civil war
   playerHouse: HousePrefix;
+  /** Per-territory attempt history: territoryId → attempt data */
+  territoryHistory?: Record<number, TerritoryAttempt>;
 }
 
 export class CampaignPhaseManager {
@@ -140,6 +148,7 @@ export class CampaignPhaseManager {
       isVictory: false,
       civilWarChoice: null,
       playerHouse,
+      territoryHistory: {},
     };
     // Tutorial auto-advances to Phase 1
     this.advancePhase(1);
@@ -176,6 +185,31 @@ export class CampaignPhaseManager {
     if (phase <= 1 || phase === 10) return 1;
     if (phase === 2 || phase === 11 || phase === 14 || phase === 15) return 2;
     return 3;
+  }
+
+  /** Get territory attempt history for variant selection. */
+  getTerritoryHistory(territoryId: number): TerritoryAttempt | undefined {
+    return this.state.territoryHistory?.[territoryId];
+  }
+
+  /** Record a territory attempt (call before battle starts). */
+  recordTerritoryAttempt(territoryId: number): void {
+    if (!this.state.territoryHistory) this.state.territoryHistory = {};
+    const existing = this.state.territoryHistory[territoryId];
+    if (existing) {
+      existing.attempts++;
+    } else {
+      this.state.territoryHistory[territoryId] = { attempts: 1, lastOutcome: 'none' };
+    }
+  }
+
+  /** Record territory battle outcome (call after battle ends). */
+  recordTerritoryOutcome(territoryId: number, victory: boolean): void {
+    if (!this.state.territoryHistory) this.state.territoryHistory = {};
+    const existing = this.state.territoryHistory[territoryId];
+    if (existing) {
+      existing.lastOutcome = victory ? 'victory' : 'defeat';
+    }
   }
 
   /** Record a battle result. Returns true if phase should advance. */

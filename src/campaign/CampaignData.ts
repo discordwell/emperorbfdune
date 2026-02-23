@@ -311,6 +311,11 @@ export function getForcedMission(territory: number, playerHouse: HousePrefix): F
 // ── Special Mission Names ──────────────────────────────────────────
 
 export const SPECIAL_MISSIONS: Record<string, Record<HousePrefix, string>> = {
+  tutorial: {
+    AT: 'ATTutorial',
+    HK: 'HKStart',
+    OR: 'ORStart',
+  },
   heighliner: {
     AT: 'Atreides Heighliner Mission',
     HK: 'HHK Heighliner Mission',

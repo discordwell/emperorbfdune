@@ -266,6 +266,7 @@ async function main() {
               const tempSubSys = SubHouseSystem.deserialize(cState.subHouseState, cState.housePrefix as HousePrefix);
               subHousePresent = tempSubSys.getMissionSubHouse(phaseManager.getCurrentPhase(), house.campaignTerritoryId!) ?? null;
             }
+            const tHistory = phaseManager.getTerritoryHistory(house.campaignTerritoryId!);
             missionConfig = generateMissionConfig({
               playerHouse: cState.housePrefix as HousePrefix,
               phase: phaseManager.getCurrentPhase(),
@@ -276,6 +277,7 @@ async function main() {
               isAttack: territory.owner !== 'player',
               territoryDiff: playerCount - enemyCount,
               subHousePresent,
+              territoryHistory: tHistory,
             });
             activeMissionConfig = missionConfig;
             house.enemyPrefix = enemyHouse;
@@ -340,6 +342,7 @@ async function main() {
           ? territory.ownerHouse as HousePrefix : cState.enemyPrefix as HousePrefix;
         const subSys2 = campaign.getSubHouseSystem();
         const missionSH = subSys2.getMissionSubHouse(phase, house.campaignTerritoryId!) ?? null;
+        const tHist2 = phaseManager.getTerritoryHistory(house.campaignTerritoryId!);
         activeMissionConfig = generateMissionConfig({
           playerHouse: cState.housePrefix as HousePrefix,
           phase, phaseType,
@@ -349,9 +352,15 @@ async function main() {
           isAttack: territory.owner !== 'player',
           territoryDiff: playerCount - enemyCount,
           subHousePresent: missionSH,
+          territoryHistory: tHist2,
         });
       }
     }
+
+    // Record territory attempt AFTER config generation so selectScriptVariant
+    // sees the previous attempt count (not the current one) in both code paths
+    phaseManager.recordTerritoryAttempt(house.campaignTerritoryId!);
+    campaign.saveCampaign();
 
     missionRuntime = deriveMissionRuntimeSettings({ missionConfig: activeMissionConfig, phaseType, phase });
     // Store for wiring after ctx is created
@@ -403,6 +412,7 @@ async function main() {
 
       // Capture phase BEFORE recordBattleResult (which may advance the phase)
       const missionPhase = phaseManagerRef!.getCurrentPhase();
+      phaseManagerRef!.recordTerritoryOutcome(house.campaignTerritoryId!, true);
       campaignRef!.recordVictory(house.campaignTerritoryId!);
       lastBattleResult = phaseManagerRef!.recordBattleResult(true, capturedTerritory, isJumpPoint);
 
@@ -423,6 +433,7 @@ async function main() {
     });
 
     ctx.victorySystem.setDefeatCallback(() => {
+      phaseManagerRef!.recordTerritoryOutcome(house.campaignTerritoryId!, false);
       phaseManagerRef!.recordBattleResult(false, false, false);
       campaignRef!.recordDefeat();
     });
@@ -1016,6 +1027,30 @@ async function main() {
       } catch (e) {
         console.warn('EvalChecklist module not available:', e);
       }
+    },
+    gameStateSnapshot() {
+      const world = ctx.game.getWorld();
+      const tick = ctx.game.getTickCount();
+      const playerUnits: Record<number, number> = {};
+      const playerBuildings: Record<number, number> = {};
+      for (const eid of unitQuery(world)) {
+        if (Health.current[eid] <= 0) continue;
+        const owner = Owner.playerId[eid];
+        playerUnits[owner] = (playerUnits[owner] ?? 0) + 1;
+      }
+      for (const eid of buildingQuery(world)) {
+        if (Health.current[eid] <= 0) continue;
+        const owner = Owner.playerId[eid];
+        playerBuildings[owner] = (playerBuildings[owner] ?? 0) + 1;
+      }
+      const credits: Record<number, number> = {};
+      if (ctx.harvestSystem?.getSolaris) {
+        for (let p = 0; p < 4; p++) {
+          const s = ctx.harvestSystem.getSolaris(p);
+          if (s > 0) credits[p] = s;
+        }
+      }
+      return { tick, playerUnits, playerBuildings, credits };
     },
   };
 }

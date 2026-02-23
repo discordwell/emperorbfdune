@@ -311,8 +311,9 @@ export class CampaignMap {
       this.expandedThisCycle = true;
     }
 
-    // Use 3D campaign map if canvas/renderer available
-    if (this.canvas && this.renderer) {
+    // Use 3D campaign map if canvas/renderer available (unless ?ui=2d)
+    const force2D = new URLSearchParams(window.location.search).get('ui') === '2d';
+    if (!force2D && this.canvas && this.renderer) {
       try {
         const map3D = new CampaignMap3D(this.canvas, this.renderer, this.state);
         const territoryId = await map3D.show();

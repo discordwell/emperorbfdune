@@ -46,6 +46,50 @@ const CREDITS_BY_PHASE: Record<string, number> = {
   final: 7500,
 };
 
+import type { TerritoryAttempt } from './CampaignPhaseManager';
+
+/**
+ * Select the mission script variant based on attempt history.
+ * Chain: M (first) → D (replay) → Fail (after D loss) / Win (after D win, rare).
+ * Falls back to earlier variants if the requested one doesn't exist in manifest.
+ */
+export function selectScriptVariant(
+  baseScriptId: string,
+  history: TerritoryAttempt | undefined,
+): string {
+  if (!history || history.attempts === 0) {
+    // First time: M-variant (the baseScriptId already contains 'M')
+    return baseScriptId;
+  }
+
+  // Extract the pattern: {HOUSE}P{PHASE}M{TERRITORY}{SUBHOUSE}
+  // Replace M with D for replay variants
+  const dVariant = baseScriptId.replace(/P(\d+)M(\d+)/, 'P$1D$2');
+  if (dVariant === baseScriptId) {
+    // Not a standard mission pattern (special mission) — no variants
+    return baseScriptId;
+  }
+
+  if (history.attempts === 1 || history.lastOutcome === 'none') {
+    // Second attempt → D-variant
+    return dVariant;
+  }
+
+  if (history.attempts >= 2) {
+    // After D-variant: Fail if lost, Win if won
+    if (history.lastOutcome === 'defeat') {
+      return dVariant + 'Fail';
+    }
+    if (history.lastOutcome === 'victory') {
+      return dVariant + 'Win';
+    }
+    // Default to D
+    return dVariant;
+  }
+
+  return baseScriptId;
+}
+
 /**
  * Generate mission configuration for a campaign battle.
  */
@@ -60,6 +104,7 @@ export function generateMissionConfig(params: {
   territoryDiff: number;        // Difference in territory count (player - enemy)
   subHousePresent: AllianceSubHouse | null;
   aiPersonality?: number;
+  territoryHistory?: TerritoryAttempt;
 }): MissionConfigData {
   const {
     playerHouse, phase, phaseType, territoryId, territoryName,
@@ -72,6 +117,10 @@ export function generateMissionConfig(params: {
   let isSpecial = false;
 
   switch (phaseType) {
+    case 'tutorial':
+      victoryCondition = 'conyard';
+      isSpecial = true;
+      break;
     case 'heighliner':
       victoryCondition = 'survival';
       isSpecial = true;
@@ -116,11 +165,12 @@ export function generateMissionConfig(params: {
 
   // Script ID for .tok lookup: special missions use SPECIAL_MISSIONS names,
   // standard missions use the briefing key pattern (e.g., ATP2M15IX)
+  // then apply variant selection (M → D → Fail/Win) based on territory history
   let scriptId: string;
   if (isSpecial && SPECIAL_MISSIONS[phaseType]?.[playerHouse]) {
     scriptId = SPECIAL_MISSIONS[phaseType][playerHouse];
   } else {
-    scriptId = briefingKey;
+    scriptId = selectScriptVariant(briefingKey, params.territoryHistory);
   }
 
   return {
