@@ -173,6 +173,12 @@ export class ProductionSystem {
     return this.playerBuildings.get(playerId);
   }
 
+  /** Check if a building type can serve as a primary production facility (from rules.txt CanBePrimary). */
+  canSetAsPrimary(buildingType: string): boolean {
+    const def = this.rules.buildings.get(buildingType);
+    return def?.canBePrimary ?? false;
+  }
+
   ownsAnyBuildingSuffix(playerId: number, suffix: string): boolean {
     const owned = this.playerBuildings.get(playerId);
     if (!owned) return false;

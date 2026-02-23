@@ -57,6 +57,7 @@ export function computeSimulationHash(world: World, playerCredits?: number[]): n
     }
     h = fnvMixF32(h, Combat.fireTimer[eid]);
     h = fnvMixF32(h, Speed.max[eid]);
+    h = fnvMixF32(h, Speed.current[eid]);
     h = fnvMix(h, Veterancy.rank[eid]);
     // Harvester state
     if (hasComponent(world, Harvester, eid)) {

@@ -6,8 +6,9 @@ import {
 } from '../core/ECS';
 import { PathfindingSystem } from './PathfindingSystem';
 import type { AsyncPathfinder } from './AsyncPathfinder';
+import type { FormationSystem } from './FormationSystem';
 import { SpatialGrid } from '../utils/SpatialGrid';
-import { worldToTile, angleBetween, lerpAngle, distance2D } from '../utils/MathUtils';
+import { worldToTile, angleBetween, stepAngle, distance2D } from '../utils/MathUtils';
 import type { TerrainRenderer } from '../rendering/TerrainRenderer';
 
 const ARRIVAL_THRESHOLD = 1.0;
@@ -44,6 +45,8 @@ export class MovementSystem implements GameSystem {
   private speedModifierFn: ((eid: number) => number) | null = null;
   // Terrain reference for height following
   private terrain: TerrainRenderer | null = null;
+  // Formation system for coordinated group movement speed capping
+  private formationSystem: FormationSystem | null = null;
 
   constructor(pathfinder: PathfindingSystem) {
     this.pathfinder = pathfinder;
@@ -64,6 +67,10 @@ export class MovementSystem implements GameSystem {
 
   setTerrain(terrain: TerrainRenderer): void {
     this.terrain = terrain;
+  }
+
+  setFormationSystem(fs: FormationSystem): void {
+    this.formationSystem = fs;
   }
 
   /** Invalidate all cached paths (call when blocked tiles change, e.g. building placed/destroyed) */
@@ -129,6 +136,15 @@ export class MovementSystem implements GameSystem {
       }
 
       if (MoveTarget.active[eid] !== 1) {
+        // Decelerate to stop when idle
+        const accel = Speed.acceleration[eid];
+        if (accel > 0 && Speed.current[eid] > 0) {
+          // Ramp down at 2x acceleration for snappier stop feel
+          Speed.current[eid] = Math.max(0, Speed.current[eid] - accel * 2);
+        } else {
+          Speed.current[eid] = 0;
+        }
+
         // Apply idle separation to prevent stacking (throttled)
         if (doIdleSep && !this.flyingEntities.has(eid)) {
           const px = Position.x[eid];
@@ -182,17 +198,31 @@ export class MovementSystem implements GameSystem {
           MoveTarget.active[eid] = 0;
           Velocity.x[eid] = 0;
           Velocity.z[eid] = 0;
+          Speed.current[eid] = 0;
           continue;
         }
         const dx = targetX - px;
         const dz = targetZ - pz;
         const dirX = dx / dist;
         const dirZ = dz / dist;
-        const speed = Speed.max[eid];
+
+        // Acceleration curve for aircraft
+        const flyAccel = Speed.acceleration[eid];
+        const flyMaxSpeed = Speed.max[eid];
+        let flySpeed: number;
+        if (flyAccel > 0) {
+          Speed.current[eid] = Math.min(flyMaxSpeed, Speed.current[eid] + flyAccel);
+          flySpeed = Speed.current[eid];
+        } else {
+          flySpeed = flyMaxSpeed;
+          Speed.current[eid] = flyMaxSpeed;
+        }
+
         const desiredAngle = angleBetween(px, pz, targetX, targetZ);
-        Rotation.y[eid] = lerpAngle(Rotation.y[eid], desiredAngle, Math.min(1, Speed.turnRate[eid] * 3));
-        const vx = dirX * speed;
-        const vz = dirZ * speed;
+        // TurnRate from rules.txt is radians per tick — apply directly as fixed angular step
+        Rotation.y[eid] = stepAngle(Rotation.y[eid], desiredAngle, Speed.turnRate[eid]);
+        const vx = dirX * flySpeed;
+        const vz = dirZ * flySpeed;
         Velocity.x[eid] = vx;
         Velocity.z[eid] = vz;
         Position.x[eid] = Math.max(0, Math.min(this.mapMaxX, px + vx * 0.04));
@@ -256,6 +286,7 @@ export class MovementSystem implements GameSystem {
         MoveTarget.active[eid] = 0;
         Velocity.x[eid] = 0;
         Velocity.z[eid] = 0;
+        Speed.current[eid] = 0;
         this.paths.delete(eid);
         this.pathIndex.delete(eid);
         this.stuckTicks.delete(eid);
@@ -275,6 +306,7 @@ export class MovementSystem implements GameSystem {
           MoveTarget.active[eid] = 0;
           Velocity.x[eid] = 0;
           Velocity.z[eid] = 0;
+          Speed.current[eid] = 0;
           this.paths.delete(eid);
           this.pathIndex.delete(eid);
           continue;
@@ -293,15 +325,53 @@ export class MovementSystem implements GameSystem {
       const dirX = dx / len;
       const dirZ = dz / len;
 
-      // Turn toward target
+      // Turn toward target — TurnRate is radians per tick (from rules.txt)
       const desiredAngle = angleBetween(px, pz, wp.x, wp.z);
       const currentAngle = Rotation.y[eid];
       const turnRate = Speed.turnRate[eid];
-      Rotation.y[eid] = lerpAngle(currentAngle, desiredAngle, Math.min(1, turnRate * 2));
+      Rotation.y[eid] = stepAngle(currentAngle, desiredAngle, turnRate);
 
-      // Move at speed (with hit slowdown and terrain modifiers)
-      let speed = Speed.max[eid];
-      if (this.speedModifierFn) speed *= this.speedModifierFn(eid);
+      // Determine target max speed (with formation cap, hit slowdown, and terrain modifiers)
+      let maxSpeed = Speed.max[eid];
+      // Formation speed cap: match slowest member so units arrive together
+      if (this.formationSystem) {
+        const cap = this.formationSystem.getFormationSpeedCap(eid);
+        if (cap > 0 && cap < maxSpeed) {
+          maxSpeed = cap;
+        }
+      }
+      if (this.speedModifierFn) maxSpeed *= this.speedModifierFn(eid);
+
+      // Acceleration curve: ramp up / brake / or instant
+      const accel = Speed.acceleration[eid];
+      let speed: number;
+      if (accel > 0) {
+        // Compute distance to final destination for braking
+        const finalWp = path[path.length - 1];
+        const distToFinal = distance2D(px, pz, finalWp.x, finalWp.z);
+
+        // Braking distance: d = v^2 / (2 * decel), where decel = accel * 2
+        // Solve for max speed that allows stopping in distToFinal: v = sqrt(2 * decel * dist)
+        const decel = accel * 2;
+        const brakingSpeed = Math.sqrt(2 * decel * distToFinal);
+
+        // Target speed is the lesser of max speed and braking speed
+        const targetSpeed = Math.min(maxSpeed, brakingSpeed);
+
+        if (Speed.current[eid] < targetSpeed) {
+          // Accelerate
+          Speed.current[eid] = Math.min(targetSpeed, Speed.current[eid] + accel);
+        } else if (Speed.current[eid] > targetSpeed) {
+          // Decelerate
+          Speed.current[eid] = Math.max(targetSpeed, Speed.current[eid] - decel);
+        }
+        // Ensure minimum crawl speed so units don't freeze near destination
+        speed = Math.max(Speed.current[eid], accel * 0.5);
+      } else {
+        // No acceleration defined: instant speed (backward compat)
+        speed = maxSpeed;
+        Speed.current[eid] = maxSpeed;
+      }
 
       // Separation from nearby units (spatial grid lookup)
       let sepX = 0;

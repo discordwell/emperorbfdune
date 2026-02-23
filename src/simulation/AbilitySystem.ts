@@ -523,7 +523,7 @@ export class AbilitySystem {
         if (dx * dx + dz * dz < 2.5) { // ~1.58 world units radius
           Health.current[other] = 0;
           effectsManager.spawnExplosion(Position.x[other], 0, Position.z[other], 'small');
-          EventBus.emit('unit:died', { entityId: other, killerEntity: eid });
+          EventBus.emit('unit:died', { entityId: other, killerEntity: eid, deathType: 'crush' });
         }
       }
     }

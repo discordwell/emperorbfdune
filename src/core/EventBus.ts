@@ -1,5 +1,18 @@
 type EventCallback<T = unknown> = (data: T) => void;
 
+/**
+ * Death animation type for units. Determines which visual effect plays on death.
+ * - 'normal':    Standard tilt-and-fade (default for infantry shot deaths)
+ * - 'explode':   Body flies apart with small explosion (BlowUp bullets, light vehicles)
+ * - 'dissolve':  Unit melts/dissolves with green particles (Gassed/Tleilaxu contaminator)
+ * - 'electrify': Electric sparks and blue-white flash (Ix/electric weapons)
+ * - 'crush':     Flattened by vehicle (vehicle runs over infantry)
+ * - 'burn':      Fire particles, charred remains (flame weapons)
+ * - 'bigExplosion': Large multi-stage explosion (heavy vehicles, buildings)
+ * - 'wreck':     Burning husk that lingers and fades (medium vehicles)
+ */
+export type DeathType = 'normal' | 'explode' | 'dissolve' | 'electrify' | 'crush' | 'burn' | 'bigExplosion' | 'wreck';
+
 interface EventMap {
   'unit:selected': { entityIds: number[] };
   'unit:deselected': {};
@@ -7,7 +20,7 @@ interface EventMap {
   'unit:attack': { attackerIds: number[]; targetId: number };
   'unit:attacked': { attackerEid: number; targetEid: number };
   'unit:spawned': { entityId: number; unitType: string; owner: number };
-  'unit:died': { entityId: number; killerEntity: number };
+  'unit:died': { entityId: number; killerEntity: number; deathType?: DeathType };
   'unit:promoted': { entityId: number; rank: number };
   'building:placed': { entityId: number; buildingType: string; owner: number };
   'building:destroyed': { entityId: number; owner: number; x: number; z: number };
@@ -24,7 +37,7 @@ interface EventMap {
   'game:started': {};
   'game:paused': {};
   'placement:cancelled': { typeName: string };
-  'combat:fire': { attackerX: number; attackerZ: number; targetX: number; targetZ: number; weaponType?: string; attackerEntity?: number; targetEntity?: number };
+  'combat:fire': { attackerX: number; attackerZ: number; targetX: number; targetZ: number; weaponType?: string; attackerEntity?: number; targetEntity?: number; impactType?: number; impactDamage?: number };
   'worm:emerge': { x: number; z: number };
   'worm:submerge': { x: number; z: number };
   'rally:set': { playerId: number; x: number; z: number };

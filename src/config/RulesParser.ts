@@ -5,6 +5,15 @@ import {
   createDefaultTurretDef, createDefaultBulletDef, createDefaultWarheadDef,
 } from './WeaponDefs';
 
+export interface CrateDef {
+  name: string;
+  size: number;
+  health: number;
+  terrain: string[];
+  lifespan: number;
+  crateGiftObject: string; // Unit type name spawned when crate is collected (or 'CASH2000' etc.)
+}
+
 export interface GameRules {
   general: Record<string, string>;
   spiceMound: Record<string, string>;
@@ -16,6 +25,7 @@ export interface GameRules {
   turrets: Map<string, TurretDef>;
   bullets: Map<string, BulletDef>;
   warheads: Map<string, WarheadDef>;
+  crates: Map<string, CrateDef>;
 }
 
 type Section = { name: string; entries: [string, string][] };
@@ -173,7 +183,16 @@ export function parseRules(text: string): GameRules {
     warheads.set(name, parseWarheadDef(name, section));
   }
 
-  return { general, spiceMound, houseTypes, terrainTypes, armourTypes, units, buildings, turrets, bullets, warheads };
+  // Parse crates
+  const crateTypeNames = getListValues(sectionMap.get('CrateTypes') ?? { name: '', entries: [] });
+  const crates = new Map<string, CrateDef>();
+  for (const name of crateTypeNames) {
+    const section = sectionMap.get(name);
+    if (!section) continue;
+    crates.set(name, parseCrateDef(name, section));
+  }
+
+  return { general, spiceMound, houseTypes, terrainTypes, armourTypes, units, buildings, turrets, bullets, warheads, crates };
 }
 
 function parseUnitDef(name: string, section: Section): UnitDef {
@@ -249,6 +268,7 @@ function parseUnitDef(name: string, section: Section): UnitDef {
       case 'AiSpecial': def.aiSpecial = parseBool(value); break;
       case 'AIThreat': def.aiThreat = parseNum(value); break;
       case 'SpiceCapacity': def.spiceCapacity = parseNum(value); break;
+      case 'UnloadRate': def.unloadRate = parseNum(value); break;
       case 'StormDamage': def.stormDamage = parseNum(value); break;
       case 'ShieldHealth': def.shieldHealth = parseNum(value); break;
       case 'CanSelfRepairShield': def.canSelfRepairShield = parseBool(value); break;
@@ -261,7 +281,11 @@ function parseUnitDef(name: string, section: Section): UnitDef {
       case 'CountsForStats': def.countsForStats = parseBool(value); break;
       case 'SoundFile': def.soundFile = parseNum(value, -1); break;
       case 'SoundID': def.soundFile = parseNum(value, -1); break;
+      case 'CrateGift': def.crateGift = parseBool(value); break;
+      case 'SinkAmount': def.sinkAmount = parseNum(value); break;
+      case 'SinkSpeed': def.sinkSpeed = parseNum(value); break;
       case 'GetUnitWhenBuilt': def.getUnitWhenBuilt = value; break;
+      case 'Acceleration': def.acceleration = parseNum(value); break;
       case 'DeploysTo': def.deploysTo = value; break;
       case 'VeterancyLevel':
         if (currentVet) def.veterancy.push(currentVet);
@@ -287,6 +311,29 @@ function parseUnitDef(name: string, section: Section): UnitDef {
   }
 
   if (currentVet) def.veterancy.push(currentVet);
+
+  // Derive acceleration if not explicitly set in rules.txt.
+  // The original game has no Acceleration field; we infer from unit characteristics.
+  // Values are in speed-units per tick. Higher = snappier response.
+  if (def.acceleration === 0 && def.speed > 0) {
+    if (def.canFly) {
+      // Aircraft: very fast acceleration (they're already airborne)
+      def.acceleration = def.speed * 0.25;
+    } else if (def.infantry) {
+      // Infantry: medium acceleration — they start moving fairly quickly
+      def.acceleration = def.speed * 0.15;
+    } else if (def.size >= 3) {
+      // Heavy vehicles (size 3+): harvesters, devastators, siege tanks — lumber to start
+      def.acceleration = def.speed * 0.06;
+    } else if (def.size >= 2) {
+      // Medium vehicles (size 2): most tanks and APCs
+      def.acceleration = def.speed * 0.10;
+    } else {
+      // Light vehicles (size 1): trikes, quads — zip away quickly
+      def.acceleration = def.speed * 0.18;
+    }
+  }
+
   return def;
 }
 
@@ -338,6 +385,7 @@ function parseBuildingDef(name: string, section: Section): BuildingDef {
       }
       case 'Wall': def.wall = parseBool(value); break;
       case 'Refinery': def.refinery = parseBool(value); break;
+      case 'Dockable': def.dockable = parseBool(value); break;
       case 'CanBeEngineered': def.canBeEngineered = parseBool(value); break;
       case 'DisableWithLowPower': def.disableWithLowPower = parseBool(value); break;
       case 'GetUnitWhenBuilt': def.getUnitWhenBuilt = value; break;
@@ -352,6 +400,7 @@ function parseBuildingDef(name: string, section: Section): BuildingDef {
       case 'HideUnitOnRadar': def.hideOnRadar = parseBool(value); break;
       case 'UpgradeCost': def.upgradeCost = parseNum(value); def.upgradable = true; break;
       case 'UpgradeTechLevel': def.upgradeTechLevel = parseNum(value); break;
+      case 'CanBePrimary': def.canBePrimary = parseBool(value); break;
       case 'UpgradedPrimaryRequired': def.upgradedPrimaryRequired = parseBool(value); break;
       case 'ExcludeFromSkirmishLose': def.excludeFromSkirmishLose = parseBool(value); break;
       case 'ExcludeFromCampaignLose': def.excludeFromCampaignLose = parseBool(value); break;
@@ -376,6 +425,8 @@ function parseTurretDef(name: string, section: Section): TurretDef {
   def.maxXRotation = parseNum(entries.get('TurretMaxXRotation') ?? '90');
   def.xRotationAngle = parseNum(entries.get('TurretXRotationAngle') ?? '4');
   def.nextJoint = entries.get('TurretNextJoint') ?? '';
+  def.turretDisableIfUnitDeployed = parseBool(entries.get('TurretDisableIfUnitDeployed') ?? 'false');
+  def.turretDisableIfUnitUndeployed = parseBool(entries.get('TurretDisableIfUnitUndeployed') ?? 'false');
 
   return def;
 }
@@ -407,6 +458,13 @@ function parseBulletDef(name: string, section: Section): BulletDef {
   def.lingerDuration = parseNum(entries.get('LingerDuration') ?? '0');
   def.lingerDamage = parseNum(entries.get('LingerDamage') ?? '0');
 
+  // Infantry death type: mutually exclusive boolean flags in rules.txt
+  // Shot, BlowUp, Burnt, Gassed determine which death animation plays
+  if (parseBool(entries.get('Shot') ?? 'false')) def.infantryDeathType = 'Shot';
+  else if (parseBool(entries.get('BlowUp') ?? 'false')) def.infantryDeathType = 'BlowUp';
+  else if (parseBool(entries.get('Burnt') ?? 'false')) def.infantryDeathType = 'Burnt';
+  else if (parseBool(entries.get('Gassed') ?? 'false')) def.infantryDeathType = 'Gassed';
+
   return def;
 }
 
@@ -419,4 +477,16 @@ function parseWarheadDef(name: string, section: Section): WarheadDef {
   }
 
   return def;
+}
+
+function parseCrateDef(name: string, section: Section): CrateDef {
+  const entries = getEntries(section);
+  return {
+    name,
+    size: parseNum(entries.get('Size') ?? '2'),
+    health: parseNum(entries.get('Health') ?? '0'),
+    terrain: parseList(entries.get('Terrain') ?? 'Rock, Sand'),
+    lifespan: parseNum(entries.get('Lifespan') ?? '10000'),
+    crateGiftObject: entries.get('CrateGiftObject') ?? '',
+  };
 }

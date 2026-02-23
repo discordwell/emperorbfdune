@@ -40,6 +40,8 @@ import type { ReplayRecorder, ReplayPlayer } from './ReplaySystem';
 import type { MissionScriptRunnerInterface } from '../campaign/scripting/MissionScriptTypes';
 import type { MapMetadata } from '../config/MapLoader';
 import type { DeliverySystem } from '../simulation/DeliverySystem';
+import type { FormationSystem } from '../simulation/FormationSystem';
+import type { BuildingDestructionSystem } from '../simulation/BuildingDestructionSystem';
 
 // Save/Load types
 export interface SavedEntity {
@@ -48,7 +50,7 @@ export interface SavedEntity {
   unitTypeId?: number; buildingTypeId?: number;
   harvester?: { spice: number; maxCap: number; state: number; refEid: number };
   moveTarget?: { x: number; z: number; active: number };
-  speed?: { max: number; turn: number };
+  speed?: { max: number; turn: number; accel?: number; cur?: number };
   vet?: { xp: number; rank: number };
   ammo?: number;
   passengerTypeIds?: number[];
@@ -152,6 +154,8 @@ export interface GameContext {
   aiPlayers: AIPlayer[];
   agentAI: AIPlayer | null; // Agent mode: AIPlayer controlling player 0
   deliverySystem: DeliverySystem;
+  formationSystem: FormationSystem;
+  buildingDestructionSystem: BuildingDestructionSystem;
 
   // Mission scripting
   missionScriptRunner: MissionScriptRunnerInterface | null;
@@ -160,7 +164,7 @@ export interface GameContext {
   aircraftAmmo: Map<number, number>;
   rearmingAircraft: Set<number>;
   descendingUnits: Map<number, { startTick: number; duration: number }>;
-  dyingTilts: Map<number, { obj: THREE.Object3D; tiltDir: number; startTick: number; startY: number; isBuilding?: boolean }>;
+  dyingTilts: Map<number, { obj: THREE.Object3D; tiltDir: number; startTick: number; startY: number; isBuilding?: boolean; deathType?: import('./EventBus').DeathType }>;
   processedDeaths: Set<number>;
   deferredActions: Array<{ tick: number; action: () => void }>;
   repairingBuildings: Set<number>;

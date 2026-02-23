@@ -16,6 +16,7 @@ import { UnitRenderer } from '../rendering/UnitRenderer';
 import { SelectionManager } from '../input/SelectionManager';
 import { CommandManager } from '../input/CommandManager';
 import { MovementSystem } from '../simulation/MovementSystem';
+import { FormationSystem } from '../simulation/FormationSystem';
 import { PathfindingSystem } from '../simulation/PathfindingSystem';
 import { AsyncPathfinder } from '../simulation/AsyncPathfinder';
 import { simRng } from '../utils/DeterministicRNG';
@@ -31,6 +32,7 @@ import { AbilitySystem } from '../simulation/AbilitySystem';
 import { SuperweaponSystem } from '../simulation/SuperweaponSystem';
 import { WallSystem } from '../simulation/WallSystem';
 import { DeliverySystem } from '../simulation/DeliverySystem';
+import { BuildingDestructionSystem } from '../simulation/BuildingDestructionSystem';
 import { AIPlayer } from '../ai/AIPlayer';
 import { AudioManager } from '../audio/AudioManager';
 import { BuildingPlacement } from '../input/BuildingPlacement';
@@ -109,16 +111,22 @@ export function initializeSystems(config: SystemInitConfig): GameContext {
 
   const pathfinder = new PathfindingSystem(terrain);
   const asyncPathfinder = new AsyncPathfinder(terrain, pathfinder);
+  const formationSystem = new FormationSystem();
   const movement = new MovementSystem(pathfinder);
   movement.setAsyncPathfinder(asyncPathfinder);
+  movement.setFormationSystem(formationSystem);
   const combatSystem = new CombatSystem(gameRules);
   commandManager.setCombatSystem(combatSystem);
+  commandManager.setFormationSystem(formationSystem);
   const effectsManager = new EffectsManager(scene);
   commandManager.setMoveMarkerFn((x, z) => effectsManager.spawnMoveMarker(x, z));
   const harvestSystem = new HarvestSystem(terrain);
   commandManager.setForceReturnFn((eid) => harvestSystem.forceReturn(eid));
   const productionSystem = new ProductionSystem(gameRules, harvestSystem);
   const deliverySystem = new DeliverySystem();
+  const buildingDestructionSystem = new BuildingDestructionSystem(
+    effectsManager, scene, unitRenderer, audioManager, combatSystem,
+  );
 
   const playerDifficulty = house.difficulty ?? 'normal';
   productionSystem.setDifficulty(0, playerDifficulty, false);
@@ -494,7 +502,7 @@ export function initializeSystems(config: SystemInitConfig): GameContext {
     sandwormSystem, abilitySystem, superweaponSystem, wallSystem,
     audioManager, buildingPlacement, victorySystem, gameStats,
     selectionPanel, sidebar, iconRenderer, pipRenderer, aiPlayers,
-    agentAI: null, deliverySystem,
+    agentAI: null, deliverySystem, formationSystem, buildingDestructionSystem,
 
     missionScriptRunner: null,
 

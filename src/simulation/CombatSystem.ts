@@ -7,10 +7,10 @@ import {
   combatQuery, healthQuery, hasComponent,
 } from '../core/ECS';
 import type { GameRules } from '../config/RulesParser';
-import type { BulletDef } from '../config/WeaponDefs';
-import { distance2D, worldToTile, angleBetween, lerpAngle, TILE_SIZE } from '../utils/MathUtils';
+import { type BulletDef, classifyImpactType } from '../config/WeaponDefs';
+import { distance2D, worldToTile, angleBetween, stepAngle, TILE_SIZE } from '../utils/MathUtils';
 import { GameConstants } from '../utils/Constants';
-import { EventBus } from '../core/EventBus';
+import { EventBus, type DeathType } from '../core/EventBus';
 import type { VeterancyLevel } from '../config/UnitDefs';
 import type { FogOfWar } from '../rendering/FogOfWar';
 import type { TerrainRenderer } from '../rendering/TerrainRenderer';
@@ -46,6 +46,8 @@ export class CombatSystem implements GameSystem {
   private suppressedEntities = new Set<number>();
   // Bullet definition lookup cache: turret name -> BulletDef (null if not found)
   private bulletCache = new Map<string, BulletDef | null>();
+  // Turret turn rate cache: unit type name -> radians per tick (from TurretYRotationAngle)
+  private turretTurnRateCache = new Map<string, number>();
   // Spatial grid from MovementSystem for efficient neighbor queries
   private spatialGrid: SpatialGrid | null = null;
   // Entities that fired this tick (for animation triggering)
@@ -60,6 +62,9 @@ export class CombatSystem implements GameSystem {
   private infantrySuppressed = new Set<number>();
   // Lingering damage effects (gas weapons, etc.)
   private lingerEffects = new Map<number, { ticksLeft: number; damagePerTick: number; attackerEid: number; warheadMult: number }[]>();
+  // Deployed state tracking: entities that are currently deployed (e.g. Kobra, popup turrets)
+  // Used with TurretDisableIfUnitDeployed/Undeployed to enable/disable specific turrets
+  private deployedEntities = new Set<number>();
   // Terrain reference for height/infantry rock bonuses
   private terrain: TerrainRenderer | null = null;
   // Sandstorm active callback (reduces accuracy and auto-acquire range)
@@ -155,6 +160,16 @@ export class CombatSystem implements GameSystem {
     else this.suppressedEntities.delete(eid);
   }
 
+  /** Mark a unit as deployed or undeployed (for TurretDisableIfUnitDeployed/Undeployed). */
+  setDeployed(eid: number, deployed: boolean): void {
+    if (deployed) this.deployedEntities.add(eid);
+    else this.deployedEntities.delete(eid);
+  }
+
+  isDeployed(eid: number): boolean {
+    return this.deployedEntities.has(eid);
+  }
+
   getStance(eid: number): number {
     return this.stances.get(eid) ?? 1; // Default: defensive
   }
@@ -191,6 +206,16 @@ export class CombatSystem implements GameSystem {
     this.unitTypeMap.set(eid, typeName);
   }
 
+  /**
+   * Get the infantry death animation type for a given killer entity.
+   * Returns the bullet's infantryDeathType (Shot, BlowUp, Burnt, Gassed)
+   * or empty string if unknown.
+   */
+  getKillerDeathType(killerEid: number): string {
+    const bullet = this.getBulletDef(killerEid);
+    return bullet?.infantryDeathType ?? '';
+  }
+
   unregisterUnit(eid: number): void {
     this.unitTypeMap.delete(eid);
     this.hitSlowdowns.delete(eid);
@@ -204,6 +229,7 @@ export class CombatSystem implements GameSystem {
     this.lastAttacker.delete(eid);
     this.suppressedEntities.delete(eid);
     this.stealthedEntities.delete(eid);
+    this.deployedEntities.delete(eid);
     this.disabledBuildings.delete(eid);
     this.lingerEffects.delete(eid);
     // Clear any units escorting this entity or tracking it as attacker
@@ -492,19 +518,18 @@ export class CombatSystem implements GameSystem {
           Position.x[targetEid], Position.z[targetEid]
         );
         if (hasComponent(world, TurretRotation, eid)) {
-          // Independent turret: rotate turret toward target, hull stays facing movement
-          const turnRate = (hasComponent(world, Speed, eid) && Speed.turnRate[eid] > 0)
-            ? Speed.turnRate[eid] : 0.15;
-          TurretRotation.y[eid] = lerpAngle(TurretRotation.y[eid], desiredAngle, Math.min(1, turnRate * 4));
+          // Independent turret: rotate turret toward target using TurretYRotationAngle (deg/tick -> rad)
+          const turretRate = this.getTurretTurnRate(eid);
+          TurretRotation.y[eid] = stepAngle(TurretRotation.y[eid], desiredAngle, turretRate);
           // Don't fire until turret is roughly aimed (within ~20 degrees)
           let angleDiff = desiredAngle - TurretRotation.y[eid];
           if (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
           if (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
           if (Math.abs(angleDiff) > 0.35) continue;
         } else {
-          // No turret: rotate whole hull
+          // No turret: rotate whole hull using unit TurnRate (radians per tick)
           const turnRate = hasComponent(world, Speed, eid) ? Speed.turnRate[eid] : 0.15;
-          Rotation.y[eid] = lerpAngle(Rotation.y[eid], desiredAngle, Math.min(1, turnRate * 3));
+          Rotation.y[eid] = stepAngle(Rotation.y[eid], desiredAngle, turnRate);
           let angleDiff = desiredAngle - Rotation.y[eid];
           if (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
           if (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
@@ -514,6 +539,10 @@ export class CombatSystem implements GameSystem {
 
       // Only fire when cooldown is done
       if (Combat.fireTimer[eid] > 0) continue;
+
+      // Check turret deploy/undeploy restrictions (TurretDisableIfUnitDeployed/Undeployed)
+      const turretCheck = this.checkTurretDeployRestriction(eid);
+      if (!turretCheck) continue;
 
       // Check minimum range (e.g., missiles can't fire at point-blank)
       const bullet = this.getBulletDef(eid);
@@ -532,6 +561,32 @@ export class CombatSystem implements GameSystem {
       }
       Combat.fireTimer[eid] = rof;
     }
+  }
+
+  /** Check if the entity's turret is allowed to fire given its deployed state.
+   *  Returns true if the turret can fire, false if it's disabled by deploy restrictions. */
+  private checkTurretDeployRestriction(eid: number): boolean {
+    const typeName = this.unitTypeMap.get(eid);
+    if (!typeName) return true;
+
+    const unitDef = this.rules.units.get(typeName);
+    const bldgDef = this.rules.buildings.get(typeName);
+    const turretName = unitDef?.turretAttach ?? bldgDef?.turretAttach;
+    if (!turretName) return true;
+
+    // Check the first turret in the attach list (comma-separated for multi-turret units)
+    const firstName = turretName.split(',')[0].trim();
+    const turret = this.rules.turrets.get(firstName);
+    if (!turret) return true;
+
+    const isDeployed = this.deployedEntities.has(eid);
+
+    // TurretDisableIfUnitDeployed: turret is disabled when unit IS deployed
+    if (turret.turretDisableIfUnitDeployed && isDeployed) return false;
+    // TurretDisableIfUnitUndeployed: turret is disabled when unit IS NOT deployed
+    if (turret.turretDisableIfUnitUndeployed && !isDeployed) return false;
+
+    return true;
   }
 
   /** Look up the BulletDef for an attacker entity via turretAttach -> bullet chain. Cached. */
@@ -557,6 +612,37 @@ export class CombatSystem implements GameSystem {
     const bullet = this.rules.bullets.get(turret.bullet) ?? null;
     this.bulletCache.set(typeName, bullet);
     return bullet;
+  }
+
+  /**
+   * Look up turret rotation speed in radians per tick for an entity.
+   * Uses TurretYRotationAngle from the TurretDef (degrees/tick in rules.txt),
+   * converted to radians. Falls back to the unit's body TurnRate if no turret def found.
+   */
+  private getTurretTurnRate(eid: number): number {
+    const typeName = this.unitTypeMap.get(eid);
+    if (!typeName) return 0.07; // ~4 deg/tick fallback
+
+    const cached = this.turretTurnRateCache.get(typeName);
+    if (cached !== undefined) return cached;
+
+    const unitDef = this.rules.units.get(typeName);
+    const bldgDef = this.rules.buildings.get(typeName);
+    const turretName = unitDef?.turretAttach ?? bldgDef?.turretAttach;
+    if (turretName) {
+      const turretDef = this.rules.turrets.get(turretName);
+      if (turretDef && turretDef.yRotationAngle > 0) {
+        // TurretYRotationAngle is degrees per tick — convert to radians
+        const radsPerTick = turretDef.yRotationAngle * (Math.PI / 180);
+        this.turretTurnRateCache.set(typeName, radsPerTick);
+        return radsPerTick;
+      }
+    }
+
+    // Fallback: use unit body turn rate (already in radians per tick)
+    const fallback = unitDef?.turnRate ?? 0.15;
+    this.turretTurnRateCache.set(typeName, fallback);
+    return fallback;
   }
 
   /** Get veterancy level data for an entity at its current rank */
@@ -636,7 +722,15 @@ export class CombatSystem implements GameSystem {
       const scoreValue = killedDef?.score ?? killedBldgDef?.score ?? 1;
       this.addXp(attackerEid, scoreValue);
 
-      EventBus.emit('unit:died', { entityId: targetEid, killerEntity: attackerEid });
+      // Determine death animation type from killing weapon's bullet
+      const bulletDeathType = this.getKillerDeathType(attackerEid);
+      let deathType: DeathType = 'normal';
+      if (bulletDeathType === 'Burnt') deathType = 'burn';
+      else if (bulletDeathType === 'Gassed') deathType = 'dissolve';
+      else if (bulletDeathType === 'BlowUp') deathType = 'explode';
+      // 'Shot' maps to 'normal' (standard tilt-and-fade)
+
+      EventBus.emit('unit:died', { entityId: targetEid, killerEntity: attackerEid, deathType });
       return; // Dead — skip slowdown/suppression to prevent stale state on ID recycling
     }
 
@@ -785,7 +879,7 @@ export class CombatSystem implements GameSystem {
       }
     }
 
-    // Emit fire event for visual projectile
+    // Emit fire event for visual projectile (includes impact type for weapon-specific effects)
     EventBus.emit('combat:fire', {
       attackerX: Position.x[attackerEid],
       attackerZ: Position.z[attackerEid],
@@ -794,6 +888,8 @@ export class CombatSystem implements GameSystem {
       weaponType: bulletName,
       attackerEntity: attackerEid,
       targetEntity: targetEid,
+      impactType: bullet ? classifyImpactType(bullet) : undefined,
+      impactDamage: baseDamage,
     });
     EventBus.emit('unit:attacked', {
       attackerEid,

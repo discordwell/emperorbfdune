@@ -106,6 +106,17 @@ export interface UnitDef {
 
   // Harvesting
   spiceCapacity: number; // Maximum cash value of spice carried (default 700)
+  unloadRate: number; // Spice units transferred per tick at refinery (from rules.txt, default 2)
+
+  // Crate drops
+  crateGift: boolean; // When destroyed, drops a crate containing a random gift
+
+  // Sand sinking (visual effect)
+  sinkAmount: number; // How far the unit sinks into sand (game units)
+  sinkSpeed: number; // How fast the unit sinks (game units per tick)
+
+  // Movement dynamics
+  acceleration: number; // Speed units gained per tick (0 = instant)
 
   // Special
   getUnitWhenBuilt?: string;
@@ -185,5 +196,10 @@ export function createDefaultUnitDef(name: string): UnitDef {
     countsForStats: true,
     upgradedPrimaryRequired: false,
     spiceCapacity: 700,
+    unloadRate: 2, // rules.txt default: UnloadRate = 2
+    crateGift: false,
+    sinkAmount: 0,
+    sinkSpeed: 0,
+    acceleration: 0, // 0 = derive from unit characteristics at parse time
   };
 }

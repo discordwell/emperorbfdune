@@ -28,7 +28,7 @@ export function buildSaveData(ctx: GameContext): SaveData {
       hp: Health.current[eid], maxHp: Health.max[eid],
       owner: Owner.playerId[eid],
       unitTypeId: UnitType.id[eid],
-      speed: { max: Speed.max[eid], turn: Speed.turnRate[eid] },
+      speed: { max: Speed.max[eid], turn: Speed.turnRate[eid], accel: Speed.acceleration[eid], cur: Speed.current[eid] },
       vet: { xp: Veterancy.xp[eid], rank: Veterancy.rank[eid] },
     };
     if (MoveTarget.active[eid]) {
@@ -217,6 +217,9 @@ export function restoreFromSave(ctx: GameContext, savedGame: SaveData): void {
         if (se.vet) {
           Veterancy.xp[eid] = se.vet.xp;
           Veterancy.rank[eid] = se.vet.rank;
+        }
+        if (se.speed?.cur !== undefined) {
+          Speed.current[eid] = se.speed.cur;
         }
         if (se.moveTarget && se.moveTarget.active) {
           MoveTarget.x[eid] = se.moveTarget.x;

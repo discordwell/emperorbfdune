@@ -4,11 +4,12 @@ import { simRng } from '../utils/DeterministicRNG';
 import { GameConstants } from '../utils/Constants';
 import { tileToWorld } from '../utils/MathUtils';
 import { EventBus } from './EventBus';
+import { ImpactType } from '../config/WeaponDefs';
 import {
   hasComponent, removeEntity,
   Position, Health, Owner, UnitType,
   MoveTarget, AttackTarget, Veterancy,
-  Harvester, BuildingType, Shield,
+  Harvester, BuildingType, Shield, Selectable,
   unitQuery, buildingQuery,
 } from './ECS';
 
@@ -47,7 +48,7 @@ export function registerEventHandlers(ctx: GameContext): void {
   });
 
   // Unit death handler
-  EventBus.on('unit:died', ({ entityId }) => {
+  EventBus.on('unit:died', ({ entityId, deathType }) => {
     if (processedDeaths.has(entityId)) return;
     processedDeaths.add(entityId);
     const world = game.getWorld();
@@ -79,51 +80,42 @@ export function registerEventHandlers(ctx: GameContext): void {
     repairingBuildings.delete(entityId);
     abilitySystem.handleUnitDeath(entityId);
 
-    const isUnit = hasComponent(world, UnitType, entityId);
-    let explosionSize: 'small' | 'medium' | 'large' = 'medium';
-    if (isBuilding) explosionSize = 'large';
-    else if (isUnit) {
-      const typeId = UnitType.id[entityId];
-      const typeName = unitTypeNames[typeId];
-      const def = typeName ? gameRules.units.get(typeName) : null;
-      explosionSize = def?.infantry ? 'small' : 'medium';
-    }
-    effectsManager.spawnExplosion(x, y, z, explosionSize);
-    effectsManager.spawnWreckage(x, y, z, isBuilding);
-    effectsManager.spawnDecal(x, z, explosionSize);
     const deathColor = deadOwner === 0 ? '#ff6600' : '#ff2222';
     minimapRenderer.flashPing(x, z, deathColor);
-    if (explosionSize === 'large') scene.shake(0.4);
-    else if (explosionSize === 'medium') scene.shake(0.15);
-    if (isBuilding) {
-      EventBus.emit('building:destroyed', { entityId, owner: deadOwner, x, z });
-      movement.invalidateAllPaths();
-    }
 
-    // Death animation (units tilt, buildings collapse with shrink effect)
-    const hasDeathClip = unitRenderer.playDeathAnim(entityId);
-    const obj = unitRenderer.getEntityObject(entityId);
-    if (obj && !hasDeathClip) {
-      dyingTilts.set(entityId, { obj, tiltDir: Math.random() * Math.PI * 2, startTick: game.getTickCount(), startY: obj.position.y, isBuilding });
-    }
-
-    // Clean up building from production prerequisites
     if (isBuilding) {
+      // --- Staged building destruction ---
       const typeId = BuildingType.id[entityId];
       const typeName = buildingTypeNames[typeId];
+      const bDef = typeName ? gameRules.buildings.get(typeName) : null;
+
+      // Make building non-selectable and non-targetable immediately
+      if (hasComponent(world, Selectable, entityId)) {
+        Selectable.selected[entityId] = 0;
+      }
+
+      // Emit building:destroyed event immediately (for AI, production, victory checks)
+      EventBus.emit('building:destroyed', { entityId, owner: deadOwner, x, z });
+      movement.invalidateAllPaths();
+
+      // Clean up building from production prerequisites
       if (typeName) {
         productionSystem.removePlayerBuilding(Owner.playerId[entityId], typeName);
       }
 
-      // Spawn infantry survivors
-      const bDef = typeName ? gameRules.buildings.get(typeName) : null;
+      // Start staged destruction sequence (handles visuals, removal timing, SFX)
+      ctx.buildingDestructionSystem.startDestruction(
+        entityId, x, y, z, deadOwner, typeName ?? '', bDef ?? null,
+      );
+
+      // Spawn infantry survivors (immediately, they emerge from the rubble)
       if (bDef && bDef.numInfantryWhenGone > 0) {
         const FACTION_INFANTRY: Record<string, string> = {
           'AT': 'ATInfantry', 'HK': 'HKLightInf', 'OR': 'ORChemical',
           'FR': 'FRFremen', 'IM': 'IMSardaukar', 'IX': 'IXSlave',
           'TL': 'TLContaminator', 'GU': 'GUMaker'
         };
-        const prefix = typeName.substring(0, 2);
+        const prefix = (typeName ?? '').substring(0, 2);
         const infantryType = FACTION_INFANTRY[prefix];
         if (infantryType && gameRules.units.has(infantryType)) {
           const count = Math.min(bDef.numInfantryWhenGone, 5);
@@ -138,31 +130,112 @@ export function registerEventHandlers(ctx: GameContext): void {
           }
         }
       }
-    }
+    } else {
+      // --- Standard unit death (non-building) ---
+      const isUnit = hasComponent(world, UnitType, entityId);
+      const typeId = isUnit ? UnitType.id[entityId] : -1;
+      const typeName = isUnit ? unitTypeNames[typeId] : null;
+      const unitDef = typeName ? gameRules.units.get(typeName) : null;
+      const isInfantry = unitDef?.infantry ?? false;
 
-    // Auto-replace harvesters
-    const owner = Owner.playerId[entityId];
-    if (owner === 0 && hasComponent(world, Harvester, entityId)) {
-      const typeId = UnitType.id[entityId];
-      const harvTypeName = unitTypeNames[typeId];
-      if (harvTypeName && ctx.findRefinery(world, 0)) {
-        const delayTicks = GameConstants.HARV_REPLACEMENT_DELAY;
-        selectionPanel.addMessage(`Harvester lost - replacement in ${Math.round(delayTicks / 25)}s`, '#ff8800');
-        ctx.deferAction(delayTicks, () => {
-          try {
-            if (ctx.findRefinery(game.getWorld(), 0)) {
-              if (productionSystem.startProduction(0, harvTypeName, false)) {
-                selectionPanel.addMessage('Replacement harvester queued', '#44ff44');
-              }
-            }
-          } catch { /* game may have ended */ }
+      // Determine effective death type:
+      // If no death type was provided, infer from unit category
+      let effectiveDeathType = deathType ?? 'normal';
+      if (!deathType || deathType === 'normal') {
+        if (unitDef && !isInfantry) {
+          if (unitDef.size >= 3) {
+            // Heavy vehicles (Devastator, Harvester): burning wreck
+            effectiveDeathType = 'wreck';
+          } else if (unitDef.size >= 2) {
+            // Medium vehicles (tanks, APCs): explode with debris
+            effectiveDeathType = 'explode';
+          }
+          // Light vehicles (size 1, trikes/quads): standard small explosion
+        }
+      }
+
+      // Spawn death-type-specific particle effects
+      switch (effectiveDeathType) {
+        case 'dissolve':
+          effectsManager.spawnDissolveEffect(x, y, z);
+          effectsManager.spawnDecal(x, z, 'small');
+          break;
+        case 'burn':
+          effectsManager.spawnBurnEffect(x, y, z);
+          effectsManager.spawnDecal(x, z, 'small');
+          break;
+        case 'electrify':
+          effectsManager.spawnElectrifyEffect(x, y, z);
+          effectsManager.spawnDecal(x, z, 'small');
+          break;
+        case 'crush':
+          effectsManager.spawnCrushEffect(x, y, z);
+          // No wreckage or decal for crushed infantry - just a quick splat
+          break;
+        case 'explode':
+          effectsManager.spawnExplosion(x, y, z, 'medium');
+          effectsManager.spawnWreckage(x, y, z, false);
+          effectsManager.spawnDecal(x, z, 'medium');
+          scene.shake(0.15);
+          break;
+        case 'wreck':
+          effectsManager.spawnBurningWreck(x, y, z);
+          effectsManager.spawnDecal(x, z, 'medium');
+          scene.shake(0.15);
+          break;
+        case 'bigExplosion':
+          effectsManager.spawnBigExplosionEffect(x, y, z);
+          effectsManager.spawnDecal(x, z, 'large');
+          scene.shake(0.4);
+          break;
+        default: {
+          // Normal death: standard explosion + wreckage (infantry=small, vehicles=medium)
+          const explosionSize = isInfantry ? 'small' as const : 'medium' as const;
+          effectsManager.spawnExplosion(x, y, z, explosionSize);
+          if (!isInfantry) effectsManager.spawnWreckage(x, y, z, false);
+          effectsManager.spawnDecal(x, z, explosionSize);
+          if (explosionSize === 'medium') scene.shake(0.15);
+          break;
+        }
+      }
+
+      // Death animation: different visual depending on death type
+      const hasDeathClip = unitRenderer.playDeathAnim(entityId);
+      const obj = unitRenderer.getEntityObject(entityId);
+      if (obj && !hasDeathClip) {
+        dyingTilts.set(entityId, {
+          obj,
+          tiltDir: Math.random() * Math.PI * 2,
+          startTick: game.getTickCount(),
+          startY: obj.position.y,
+          isBuilding: false,
+          deathType: effectiveDeathType,
         });
       }
-    }
 
-    ctx.deferAction(13, () => {
-      try { removeEntity(game.getWorld(), entityId); } catch {}
-    });
+      // Auto-replace harvesters
+      const owner = Owner.playerId[entityId];
+      if (owner === 0 && hasComponent(world, Harvester, entityId)) {
+        const harvTypeName = unitTypeNames[typeId];
+        if (harvTypeName && ctx.findRefinery(world, 0)) {
+          const delayTicks = GameConstants.HARV_REPLACEMENT_DELAY;
+          selectionPanel.addMessage(`Harvester lost - replacement in ${Math.round(delayTicks / 25)}s`, '#ff8800');
+          ctx.deferAction(delayTicks, () => {
+            try {
+              if (ctx.findRefinery(game.getWorld(), 0)) {
+                if (productionSystem.startProduction(0, harvTypeName, false)) {
+                  selectionPanel.addMessage('Replacement harvester queued', '#44ff44');
+                }
+              }
+            } catch { /* game may have ended */ }
+          });
+        }
+      }
+
+      ctx.deferAction(13, () => {
+        try { removeEntity(game.getWorld(), entityId); } catch {}
+      });
+    }
   });
 
   // Veterancy promotion
@@ -292,8 +365,8 @@ export function registerEventHandlers(ctx: GameContext): void {
     effectsManager.hideRallyLine();
   });
 
-  // Projectile visuals
-  EventBus.on('combat:fire', ({ attackerX, attackerZ, targetX, targetZ, weaponType, attackerEntity, targetEntity }) => {
+  // Projectile visuals with weapon-specific impact effects
+  EventBus.on('combat:fire', ({ attackerX, attackerZ, targetX, targetZ, weaponType, attackerEntity, targetEntity, impactType, impactDamage }) => {
     let color = 0xffaa00;
     let speed = 40;
     let style: 'bullet' | 'rocket' | 'laser' | 'flame' | 'mortar' = 'bullet';
@@ -309,9 +382,24 @@ export function registerEventHandlers(ctx: GameContext): void {
     } else if (wt.includes('mortar') || wt.includes('inkvine')) {
       color = 0x88ff44; speed = 15; style = 'mortar';
     }
+
+    // Refine projectile color based on impact type for better visual consistency
+    if (impactType !== undefined) {
+      switch (impactType as ImpactType) {
+        case ImpactType.Sonic: color = 0x6644ff; break;
+        case ImpactType.Electric: color = 0x88aaff; break;
+        case ImpactType.Gas: color = 0x44aa22; break;
+      }
+    }
+
     const attackerY = attackerEntity !== undefined ? (Position.y[attackerEntity] ?? 0) : 0;
     const targetY = targetEntity !== undefined ? (Position.y[targetEntity] ?? 0) : 0;
-    effectsManager.spawnProjectile(attackerX, attackerY, attackerZ, targetX, targetY, targetZ, color, speed, undefined, style);
+
+    // Create onHit callback to spawn weapon-specific impact when projectile arrives
+    const onHit = impactType !== undefined
+      ? () => { effectsManager.spawnWeaponImpact(targetX, targetZ, impactType as ImpactType, impactDamage ?? 100); }
+      : undefined;
+    effectsManager.spawnProjectile(attackerX, attackerY, attackerZ, targetX, targetY, targetZ, color, speed, onHit, style);
 
     // Decrement ammo for ornithopters/gunships
     if (attackerEntity !== undefined && aircraftAmmo.has(attackerEntity)) {

@@ -26,6 +26,7 @@ export interface BuildingDef {
   // Flags
   wall: boolean; // Single-tile wall segment (drag-to-build, auto-connect)
   refinery: boolean;
+  dockable: boolean; // Units can dock at this building (e.g. starport landing pads)
   canBeEngineered: boolean;
   disableWithLowPower: boolean;
   upgradable: boolean;
@@ -33,6 +34,7 @@ export interface BuildingDef {
   upgradeTechLevel: number;
 
   // Production
+  canBePrimary: boolean; // Can serve as a primary facility for production
   upgradedPrimaryRequired: boolean; // Requires primary building to be upgraded
 
   // Special
@@ -86,11 +88,13 @@ export function createDefaultBuildingDef(name: string): BuildingDef {
     deployTiles: [],
     wall: false,
     refinery: false,
+    dockable: false,
     canBeEngineered: true,
     disableWithLowPower: false,
     upgradable: false,
     upgradeCost: 0,
     upgradeTechLevel: 0,
+    canBePrimary: false,
     upgradedPrimaryRequired: false,
     getUnitWhenBuilt: '',
     numInfantryWhenGone: 0,

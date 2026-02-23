@@ -21,6 +21,31 @@ interface EntityAnimData {
   currentAction: THREE.AnimationAction | null;
 }
 
+// Infantry squad formation constants
+const SQUAD_MAX_MEMBERS = 5;
+const SQUAD_RADIUS = 0.5; // World units radius for surrounding members
+// Pentagon formation offsets (center + 4 surrounding), relative to entity position
+// Member 0 = center, Members 1-4 = surrounding at cardinal + diagonal positions
+const SQUAD_OFFSETS: Array<{ x: number; z: number }> = [
+  { x: 0, z: 0 },          // Center
+  { x: SQUAD_RADIUS, z: 0 },              // Right
+  { x: -SQUAD_RADIUS, z: 0 },             // Left
+  { x: 0, z: SQUAD_RADIUS },              // Front
+  { x: 0, z: -SQUAD_RADIUS },             // Back
+];
+
+// Random jitter range added to each squad member's offset (persisted per entity)
+const SQUAD_JITTER = 0.12;
+
+interface SquadData {
+  /** The cloned model groups for each squad member (up to 5) */
+  memberModels: THREE.Group[];
+  /** Persistent random offset jitter for each member (seeded once on creation) */
+  jitterOffsets: Array<{ x: number; z: number }>;
+  /** How many members are currently visible (based on HP) */
+  visibleCount: number;
+}
+
 // House colors for team tinting
 const HOUSE_COLORS: THREE.Color[] = [
   new THREE.Color(0x0085E2), // 0: Atreides blue
@@ -99,6 +124,8 @@ export class UnitRenderer {
   private deviatedUnits: Map<number, { originalOwner: number; revertTick: number }> | null = null;
   // Track which entities have mind-control tint applied
   private mindControlTinted = new Set<number>();
+  // Infantry squad rendering: entity ID -> squad data
+  private squadData = new Map<number, SquadData>();
 
   constructor(sceneManager: SceneManager, modelManager: ModelManager, artMap: Map<string, ArtEntry>) {
     this.sceneManager = sceneManager;
@@ -415,8 +442,20 @@ export class UnitRenderer {
         if (cat === 'aircraft') {
           obj.position.y += Math.sin(t * 2.0) * 0.15;
           if (isIdle) obj.rotation.y += Math.sin(t * 0.5) * 0.003;
-        } else if (cat === 'infantry' && isIdle) {
-          obj.position.y += Math.sin(t * 3.0) * 0.03;
+        } else if (cat === 'infantry') {
+          // Apply per-member bobbing for infantry squads (idle or marching)
+          const squad = this.squadData.get(eid);
+          if (squad) {
+            const bobFreq = isIdle ? 3.0 : 6.0; // Faster bob when marching
+            const bobAmp = isIdle ? 0.03 : 0.05;
+            for (let mi = 0; mi < squad.memberModels.length; mi++) {
+              if (!squad.memberModels[mi].visible) continue;
+              const memberT = t + mi * 0.97; // Phase offset per member
+              squad.memberModels[mi].position.y = Math.sin(memberT * bobFreq) * bobAmp;
+            }
+          } else if (isIdle) {
+            obj.position.y += Math.sin(t * 3.0) * 0.03;
+          }
         } else if (cat === 'vehicle' && isIdle) {
           obj.position.y += Math.sin(t * 8.0) * 0.008;
         }
@@ -509,6 +548,9 @@ export class UnitRenderer {
           }
         }
       }
+
+      // Update infantry squad member visibility based on HP
+      this.updateSquadVisibility(eid);
 
       // Update health bar
       this.updateHealthBar(eid);
@@ -652,42 +694,29 @@ export class UnitRenderer {
       }
     }
 
-    // Add cloned model
-    const clone = this.modelManager.cloneModel(template);
-    clone.scale.setScalar(scale);
-    existing.add(clone);
+    // Clean up any previous squad data for this entity
+    this.squadData.delete(eid);
+
+    // Check if this entity is infantry — if so, create a squad of multiple model clones
+    const isInfantry = this.unitCategoryFn ? this.unitCategoryFn(eid) === 'infantry' : false;
+
+    if (isInfantry) {
+      this.createInfantrySquad(eid, existing, template, scale);
+    } else {
+      // Standard single-model path (vehicles, aircraft, buildings)
+      this.createSingleModel(eid, existing, template, scale);
+    }
 
     // Re-add selection circle
     if (circle) {
       existing.add(circle);
     }
 
-    // Apply team color
-    const ownerId = Owner.playerId[eid];
-    const color = HOUSE_COLORS[ownerId] ?? HOUSE_COLORS[0];
-    clone.traverse(child => {
-      if (child instanceof THREE.Mesh) {
-        child.castShadow = true;
-        child.receiveShadow = true;
-        if (child.material instanceof THREE.MeshStandardMaterial) {
-          // Materials already cloned by ModelManager.cloneModel(), safe to tint in-place
-          child.material.color.lerp(color, 0.3);
-        }
-      }
-    });
-
     this.invalidateMeshLookup();
 
-    // Cache turret node (identified by ::0 name prefix in XBF models)
-    this.turretNodes.delete(eid);
-    clone.traverse(child => {
-      if (child.name.startsWith('::0')) {
-        this.turretNodes.set(eid, child);
-      }
-    });
-
-    // Set up animation mixer if the template has animation clips
-    if (template.animations.length > 0) {
+    // Set up animation mixer if the template has animation clips (non-squad only;
+    // squad members get individual procedural anims via the existing idle bob)
+    if (!isInfantry && template.animations.length > 0) {
       const mixer = new THREE.AnimationMixer(existing);
       const clips = new Map<string, THREE.AnimationClip>();
       for (const clip of template.animations) {
@@ -702,6 +731,83 @@ export class UnitRenderer {
       // Try to play an initial idle clip
       this.playAnimClip(eid, 'idle');
     }
+  }
+
+  /** Create a single model clone for a non-infantry entity */
+  private createSingleModel(eid: number, group: THREE.Group, template: LoadedModel, scale: number): void {
+    const clone = this.modelManager.cloneModel(template);
+    clone.scale.setScalar(scale);
+    group.add(clone);
+
+    // Apply team color
+    const ownerId = Owner.playerId[eid];
+    const color = HOUSE_COLORS[ownerId] ?? HOUSE_COLORS[0];
+    clone.traverse(child => {
+      if (child instanceof THREE.Mesh) {
+        child.castShadow = true;
+        child.receiveShadow = true;
+        if (child.material instanceof THREE.MeshStandardMaterial) {
+          child.material.color.lerp(color, 0.3);
+        }
+      }
+    });
+
+    // Cache turret node (identified by ::0 name prefix in XBF models)
+    this.turretNodes.delete(eid);
+    clone.traverse(child => {
+      if (child.name.startsWith('::0')) {
+        this.turretNodes.set(eid, child);
+      }
+    });
+  }
+
+  /** Create an infantry squad with multiple model clones in formation */
+  private createInfantrySquad(eid: number, group: THREE.Group, template: LoadedModel, scale: number): void {
+    const memberModels: THREE.Group[] = [];
+    const jitterOffsets: Array<{ x: number; z: number }> = [];
+    const ownerId = Owner.playerId[eid];
+    const color = HOUSE_COLORS[ownerId] ?? HOUSE_COLORS[0];
+
+    // Deterministic seed from entity ID for consistent jitter
+    let seed = eid * 2654435761; // Knuth multiplicative hash
+    const nextRand = () => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      return (seed / 0x7fffffff) * 2 - 1; // Range [-1, 1]
+    };
+
+    for (let i = 0; i < SQUAD_MAX_MEMBERS; i++) {
+      const clone = this.modelManager.cloneModel(template);
+      clone.scale.setScalar(scale);
+
+      // Position each squad member at its formation offset + random jitter
+      const baseOffset = SQUAD_OFFSETS[i];
+      const jx = nextRand() * SQUAD_JITTER;
+      const jz = nextRand() * SQUAD_JITTER;
+      jitterOffsets.push({ x: jx, z: jz });
+
+      clone.position.x = baseOffset.x + jx;
+      clone.position.z = baseOffset.z + jz;
+
+      // Apply team color tinting
+      clone.traverse(child => {
+        if (child instanceof THREE.Mesh) {
+          child.castShadow = true;
+          child.receiveShadow = true;
+          if (child.material instanceof THREE.MeshStandardMaterial) {
+            child.material.color.lerp(color, 0.3);
+          }
+        }
+      });
+
+      group.add(clone);
+      memberModels.push(clone);
+    }
+
+    this.squadData.set(eid, {
+      memberModels,
+      jitterOffsets,
+      visibleCount: SQUAD_MAX_MEMBERS,
+    });
   }
 
   /** Map a logical animation state to the best available clip name */
@@ -886,6 +992,37 @@ export class UnitRenderer {
     }
   }
 
+  /** Update infantry squad member visibility based on entity HP ratio.
+   *  100-80% HP: 5 visible, 80-60%: 4, 60-40%: 3, 40-20%: 2, <20%: 1 */
+  private updateSquadVisibility(eid: number): void {
+    const squad = this.squadData.get(eid);
+    if (!squad) return;
+
+    const maxHp = Health.max[eid];
+    if (maxHp <= 0) return;
+    const ratio = Health.current[eid] / maxHp;
+
+    // Determine how many members should be visible
+    let targetCount: number;
+    if (ratio > 0.8) targetCount = 5;
+    else if (ratio > 0.6) targetCount = 4;
+    else if (ratio > 0.4) targetCount = 3;
+    else if (ratio > 0.2) targetCount = 2;
+    else targetCount = 1;
+
+    // Clamp to actual member count
+    targetCount = Math.min(targetCount, squad.memberModels.length);
+
+    if (targetCount !== squad.visibleCount) {
+      squad.visibleCount = targetCount;
+      // Show/hide members. Members are removed from the edges inward
+      // (last members in the array disappear first, center member last)
+      for (let i = 0; i < squad.memberModels.length; i++) {
+        squad.memberModels[i].visible = i < targetCount;
+      }
+    }
+  }
+
   private updateRearmBar(eid: number): void {
     if (!this.rearmProgressFn) return;
     const progress = this.rearmProgressFn(eid);
@@ -1033,6 +1170,7 @@ export class UnitRenderer {
     this.constructing.delete(eid);
     this.deconstructing.delete(eid);
     this.turretNodes.delete(eid);
+    this.squadData.delete(eid);
     // Clean up animation mixer — uncacheRoot releases PropertyBinding cache
     const animData = this.entityAnims.get(eid);
     if (animData) {

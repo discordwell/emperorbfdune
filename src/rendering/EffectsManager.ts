@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { SceneManager } from './SceneManager';
+import { ImpactType } from '../config/WeaponDefs';
 
 interface ParticleEffect {
   mesh: THREE.Mesh;
@@ -98,6 +99,14 @@ export class EffectsManager {
   private sandstormParticles: THREE.Mesh[] = [];
   private sandstormActive = false;
   private preSandstormFog = { density: 0.003, color: 0xc09050 };
+  // Weapon-specific impact lingering effects (gas clouds, ground fire)
+  private lingeringImpacts: { meshes: THREE.Mesh[]; life: number; maxLife: number; type: ImpactType }[] = [];
+  // Sonic ripple rings
+  private sonicRipples: { mesh: THREE.Mesh; life: number; maxLife: number; maxScale: number }[] = [];
+  // Electric arc lines
+  private electricArcs: { line: THREE.Line; life: number }[] = [];
+  // Shared geometry for impact ring effects
+  private impactRingGeo: THREE.RingGeometry | null = null;
   // Dust trails from moving units
   private dustPuffs: { mesh: THREE.Mesh; life: number; vy: number }[] = [];
   private dustGeo: THREE.SphereGeometry | null = null;
@@ -473,7 +482,11 @@ export class EffectsManager {
     // Laser: instant beam, no traveling projectile
     if (style === 'laser') {
       this.spawnBeam(startPos, endPos, color);
-      this.spawnExplosion(toX, toY, toZ, 'small');
+      if (onHit) {
+        onHit();
+      } else {
+        this.spawnExplosion(toX, toY, toZ, 'small');
+      }
       return;
     }
 
@@ -703,10 +716,14 @@ export class EffectsManager {
         }
         // Clean up trail timer (existing trail particles fade out naturally)
         this.projectileTrailTimers.delete(proj.id);
-        if (proj.onHit) proj.onHit();
-        // Impact size based on weapon type
-        const impactSize = proj.style === 'rocket' || proj.style === 'mortar' ? 'medium' : 'small';
-        this.spawnExplosion(proj.end.x, proj.end.y - 1, proj.end.z, impactSize);
+        if (proj.onHit) {
+          // Weapon-specific impact handled by callback (from combat:fire event)
+          proj.onHit();
+        } else {
+          // Fallback: generic explosion for projectiles without weapon-specific impact
+          const impactSize = proj.style === 'rocket' || proj.style === 'mortar' ? 'medium' : 'small';
+          this.spawnExplosion(proj.end.x, proj.end.y - 1, proj.end.z, impactSize);
+        }
         this.projectiles.splice(i, 1);
       } else {
         // Interpolate position
@@ -887,6 +904,67 @@ export class EffectsManager {
           const fadeT = (d.age - fadeStart) / (d.maxAge - fadeStart);
           (d.mesh.material as THREE.MeshBasicMaterial).opacity = 0.7 * (1 - fadeT);
         }
+      }
+    }
+
+    // Update lingering impact effects (gas clouds, ground fire)
+    for (let i = this.lingeringImpacts.length - 1; i >= 0; i--) {
+      const linger = this.lingeringImpacts[i];
+      linger.life -= dtSec;
+      const t = Math.max(0, linger.life / linger.maxLife); // 1..0
+      if (linger.life <= 0) {
+        for (const m of linger.meshes) {
+          this.sceneManager.scene.remove(m);
+          (m.material as THREE.Material).dispose();
+        }
+        this.lingeringImpacts.splice(i, 1);
+        continue;
+      }
+      for (const m of linger.meshes) {
+        const mat = m.material as THREE.MeshBasicMaterial;
+        mat.opacity = t * 0.6;
+        if (linger.type === ImpactType.Flame) {
+          // Flickering fire effect
+          const flicker = 0.8 + Math.sin(Date.now() * 0.01 + m.position.x * 3) * 0.2;
+          mat.color.setRGB(1.0 * flicker, 0.3 * flicker, 0.05);
+          m.position.y = 0.2 + Math.sin(Date.now() * 0.008 + m.position.z * 2) * 0.15;
+        } else {
+          // Gas: slowly rise and expand
+          m.position.y += dtSec * 0.3;
+          const scale = 1.0 + (1 - t) * 0.8;
+          m.scale.setScalar(scale);
+        }
+      }
+    }
+
+    // Update sonic ripple rings
+    for (let i = this.sonicRipples.length - 1; i >= 0; i--) {
+      const ripple = this.sonicRipples[i];
+      ripple.life -= dtSec;
+      if (ripple.life <= 0) {
+        this.sceneManager.scene.remove(ripple.mesh);
+        (ripple.mesh.material as THREE.Material).dispose();
+        ripple.mesh.geometry.dispose();
+        this.sonicRipples.splice(i, 1);
+        continue;
+      }
+      const t = 1 - ripple.life / ripple.maxLife; // 0..1
+      const scale = 0.2 + t * ripple.maxScale;
+      ripple.mesh.scale.set(scale, scale, 1);
+      (ripple.mesh.material as THREE.MeshBasicMaterial).opacity = (1 - t) * 0.7;
+    }
+
+    // Update electric arc lines
+    for (let i = this.electricArcs.length - 1; i >= 0; i--) {
+      const arc = this.electricArcs[i];
+      arc.life -= dtSec;
+      if (arc.life <= 0) {
+        this.sceneManager.scene.remove(arc.line);
+        arc.line.geometry.dispose();
+        (arc.line.material as THREE.Material).dispose();
+        this.electricArcs.splice(i, 1);
+      } else {
+        (arc.line.material as THREE.LineBasicMaterial).opacity = arc.life / 0.3;
       }
     }
   }
@@ -1474,5 +1552,669 @@ export class EffectsManager {
       (mesh.material as THREE.Material).dispose();
     }
     this.groundSplatVisuals.clear();
+  }
+
+  // --- Weapon-Specific Impact Effects ---
+
+  /**
+   * Spawn a weapon-specific impact effect at the given position.
+   * @param x World X coordinate of impact
+   * @param z World Z coordinate of impact
+   * @param impactType The classified ImpactType from WeaponDefs
+   * @param damage Raw damage value — used to scale the visual size
+   */
+  spawnWeaponImpact(x: number, z: number, impactType: ImpactType, damage: number): void {
+    // Scale factor: small arms ~100-300 dmg = 0.5-0.8, tank shells ~500-1000 = 1.0-1.5
+    const scale = Math.min(2.0, Math.max(0.4, damage / 600));
+
+    switch (impactType) {
+      case ImpactType.Bullet:
+        this.spawnBulletImpact(x, z, scale);
+        break;
+      case ImpactType.Explosive:
+        this.spawnExplosiveImpact(x, z, scale);
+        break;
+      case ImpactType.Missile:
+        this.spawnMissileImpact(x, z, scale);
+        break;
+      case ImpactType.Sonic:
+        this.spawnSonicImpact(x, z, scale);
+        break;
+      case ImpactType.Laser:
+        this.spawnLaserImpact(x, z, scale);
+        break;
+      case ImpactType.Gas:
+        this.spawnGasImpact(x, z, scale);
+        break;
+      case ImpactType.Electric:
+        this.spawnElectricImpact(x, z, scale);
+        break;
+      case ImpactType.Flame:
+        this.spawnFlameImpact(x, z, scale);
+        break;
+    }
+  }
+
+  /** Bullet/kinetic: Small yellow spark, brief flash, tiny dust puff */
+  private spawnBulletImpact(x: number, z: number, scale: number): void {
+    const particleCount = Math.round(3 * scale);
+    const y = 0.3;
+
+    for (let i = 0; i < particleCount; i++) {
+      const color = Math.random() > 0.5
+        ? new THREE.Color(1.0, 0.9, 0.3) // Yellow spark
+        : new THREE.Color(0.8, 0.7, 0.4); // Dust
+      const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9 });
+      const mesh = new THREE.Mesh(this.particleGeo, mat);
+      mesh.position.set(x, y, z);
+      mesh.scale.setScalar(0.1 * scale);
+      this.sceneManager.scene.add(mesh);
+
+      const angle = Math.random() * Math.PI * 2;
+      const spd = (2 + Math.random() * 3) * scale;
+      this.explosions.push({
+        particles: [{
+          mesh,
+          velocity: new THREE.Vector3(
+            Math.cos(angle) * spd,
+            1.5 + Math.random() * 2,
+            Math.sin(angle) * spd
+          ),
+          life: 0.15 + Math.random() * 0.1,
+          maxLife: 0.25,
+          gravity: 12,
+        }],
+        flash: null, flashLife: 0,
+      });
+    }
+
+    // Quick yellow flash
+    const flash = new THREE.PointLight(0xffee44, 2 * scale, 3 * scale);
+    flash.position.set(x, y + 0.3, z);
+    this.sceneManager.scene.add(flash);
+    this.explosions.push({ particles: [], flash, flashLife: 0.06 });
+  }
+
+  /** Explosive/HE: Orange fireball with expanding smoke ring, debris particles */
+  private spawnExplosiveImpact(x: number, z: number, scale: number): void {
+    const particleCount = Math.round(10 * scale);
+    const y = 0.2;
+
+    for (let i = 0; i < particleCount; i++) {
+      const isFire = Math.random() > 0.35;
+      const color = isFire
+        ? new THREE.Color(1.0, 0.35 + Math.random() * 0.35, 0.0)
+        : new THREE.Color(0.25 + Math.random() * 0.15, 0.2, 0.15); // Dark smoke
+      const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1.0 });
+      const mesh = new THREE.Mesh(this.particleGeo, mat);
+      mesh.position.set(x, y + 0.5, z);
+      const meshScale = (0.15 + Math.random() * 0.25) * scale;
+      mesh.scale.setScalar(meshScale);
+      this.sceneManager.scene.add(mesh);
+
+      const angle = Math.random() * Math.PI * 2;
+      const elevation = Math.random() * Math.PI * 0.4 + 0.3;
+      const spd = (4 + Math.random() * 5) * scale;
+      this.explosions.push({
+        particles: [{
+          mesh,
+          velocity: new THREE.Vector3(
+            Math.cos(angle) * Math.cos(elevation) * spd,
+            Math.sin(elevation) * spd * 1.2,
+            Math.sin(angle) * Math.cos(elevation) * spd
+          ),
+          life: (0.4 + Math.random() * 0.4) * scale,
+          maxLife: 0.8 * scale,
+          gravity: isFire ? 6 : 3,
+        }],
+        flash: null, flashLife: 0,
+      });
+    }
+
+    // Bright orange flash
+    const flashIntensity = 8 * scale;
+    const flash = new THREE.PointLight(0xff6600, flashIntensity, 10 * scale);
+    flash.position.set(x, y + 1, z);
+    this.sceneManager.scene.add(flash);
+    this.explosions.push({ particles: [], flash, flashLife: 0.12 });
+
+    // Ground scorch mark for larger explosions
+    if (scale >= 0.7) {
+      this.spawnDecal(x, z, scale >= 1.2 ? 'large' : 'medium');
+    }
+  }
+
+  /** Missile/rocket: Medium explosion with smoke trail lingering at impact point */
+  private spawnMissileImpact(x: number, z: number, scale: number): void {
+    // Core explosion (smaller than HE but sharper)
+    const particleCount = Math.round(7 * scale);
+    const y = 0.2;
+
+    for (let i = 0; i < particleCount; i++) {
+      const isFire = i < particleCount * 0.6;
+      const color = isFire
+        ? new THREE.Color(1.0, 0.3 + Math.random() * 0.3, 0.0)
+        : new THREE.Color(0.5, 0.45, 0.4); // Lighter grey smoke
+      const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9 });
+      const mesh = new THREE.Mesh(this.particleGeo, mat);
+      mesh.position.set(x, y + 0.5, z);
+      mesh.scale.setScalar((0.12 + Math.random() * 0.2) * scale);
+      this.sceneManager.scene.add(mesh);
+
+      const angle = Math.random() * Math.PI * 2;
+      const spd = (3 + Math.random() * 4) * scale;
+      this.explosions.push({
+        particles: [{
+          mesh,
+          velocity: new THREE.Vector3(
+            Math.cos(angle) * spd,
+            (2 + Math.random() * 3) * scale,
+            Math.sin(angle) * spd
+          ),
+          life: 0.3 + Math.random() * 0.3,
+          maxLife: 0.6,
+          gravity: 5,
+        }],
+        flash: null, flashLife: 0,
+      });
+    }
+
+    // Lingering smoke column at impact point (3-4 smoke puffs rising)
+    for (let i = 0; i < 3; i++) {
+      const smokeMat = new THREE.MeshBasicMaterial({
+        color: 0x555555, transparent: true, opacity: 0.5, depthWrite: false,
+      });
+      const smokeMesh = new THREE.Mesh(this.smokeGeo, smokeMat);
+      smokeMesh.position.set(
+        x + (Math.random() - 0.5) * 0.5 * scale,
+        0.3 + i * 0.3,
+        z + (Math.random() - 0.5) * 0.5 * scale,
+      );
+      smokeMesh.scale.setScalar(0.3 * scale);
+      this.sceneManager.scene.add(smokeMesh);
+      this.dustPuffs.push({ mesh: smokeMesh, life: 1.2 + Math.random() * 0.4, vy: 0.6 + Math.random() * 0.3 });
+    }
+
+    // Flash
+    const flash = new THREE.PointLight(0xff4400, 6 * scale, 8 * scale);
+    flash.position.set(x, y + 0.8, z);
+    this.sceneManager.scene.add(flash);
+    this.explosions.push({ particles: [], flash, flashLife: 0.1 });
+
+    // Scorch mark
+    if (scale >= 0.6) {
+      this.spawnDecal(x, z, 'small');
+    }
+  }
+
+  /** Sonic: Blue/purple ripple wave expanding outward (Atreides sonic tank) */
+  private spawnSonicImpact(x: number, z: number, scale: number): void {
+    // Expanding ring on the ground
+    if (!this.impactRingGeo) {
+      this.impactRingGeo = new THREE.RingGeometry(0.3, 0.6, 24);
+    }
+
+    // Spawn 2-3 concentric ripples with staggered timing
+    const rippleCount = Math.round(2 + scale);
+    for (let i = 0; i < rippleCount; i++) {
+      const ringGeo = new THREE.RingGeometry(0.2 + i * 0.15, 0.5 + i * 0.15, 24);
+      ringGeo.rotateX(-Math.PI / 2);
+      const color = i % 2 === 0 ? 0x6644ff : 0x4488ff; // Alternate blue/purple
+      const mat = new THREE.MeshBasicMaterial({
+        color, transparent: true, opacity: 0.7, side: THREE.DoubleSide, depthWrite: false,
+      });
+      const mesh = new THREE.Mesh(ringGeo, mat);
+      mesh.position.set(x, 0.15, z);
+      mesh.scale.set(0.2, 0.2, 1);
+      this.sceneManager.scene.add(mesh);
+
+      const maxScale = (3 + scale * 2) * (1 + i * 0.3);
+      const life = 0.4 + i * 0.1;
+      this.sonicRipples.push({ mesh, life, maxLife: life, maxScale });
+    }
+
+    // Brief blue-purple flash
+    const flash = new THREE.PointLight(0x6644ff, 4 * scale, 6 * scale);
+    flash.position.set(x, 0.8, z);
+    this.sceneManager.scene.add(flash);
+    this.explosions.push({ particles: [], flash, flashLife: 0.1 });
+
+    // A few shimmering particles
+    for (let i = 0; i < Math.round(4 * scale); i++) {
+      const color = new THREE.Color(0.4 + Math.random() * 0.3, 0.3, 0.8 + Math.random() * 0.2);
+      const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8 });
+      const mesh = new THREE.Mesh(this.particleGeo, mat);
+      mesh.position.set(x, 0.5, z);
+      mesh.scale.setScalar(0.08 * scale);
+      this.sceneManager.scene.add(mesh);
+
+      const angle = Math.random() * Math.PI * 2;
+      const spd = (3 + Math.random() * 2) * scale;
+      this.explosions.push({
+        particles: [{
+          mesh,
+          velocity: new THREE.Vector3(Math.cos(angle) * spd, 0.5 + Math.random(), Math.sin(angle) * spd),
+          life: 0.3 + Math.random() * 0.2,
+          maxLife: 0.5,
+          gravity: 2,
+        }],
+        flash: null, flashLife: 0,
+      });
+    }
+  }
+
+  /** Laser: Red/green flash with brief beam glow at impact */
+  private spawnLaserImpact(x: number, z: number, scale: number): void {
+    const y = 0.5;
+    const particleCount = Math.round(4 * scale);
+
+    // Bright red/green spark particles that scatter quickly
+    for (let i = 0; i < particleCount; i++) {
+      const isRed = Math.random() > 0.3;
+      const color = isRed
+        ? new THREE.Color(1.0, 0.1 + Math.random() * 0.2, 0.0)
+        : new THREE.Color(0.0, 0.8 + Math.random() * 0.2, 0.1);
+      const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1.0 });
+      const mesh = new THREE.Mesh(this.particleGeo, mat);
+      mesh.position.set(x, y, z);
+      mesh.scale.setScalar(0.06 * scale);
+      this.sceneManager.scene.add(mesh);
+
+      const angle = Math.random() * Math.PI * 2;
+      const spd = (5 + Math.random() * 4) * scale;
+      this.explosions.push({
+        particles: [{
+          mesh,
+          velocity: new THREE.Vector3(Math.cos(angle) * spd, 2 + Math.random() * 3, Math.sin(angle) * spd),
+          life: 0.1 + Math.random() * 0.1,
+          maxLife: 0.2,
+          gravity: 15,
+        }],
+        flash: null, flashLife: 0,
+      });
+    }
+
+    // Bright flash — red tinted
+    const flash = new THREE.PointLight(0xff2200, 5 * scale, 5 * scale);
+    flash.position.set(x, y, z);
+    this.sceneManager.scene.add(flash);
+    this.explosions.push({ particles: [], flash, flashLife: 0.08 });
+
+    // Brief impact glow (emissive sphere that fades fast)
+    const glowMat = new THREE.MeshBasicMaterial({
+      color: 0xff4422, transparent: true, opacity: 0.8, depthWrite: false,
+    });
+    const glowMesh = new THREE.Mesh(this.particleGeo, glowMat);
+    glowMesh.position.set(x, y, z);
+    glowMesh.scale.setScalar(0.5 * scale);
+    this.sceneManager.scene.add(glowMesh);
+    this.explosions.push({
+      particles: [{
+        mesh: glowMesh,
+        velocity: new THREE.Vector3(0, 0.2, 0),
+        life: 0.12,
+        maxLife: 0.12,
+        gravity: 0,
+      }],
+      flash: null, flashLife: 0,
+    });
+  }
+
+  /** Gas/chemical: Green cloud that lingers 1-2 seconds (Tleilaxu) */
+  private spawnGasImpact(x: number, z: number, scale: number): void {
+    // Cap lingering effects to prevent performance issues
+    if (this.lingeringImpacts.length > 20) return;
+
+    const meshes: THREE.Mesh[] = [];
+    const cloudCount = Math.round(4 * scale);
+    const life = 1.5 + scale * 0.5;
+
+    for (let i = 0; i < cloudCount; i++) {
+      const green = 0.5 + Math.random() * 0.3;
+      const mat = new THREE.MeshBasicMaterial({
+        color: new THREE.Color(0.15, green, 0.1),
+        transparent: true, opacity: 0.5, depthWrite: false,
+      });
+      const mesh = new THREE.Mesh(this.smokeGeo, mat);
+      mesh.position.set(
+        x + (Math.random() - 0.5) * 1.5 * scale,
+        0.3 + Math.random() * 0.5,
+        z + (Math.random() - 0.5) * 1.5 * scale,
+      );
+      mesh.scale.setScalar((0.4 + Math.random() * 0.3) * scale);
+      this.sceneManager.scene.add(mesh);
+      meshes.push(mesh);
+    }
+
+    this.lingeringImpacts.push({ meshes, life, maxLife: life, type: ImpactType.Gas });
+
+    // Initial puff burst
+    const flash = new THREE.PointLight(0x22aa22, 3 * scale, 5 * scale);
+    flash.position.set(x, 0.8, z);
+    this.sceneManager.scene.add(flash);
+    this.explosions.push({ particles: [], flash, flashLife: 0.15 });
+  }
+
+  /** Electric: Blue-white sparks arcing outward (Ix weapons, Ordos Berserk) */
+  private spawnElectricImpact(x: number, z: number, scale: number): void {
+    const y = 0.5;
+    const arcCount = Math.round(4 * scale);
+
+    // Spawn jagged arc lines radiating outward
+    for (let i = 0; i < arcCount; i++) {
+      const angle = (i / arcCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.5;
+      const length = (1.5 + Math.random() * 2.0) * scale;
+      const segments = 4 + Math.floor(Math.random() * 3);
+      const points: THREE.Vector3[] = [];
+
+      for (let s = 0; s <= segments; s++) {
+        const t = s / segments;
+        const px = x + Math.cos(angle) * length * t + (s > 0 && s < segments ? (Math.random() - 0.5) * 0.4 * scale : 0);
+        const py = y + Math.sin(t * Math.PI) * 0.6 * scale + (Math.random() - 0.5) * 0.2;
+        const pz = z + Math.sin(angle) * length * t + (s > 0 && s < segments ? (Math.random() - 0.5) * 0.4 * scale : 0);
+        points.push(new THREE.Vector3(px, py, pz));
+      }
+
+      const geo = new THREE.BufferGeometry().setFromPoints(points);
+      const isWhite = Math.random() > 0.4;
+      const color = isWhite ? 0xddddff : 0x4488ff;
+      const mat = new THREE.LineBasicMaterial({
+        color, transparent: true, opacity: 0.9, linewidth: 2,
+      });
+      const line = new THREE.Line(geo, mat);
+      this.sceneManager.scene.add(line);
+      this.electricArcs.push({ line, life: 0.15 + Math.random() * 0.15 });
+    }
+
+    // Spark particles
+    for (let i = 0; i < Math.round(5 * scale); i++) {
+      const color = new THREE.Color(0.6 + Math.random() * 0.4, 0.7 + Math.random() * 0.3, 1.0);
+      const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1.0 });
+      const mesh = new THREE.Mesh(this.particleGeo, mat);
+      mesh.position.set(x, y, z);
+      mesh.scale.setScalar(0.06 * scale);
+      this.sceneManager.scene.add(mesh);
+
+      const ang = Math.random() * Math.PI * 2;
+      const spd = (4 + Math.random() * 5) * scale;
+      this.explosions.push({
+        particles: [{
+          mesh,
+          velocity: new THREE.Vector3(Math.cos(ang) * spd, 2 + Math.random() * 3, Math.sin(ang) * spd),
+          life: 0.15 + Math.random() * 0.15,
+          maxLife: 0.3,
+          gravity: 10,
+        }],
+        flash: null, flashLife: 0,
+      });
+    }
+
+    // Bright blue-white flash
+    const flash = new THREE.PointLight(0x88aaff, 6 * scale, 7 * scale);
+    flash.position.set(x, y, z);
+    this.sceneManager.scene.add(flash);
+    this.explosions.push({ particles: [], flash, flashLife: 0.1 });
+  }
+
+  /** Flame: Persistent ground fire effect for 1-2 seconds */
+  private spawnFlameImpact(x: number, z: number, scale: number): void {
+    // Cap lingering effects
+    if (this.lingeringImpacts.length > 20) return;
+
+    const meshes: THREE.Mesh[] = [];
+    const flameCount = Math.round(3 * scale);
+    const life = 1.2 + scale * 0.5;
+
+    for (let i = 0; i < flameCount; i++) {
+      const mat = new THREE.MeshBasicMaterial({
+        color: new THREE.Color(1.0, 0.4 + Math.random() * 0.2, 0.05),
+        transparent: true, opacity: 0.6, depthWrite: false,
+      });
+      const mesh = new THREE.Mesh(this.smokeGeo, mat);
+      mesh.position.set(
+        x + (Math.random() - 0.5) * 1.0 * scale,
+        0.2,
+        z + (Math.random() - 0.5) * 1.0 * scale,
+      );
+      mesh.scale.setScalar((0.25 + Math.random() * 0.2) * scale);
+      this.sceneManager.scene.add(mesh);
+      meshes.push(mesh);
+    }
+
+    this.lingeringImpacts.push({ meshes, life, maxLife: life, type: ImpactType.Flame });
+
+    // Initial burst of fire particles shooting upward
+    for (let i = 0; i < Math.round(5 * scale); i++) {
+      const color = new THREE.Color(1.0, 0.2 + Math.random() * 0.4, 0.0);
+      const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9 });
+      const mesh = new THREE.Mesh(this.particleGeo, mat);
+      mesh.position.set(x, 0.3, z);
+      mesh.scale.setScalar(0.1 * scale);
+      this.sceneManager.scene.add(mesh);
+
+      const angle = Math.random() * Math.PI * 2;
+      const spd = (1.5 + Math.random() * 2) * scale;
+      this.explosions.push({
+        particles: [{
+          mesh,
+          velocity: new THREE.Vector3(Math.cos(angle) * spd, 3 + Math.random() * 3, Math.sin(angle) * spd),
+          life: 0.3 + Math.random() * 0.2,
+          maxLife: 0.5,
+          gravity: 4,
+        }],
+        flash: null, flashLife: 0,
+      });
+    }
+
+    // Orange flash
+    const flash = new THREE.PointLight(0xff6600, 5 * scale, 6 * scale);
+    flash.position.set(x, 0.5, z);
+    this.sceneManager.scene.add(flash);
+    this.explosions.push({ particles: [], flash, flashLife: 0.12 });
+
+    // Scorch decal
+    this.spawnDecal(x, z, 'small');
+  }
+
+  // --- Death Animation Variant Effects ---
+
+  /** Dissolve/melt death: green particles rising and dissolving (Tleilaxu gas/contaminator) */
+  spawnDissolveEffect(x: number, y: number, z: number): void {
+    const particleCount = 15;
+    const particles: ParticleEffect[] = [];
+
+    for (let i = 0; i < particleCount; i++) {
+      const green = 0.3 + Math.random() * 0.7;
+      const color = new THREE.Color(0.1, green, 0.05);
+      const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9 });
+      const mesh = new THREE.Mesh(this.particleGeo, mat);
+      mesh.position.set(
+        x + (Math.random() - 0.5) * 1.5,
+        y + Math.random() * 0.5,
+        z + (Math.random() - 0.5) * 1.5,
+      );
+      const scale = 0.15 + Math.random() * 0.25;
+      mesh.scale.setScalar(scale);
+      this.sceneManager.scene.add(mesh);
+
+      // Dissolve particles rise slowly and drift outward
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 0.5 + Math.random() * 1.5;
+      particles.push({
+        mesh,
+        velocity: new THREE.Vector3(
+          Math.cos(angle) * speed * 0.3,
+          1.5 + Math.random() * 2.0,
+          Math.sin(angle) * speed * 0.3,
+        ),
+        life: 1.0 + Math.random() * 0.8,
+        maxLife: 1.5,
+        gravity: -0.5, // Negative gravity = float upward
+      });
+    }
+
+    // Sickly green flash
+    const flash = new THREE.PointLight(0x44ff22, 4, 8);
+    flash.position.set(x, y + 1, z);
+    this.sceneManager.scene.add(flash);
+
+    this.explosions.push({ particles, flash, flashLife: 0.3 });
+  }
+
+  /** Burn death: fire particles, charred remains (flame weapons) */
+  spawnBurnEffect(x: number, y: number, z: number): void {
+    const particleCount = 12;
+    const particles: ParticleEffect[] = [];
+
+    for (let i = 0; i < particleCount; i++) {
+      const isFire = Math.random() > 0.3;
+      const color = isFire
+        ? new THREE.Color(1.0, 0.2 + Math.random() * 0.5, 0.0)
+        : new THREE.Color(0.15, 0.15, 0.15);
+      const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1.0 });
+      const mesh = new THREE.Mesh(this.particleGeo, mat);
+      mesh.position.set(
+        x + (Math.random() - 0.5) * 1.0,
+        y + 0.3,
+        z + (Math.random() - 0.5) * 1.0,
+      );
+      const scale = 0.15 + Math.random() * 0.3;
+      mesh.scale.setScalar(scale);
+      this.sceneManager.scene.add(mesh);
+
+      const angle = Math.random() * Math.PI * 2;
+      const speed = isFire ? 1.0 + Math.random() * 2.0 : 0.3 + Math.random() * 0.8;
+      particles.push({
+        mesh,
+        velocity: new THREE.Vector3(
+          Math.cos(angle) * speed * 0.4,
+          (isFire ? 3.0 : 1.5) + Math.random() * 2.0,
+          Math.sin(angle) * speed * 0.4,
+        ),
+        life: isFire ? 0.6 + Math.random() * 0.4 : 1.0 + Math.random() * 0.6,
+        maxLife: isFire ? 0.8 : 1.2,
+        gravity: isFire ? 1.0 : 0.5,
+      });
+    }
+
+    // Warm orange flash
+    const flash = new THREE.PointLight(0xff4400, 5, 10);
+    flash.position.set(x, y + 1, z);
+    this.sceneManager.scene.add(flash);
+
+    this.explosions.push({ particles, flash, flashLife: 0.25 });
+  }
+
+  /** Electrify death: blue-white electric sparks arcing outward (Ix/electric weapons) */
+  spawnElectrifyEffect(x: number, y: number, z: number): void {
+    const particleCount = 10;
+    const particles: ParticleEffect[] = [];
+
+    for (let i = 0; i < particleCount; i++) {
+      const isArc = Math.random() > 0.4;
+      const color = isArc
+        ? new THREE.Color(0.5 + Math.random() * 0.5, 0.7 + Math.random() * 0.3, 1.0)
+        : new THREE.Color(0.2, 0.4, 1.0);
+      const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1.0 });
+      const mesh = new THREE.Mesh(this.particleGeo, mat);
+      mesh.position.set(
+        x + (Math.random() - 0.5) * 0.8,
+        y + 0.5 + Math.random() * 1.0,
+        z + (Math.random() - 0.5) * 0.8,
+      );
+      const scale = 0.1 + Math.random() * 0.15;
+      mesh.scale.setScalar(scale);
+      this.sceneManager.scene.add(mesh);
+
+      // Electric sparks: fast, erratic movement
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 4 + Math.random() * 6;
+      particles.push({
+        mesh,
+        velocity: new THREE.Vector3(
+          Math.cos(angle) * speed,
+          2 + Math.random() * 4,
+          Math.sin(angle) * speed,
+        ),
+        life: 0.2 + Math.random() * 0.3,
+        maxLife: 0.4,
+        gravity: 12 + Math.random() * 6,
+      });
+    }
+
+    // Bright blue-white flash
+    const flash = new THREE.PointLight(0x88aaff, 8, 12);
+    flash.position.set(x, y + 1.5, z);
+    this.sceneManager.scene.add(flash);
+
+    this.explosions.push({ particles, flash, flashLife: 0.12 });
+  }
+
+  /** Crush death: quick flat splat with minimal particles (vehicle runs over infantry) */
+  spawnCrushEffect(x: number, y: number, z: number): void {
+    const particles: ParticleEffect[] = [];
+
+    for (let i = 0; i < 5; i++) {
+      const color = Math.random() > 0.5
+        ? new THREE.Color(0.6, 0.1, 0.05)
+        : new THREE.Color(0.5, 0.4, 0.2);
+      const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9 });
+      const mesh = new THREE.Mesh(this.particleGeo, mat);
+      mesh.position.set(x, y + 0.1, z);
+      const scale = 0.1 + Math.random() * 0.15;
+      mesh.scale.setScalar(scale);
+      this.sceneManager.scene.add(mesh);
+
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 2 + Math.random() * 3;
+      particles.push({
+        mesh,
+        velocity: new THREE.Vector3(
+          Math.cos(angle) * speed,
+          0.5 + Math.random() * 1.0,
+          Math.sin(angle) * speed,
+        ),
+        life: 0.3 + Math.random() * 0.2,
+        maxLife: 0.4,
+        gravity: 15,
+      });
+    }
+
+    this.explosions.push({ particles, flash: null, flashLife: 0 });
+  }
+
+  /** Big explosion death: multi-stage explosion for heavy vehicles/buildings */
+  spawnBigExplosionEffect(x: number, y: number, z: number): void {
+    // Primary large explosion
+    this.spawnExplosion(x, y, z, 'large');
+
+    // Secondary explosions at offset positions
+    const offsets = [
+      { dx: 1.5, dz: 0.8 },
+      { dx: -1.0, dz: 1.2 },
+      { dx: 0.5, dz: -1.5 },
+    ];
+    for (const off of offsets) {
+      this.spawnExplosion(x + off.dx, y + Math.random() * 0.5, z + off.dz, 'medium');
+    }
+  }
+
+  /** Spawn a burning wreck that lingers and fades (medium vehicles) */
+  spawnBurningWreck(x: number, y: number, z: number): void {
+    const hullGeo = new THREE.BoxGeometry(
+      1.2 + Math.random() * 0.5,
+      0.4,
+      0.8 + Math.random() * 0.4,
+    );
+    const hullMat = new THREE.MeshLambertMaterial({ color: 0x1a1a1a, transparent: true, opacity: 1.0 });
+    const hullMesh = new THREE.Mesh(hullGeo, hullMat);
+    hullMesh.position.set(x, y + 0.2, z);
+    hullMesh.rotation.y = Math.random() * Math.PI * 2;
+    this.sceneManager.scene.add(hullMesh);
+    // Wreck lasts 100 ticks = 4 seconds, then fades for 25 more ticks
+    this.wreckages.push({ mesh: hullMesh, age: 0, maxAge: 125 });
+
+    // Spawn initial explosion
+    this.spawnExplosion(x, y + 0.5, z, 'medium');
   }
 }

@@ -33,6 +33,19 @@ export function lerpAngle(a: number, b: number, t: number): number {
   return a + diff * t;
 }
 
+/**
+ * Rotate angle `a` toward angle `b` by at most `maxStep` radians per call.
+ * Unlike lerpAngle, this provides constant angular velocity (matching the
+ * original Emperor: BFD engine where TurnRate = radians per tick).
+ */
+export function stepAngle(a: number, b: number, maxStep: number): number {
+  let diff = b - a;
+  while (diff > Math.PI) diff -= Math.PI * 2;
+  while (diff < -Math.PI) diff += Math.PI * 2;
+  if (Math.abs(diff) <= maxStep) return b;
+  return a + Math.sign(diff) * maxStep;
+}
+
 export function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }

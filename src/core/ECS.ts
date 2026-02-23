@@ -70,6 +70,7 @@ export const Harvester = defineComponent({
   maxCapacity: Types.f32,
   state: Types.ui8, // 0=idle, 1=movingToSpice, 2=harvesting, 3=returning, 4=unloading
   refineryEntity: Types.ui32,
+  unloadRate: Types.f32, // Spice units transferred per tick during unloading (from rules.txt)
 });
 
 export const Selectable = defineComponent({
@@ -105,6 +106,8 @@ export const Veterancy = defineComponent({
 export const Speed = defineComponent({
   max: Types.f32,
   turnRate: Types.f32,
+  acceleration: Types.f32, // Speed units gained per tick toward max (0 = instant)
+  current: Types.f32, // Current speed magnitude (ramps toward max or 0)
 });
 
 export const ViewRange = defineComponent({

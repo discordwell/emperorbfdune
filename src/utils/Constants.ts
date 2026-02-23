@@ -25,13 +25,16 @@ export const GameConstants = {
   STEALTH_DELAY: 30,
   DEVIATE_DURATION: 500,
   // Spice mound / bloom mechanics (from rules.txt [SpiceMound] + [General])
-  SPICE_MOUND_MIN_DURATION: 1000, // Min ticks before mound bursts
-  SPICE_MOUND_RANDOM_DURATION: 500, // Randomness added to mound lifespan
-  SPICE_BLOOM_RADIUS: 6, // Radius of spice bloom patch (in tiles)
-  SPICE_MOUND_REGROW_MIN: 200, // Min delay before mound starts regrowing
-  SPICE_MOUND_REGROW_MAX: 2000, // Max delay before mound starts regrowing
-  SPICE_BLOOM_DAMAGE: 200, // Damage to nearby units on eruption (with linear falloff from center)
-  SPICE_BLOOM_DAMAGE_RADIUS: 12, // Bloom damage radius in world units (matches 6-tile bloom radius)
+  SPICE_MOUND_MIN_DURATION: 1000, // Size: min ticks before mound bursts
+  SPICE_MOUND_RANDOM_DURATION: 500, // Cost: randomness added to mound lifespan
+  SPICE_BLOOM_RADIUS: 6, // BlastRadius: radius of spice bloom patch (in tiles)
+  SPICE_MOUND_REGROW_MIN: 200, // MinRange: minimum cooldown ticks before next mound spawns
+  SPICE_MOUND_REGROW_MAX: 2000, // MaxRange: maximum cooldown ticks before next mound spawns
+  SPICE_MOUND_HEALTH: 100, // Health: mound health (damage threshold for premature eruption)
+  SPICE_MOUND_CAPACITY: 50000, // SpiceCapacity: total spice value a full mound holds
+  SPICE_MOUND_APPEAR_DELAY: 6, // BuildTime: ticks after eruption before spice deposit appears
+  SPICE_BLOOM_DAMAGE: 100, // Derived from Health: damage to nearby units on eruption
+  SPICE_BLOOM_DAMAGE_RADIUS: 12, // Bloom damage radius in world units (derived from BlastRadius * TILE_SIZE)
   SPICE_SPREAD_INTERVAL: 100, // Ticks between spread attempts
   SPICE_SPREAD_CHANCE: 0.03, // Chance per spice tile per spread tick
   SPICE_GROWTH_RATE: 0.002, // Density increase per growth tick
@@ -132,6 +135,11 @@ export function loadSpiceMoundConfig(cfg: Record<string, string>): void {
   GameConstants.SPICE_BLOOM_RADIUS = g('BlastRadius', 6);
   GameConstants.SPICE_MOUND_REGROW_MIN = g('MinRange', 200);
   GameConstants.SPICE_MOUND_REGROW_MAX = g('MaxRange', 2000);
+  GameConstants.SPICE_MOUND_HEALTH = g('Health', 100);
+  GameConstants.SPICE_MOUND_CAPACITY = g('SpiceCapacity', 50000);
+  GameConstants.SPICE_MOUND_APPEAR_DELAY = g('BuildTime', 6);
+  // Derive bloom damage from mound health (eruption force proportional to mound health)
+  GameConstants.SPICE_BLOOM_DAMAGE = GameConstants.SPICE_MOUND_HEALTH;
   // Derive damage radius from bloom radius in world units
   GameConstants.SPICE_BLOOM_DAMAGE_RADIUS = GameConstants.SPICE_BLOOM_RADIUS * TILE_SIZE;
 }

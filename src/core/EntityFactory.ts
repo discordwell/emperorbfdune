@@ -114,6 +114,8 @@ export function createEntityFactory(deps: EntityFactoryDeps) {
     Velocity.x[eid] = 0; Velocity.y[eid] = 0; Velocity.z[eid] = 0;
     Speed.max[eid] = def.speed;
     Speed.turnRate[eid] = def.turnRate;
+    Speed.acceleration[eid] = def.acceleration;
+    Speed.current[eid] = 0;
     Renderable.modelId[eid] = unitTypeIdMap.get(typeName) ?? 0;
     Renderable.sceneIndex[eid] = -1;
     ViewRange.range[eid] = (def.viewRange || 5) * 2;
@@ -173,6 +175,9 @@ export function createEntityFactory(deps: EntityFactoryDeps) {
       Harvester.spiceCarried[eid] = 0;
       Harvester.state[eid] = 0;
       Harvester.refineryEntity[eid] = findRefinery(world, owner, x, z) ?? 0;
+      // UnloadRate from rules.txt: spice units transferred per tick at refinery
+      // Normalize to internal spice units (divide by SPICE_VALUE like capacity)
+      Harvester.unloadRate[eid] = (def.unloadRate || 2) / GameConstants.SPICE_VALUE;
     }
 
     return eid;
@@ -240,6 +245,8 @@ export function createEntityFactory(deps: EntityFactoryDeps) {
       addComponent(world, Speed, eid);
       Speed.max[eid] = 0;
       Speed.turnRate[eid] = 0;
+      Speed.acceleration[eid] = 0;
+      Speed.current[eid] = 0;
       MoveTarget.active[eid] = 0;
       AttackTarget.active[eid] = 0;
       AttackTarget.entityId[eid] = 0;

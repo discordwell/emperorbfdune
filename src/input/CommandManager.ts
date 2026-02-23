@@ -7,6 +7,7 @@ import type { UnitRenderer } from '../rendering/UnitRenderer';
 import { EventBus } from '../core/EventBus';
 import type { AudioManager, UnitCategory } from '../audio/AudioManager';
 import type { CombatSystem } from '../simulation/CombatSystem';
+import type { FormationSystem } from '../simulation/FormationSystem';
 
 export type CommandMode = 'normal' | 'attack-move' | 'patrol' | 'teleport';
 
@@ -23,6 +24,7 @@ export class CommandManager {
   private moveMarkerFn: ((x: number, z: number) => void) | null = null;
   private unitClassifier: ((eid: number) => UnitCategory) | null = null;
   private forceReturnFn: ((eid: number) => void) | null = null;
+  private formationSystem: FormationSystem | null = null;
 
   // Waypoint queue per entity
   private waypointQueues = new Map<number, Array<{ x: number; z: number }>>();
@@ -54,6 +56,10 @@ export class CommandManager {
 
   setForceReturnFn(fn: (eid: number) => void): void {
     this.forceReturnFn = fn;
+  }
+
+  setFormationSystem(fs: FormationSystem): void {
+    this.formationSystem = fs;
   }
 
   setUnitClassifier(fn: (eid: number) => UnitCategory): void {
@@ -338,6 +344,9 @@ export class CommandManager {
 
     this.applyFormation(entityIds, x, z);
 
+    // Create a formation group so units move at the same speed
+    this.formationSystem?.createFormation(entityIds, x, z);
+
     EventBus.emit('unit:move', { entityIds: [...entityIds], x, z });
     this.moveMarkerFn?.(x, z);
   }
@@ -460,6 +469,7 @@ export class CommandManager {
       AttackTarget.entityId[eid] = targetEid;
       AttackTarget.active[eid] = 1;
       this.waypointQueues.delete(eid);
+      this.formationSystem?.removeFromFormation(eid);
     }
     EventBus.emit('unit:attack', { attackerIds: [...entityIds], targetId: targetEid });
   }
@@ -494,6 +504,7 @@ export class CommandManager {
       AttackTarget.active[eid] = 0;
       this.waypointQueues.delete(eid);
       this.patrolEntities.delete(eid);
+      this.formationSystem?.removeFromFormation(eid);
     }
     this.combatSystem?.clearAttackMove(entityIds);
   }
@@ -505,6 +516,7 @@ export class CommandManager {
       this.waypointQueues.delete(eid);
       this.patrolEntities.delete(eid);
       this.combatSystem?.clearEscortTarget(eid);
+      this.formationSystem?.removeFromFormation(eid);
       // Store current position as guard point — unit returns here after combat
       this.combatSystem?.setGuardPosition(eid, Position.x[eid], Position.z[eid]);
     }
@@ -545,6 +557,7 @@ export class CommandManager {
       AttackTarget.active[eid] = 0;
       this.waypointQueues.delete(eid);
       this.patrolEntities.delete(eid);
+      this.formationSystem?.removeFromFormation(eid);
     }
     this.combatSystem?.clearAttackMove(entityIds);
     this.audioManager?.playSfx('select');
@@ -554,6 +567,7 @@ export class CommandManager {
   unregisterEntity(eid: number): void {
     this.waypointQueues.delete(eid);
     this.patrolEntities.delete(eid);
+    this.formationSystem?.unregisterEntity(eid);
   }
 
   dispose(): void {

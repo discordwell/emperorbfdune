@@ -111,6 +111,8 @@ export class DeliverySystem {
     Velocity.z[eid] = 0;
     Speed.max[eid] = CARRYALL_SPEED;
     Speed.turnRate[eid] = 0.15;
+    Speed.acceleration[eid] = 0; // Carryalls: instant speed (delivery entities)
+    Speed.current[eid] = CARRYALL_SPEED;
 
     Health.current[eid] = 9999;
     Health.max[eid] = 9999;

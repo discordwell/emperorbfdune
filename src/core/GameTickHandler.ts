@@ -7,7 +7,7 @@ import { TerrainType } from '../rendering/TerrainRenderer';
 import { EventBus } from './EventBus';
 import { computeSimulationHash } from './SimulationHash';
 import {
-  hasComponent,
+  hasComponent, removeEntity,
   Position, Health, Owner, UnitType,
   MoveTarget, AttackTarget, Harvester,
   BuildingType, PowerSource, Veterancy,
@@ -21,7 +21,7 @@ export function registerTickHandler(ctx: GameContext): void {
     effectsManager, audioManager, minimapRenderer, fogOfWar, damageNumbers,
     sandwormSystem, abilitySystem, superweaponSystem, victorySystem,
     selectionManager, selectionPanel, buildingPlacement,
-    aiPlayers,
+    aiPlayers, formationSystem, buildingDestructionSystem,
     aircraftAmmo, rearmingAircraft, descendingUnits, dyingTilts,
     processedDeaths, repairingBuildings, groundSplats, bloomMarkers,
     activeCrates, deferredActions,
@@ -118,26 +118,165 @@ export function registerTickHandler(ctx: GameContext): void {
       }
     }
 
-    // Process death tilt animations
+    // Process death animations per death type (units only — buildings use staged destruction)
     for (const [eid, tilt] of dyingTilts) {
       const frame = currentTick - tilt.startTick + 1;
-      const maxFrames = tilt.isBuilding ? 12 : 8;
+      const dt = tilt.deathType ?? 'normal';
+
+      // Duration varies by death type
+      let maxFrames = 8;
+      switch (dt) {
+        case 'dissolve': maxFrames = 15; break;  // Slower melt
+        case 'burn': maxFrames = 12; break;       // Lingering fire
+        case 'electrify': maxFrames = 6; break;   // Quick electric zap
+        case 'crush': maxFrames = 4; break;        // Very fast flatten
+        case 'explode': maxFrames = 8; break;      // Standard
+        case 'wreck': maxFrames = 10; break;       // Burning husk lingers
+        case 'bigExplosion': maxFrames = 12; break;// Multi-stage
+        default: maxFrames = 8; break;             // Normal tilt
+      }
+
       if (!tilt.obj.parent || frame > maxFrames) {
         dyingTilts.delete(eid);
         continue;
       }
-      if (tilt.isBuilding) {
-        // Buildings: shrink vertically and sink into ground
-        const t = frame / maxFrames;
-        tilt.obj.scale.y = Math.max(0.05, 1 - t * 0.8);
-        tilt.obj.position.y = tilt.startY - t * 1.5;
-        // Slight tilt for visual interest
-        tilt.obj.rotation.x = Math.sin(tilt.tiltDir) * t * 0.15;
-        tilt.obj.rotation.z = Math.cos(tilt.tiltDir) * t * 0.15;
-      } else {
-        tilt.obj.rotation.x = Math.sin(tilt.tiltDir) * frame * 0.1;
-        tilt.obj.rotation.z = Math.cos(tilt.tiltDir) * frame * 0.1;
-        tilt.obj.position.y = tilt.startY - frame * 0.05;
+
+      const t = frame / maxFrames; // 0..1 normalized progress
+
+      switch (dt) {
+        case 'dissolve': {
+          // Dissolve: shrink while becoming transparent, slight upward float
+          tilt.obj.scale.setScalar(Math.max(0.01, 1 - t * 0.9));
+          tilt.obj.position.y = tilt.startY + t * 0.5; // Float up slightly
+          // Tint green by adjusting material
+          tilt.obj.traverse((child) => {
+            if (child instanceof THREE.Mesh && child.material) {
+              const mat = child.material as THREE.MeshBasicMaterial | THREE.MeshLambertMaterial;
+              if ('opacity' in mat) {
+                mat.transparent = true;
+                mat.opacity = Math.max(0, 1 - t * 1.2);
+              }
+              if ('color' in mat) {
+                // Shift color toward green
+                mat.color.lerp(new THREE.Color(0.1, 0.8, 0.1), t * 0.03);
+              }
+            }
+          });
+          break;
+        }
+        case 'burn': {
+          // Burn: tilt sideways, sink into ground, flicker
+          const flickerScale = 1.0 + Math.sin(frame * 3) * 0.05;
+          tilt.obj.rotation.x = Math.sin(tilt.tiltDir) * t * 0.6;
+          tilt.obj.rotation.z = Math.cos(tilt.tiltDir) * t * 0.6;
+          tilt.obj.position.y = tilt.startY - t * 0.3;
+          tilt.obj.scale.setScalar(flickerScale * (1 - t * 0.3));
+          // Darken toward charred
+          tilt.obj.traverse((child) => {
+            if (child instanceof THREE.Mesh && child.material) {
+              const mat = child.material as THREE.MeshBasicMaterial | THREE.MeshLambertMaterial;
+              if ('color' in mat) {
+                mat.color.lerp(new THREE.Color(0.15, 0.08, 0.02), t * 0.04);
+              }
+              if ('opacity' in mat) {
+                mat.transparent = true;
+                mat.opacity = Math.max(0, 1 - t * 0.8);
+              }
+            }
+          });
+          break;
+        }
+        case 'electrify': {
+          // Electrify: rapid random jitter, bright flash, quick fade
+          const jitter = (1 - t) * 0.3;
+          tilt.obj.position.x += (Math.random() - 0.5) * jitter;
+          tilt.obj.position.z += (Math.random() - 0.5) * jitter;
+          tilt.obj.position.y = tilt.startY + Math.sin(frame * 5) * 0.1;
+          // Rapid scale pulse
+          const pulse = 1.0 + Math.sin(frame * 8) * 0.15 * (1 - t);
+          tilt.obj.scale.setScalar(pulse * (1 - t * 0.5));
+          // Flash bright blue-white then fade
+          tilt.obj.traverse((child) => {
+            if (child instanceof THREE.Mesh && child.material) {
+              const mat = child.material as THREE.MeshBasicMaterial | THREE.MeshLambertMaterial;
+              if ('color' in mat) {
+                const flash = Math.sin(frame * 6) > 0 ? 0.8 : 0;
+                mat.color.lerp(new THREE.Color(0.5 + flash, 0.7 + flash * 0.5, 1.0), t * 0.06);
+              }
+              if ('opacity' in mat) {
+                mat.transparent = true;
+                mat.opacity = Math.max(0, 1 - t * 1.5);
+              }
+            }
+          });
+          break;
+        }
+        case 'crush': {
+          // Crush: rapid vertical squash, flatten to ground
+          tilt.obj.scale.y = Math.max(0.02, 1 - t * 0.95);
+          tilt.obj.scale.x = 1 + t * 0.4; // Spread outward
+          tilt.obj.scale.z = 1 + t * 0.4;
+          tilt.obj.position.y = tilt.startY - t * 0.5;
+          // Quick fade
+          tilt.obj.traverse((child) => {
+            if (child instanceof THREE.Mesh && child.material) {
+              const mat = child.material as THREE.MeshBasicMaterial | THREE.MeshLambertMaterial;
+              if ('opacity' in mat) {
+                mat.transparent = true;
+                mat.opacity = Math.max(0, 1 - t * 2.0);
+              }
+            }
+          });
+          break;
+        }
+        case 'explode': {
+          // Explode: parts fly outward (simulated via scale burst + fast tilt)
+          const burstPhase = Math.min(1, t * 3); // Quick burst in first third
+          tilt.obj.rotation.x = Math.sin(tilt.tiltDir) * burstPhase * 1.2;
+          tilt.obj.rotation.z = Math.cos(tilt.tiltDir) * burstPhase * 1.2;
+          tilt.obj.position.y = tilt.startY + Math.sin(burstPhase * Math.PI) * 0.8 - t * 0.3;
+          // Expand then shrink
+          const explodeScale = t < 0.3 ? 1 + t * 2 : Math.max(0.1, 1.6 - (t - 0.3) * 2);
+          tilt.obj.scale.setScalar(explodeScale);
+          tilt.obj.traverse((child) => {
+            if (child instanceof THREE.Mesh && child.material) {
+              const mat = child.material as THREE.MeshBasicMaterial | THREE.MeshLambertMaterial;
+              if ('opacity' in mat) {
+                mat.transparent = true;
+                mat.opacity = Math.max(0, 1 - t * 1.2);
+              }
+            }
+          });
+          break;
+        }
+        case 'wreck':
+        case 'bigExplosion': {
+          // Wreck/big explosion: dramatic tilt, sink into ground, slow fade
+          tilt.obj.rotation.x = Math.sin(tilt.tiltDir) * t * 0.4;
+          tilt.obj.rotation.z = Math.cos(tilt.tiltDir) * t * 0.4;
+          tilt.obj.position.y = tilt.startY - t * 0.8;
+          tilt.obj.scale.y = Math.max(0.1, 1 - t * 0.6);
+          tilt.obj.traverse((child) => {
+            if (child instanceof THREE.Mesh && child.material) {
+              const mat = child.material as THREE.MeshBasicMaterial | THREE.MeshLambertMaterial;
+              if ('opacity' in mat) {
+                mat.transparent = true;
+                mat.opacity = Math.max(0, 1 - t);
+              }
+              if ('color' in mat) {
+                mat.color.lerp(new THREE.Color(0.1, 0.1, 0.1), t * 0.02);
+              }
+            }
+          });
+          break;
+        }
+        default: {
+          // Normal: standard tilt-and-sink
+          tilt.obj.rotation.x = Math.sin(tilt.tiltDir) * frame * 0.1;
+          tilt.obj.rotation.z = Math.cos(tilt.tiltDir) * frame * 0.1;
+          tilt.obj.position.y = tilt.startY - frame * 0.05;
+          break;
+        }
       }
     }
 
@@ -178,6 +317,12 @@ export function registerTickHandler(ctx: GameContext): void {
     }
     unitRenderer.tickDeconstruction();
     unitRenderer.tickDeathAnimations();
+
+    // Update staged building destruction sequences (after unitRenderer.update so our
+    // position/rotation/scale modifications aren't overwritten by ECS position sync)
+    buildingDestructionSystem.update((eid) => {
+      try { removeEntity(world, eid); } catch { /* entity may already be gone */ }
+    });
 
     // Check radar state
     if (currentTick % 50 === 0) {
@@ -237,6 +382,7 @@ export function registerTickHandler(ctx: GameContext): void {
     }
     commandManager.setWorld(world);
     commandManager.updateWaypoints();
+    formationSystem.update(world);
 
     // Update waypoint path lines
     if (currentTick % 10 === 0) {

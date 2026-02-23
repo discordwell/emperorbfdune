@@ -91,6 +91,7 @@ export function spawnFreshGame(ctx: GameContext): void {
           Harvester.spiceCarried[harvEid] = 0;
           Harvester.state[harvEid] = 0;
           Harvester.refineryEntity[harvEid] = 0;
+          Harvester.unloadRate[harvEid] = 2 / 200; // Default UnloadRate=2, normalized by SPICE_VALUE
         }
       }
     }
