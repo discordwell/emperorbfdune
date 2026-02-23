@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { startSkirmish } from './helpers/game-navigation.js';
 
 /**
  * Parity smoke tests — E2E verification that:
@@ -12,37 +13,9 @@ const CAMPAIGN_ONLY_UNITS = [
   'ATEngineer', 'HKEngineer', 'OREngineer',
 ];
 
-async function startAtreidesSkirm(page: Page): Promise<void> {
-  await page.goto('/?ui=2d');
-  await page.getByText('PLAY', { exact: true }).click();
-  await page.getByText('Choose Your House').waitFor();
-  await page.getByText('Atreides', { exact: true }).click();
-
-  await page.getByText('Select Game Mode').waitFor();
-  await page.getByText('Skirmish', { exact: true }).click();
-
-  await page.getByText('Choose Your Subhouse Ally').waitFor();
-  await page.getByText('Fremen', { exact: true }).first().click();
-
-  await page.getByText('Select Difficulty').waitFor();
-  await page.getByText('Normal', { exact: true }).click();
-
-  await page.getByRole('button', { name: 'Continue' }).click();
-  await page.getByText('Select Battlefield').waitFor();
-  await page.getByText('2-Player Maps').waitFor();
-  await page.getByText('KOTH1').click();
-
-  await expect(page.locator('#ui-overlay')).toBeVisible({ timeout: 120_000 });
-  await page.waitForFunction(() => {
-    const loading = document.getElementById('loading-screen');
-    if (loading && loading.style.opacity !== '0' && loading.style.display !== 'none') return false;
-    return (window as any).game?.getTickCount() > 5;
-  }, { timeout: 60_000 });
-}
-
 test('skirmish has no campaign-only units in game state', async ({ page }) => {
   test.setTimeout(180_000);
-  await startAtreidesSkirm(page);
+  await startSkirmish(page, { difficulty: 'Normal', waitForReady: true });
 
   const snapshot = await page.evaluate(() => (window as any).debug.gameStateSnapshot());
   const allUnitTypes = [
@@ -56,7 +29,7 @@ test('skirmish has no campaign-only units in game state', async ({ page }) => {
 
 test('sidebar Infantry tab has no campaign-only units', async ({ page }) => {
   test.setTimeout(180_000);
-  await startAtreidesSkirm(page);
+  await startSkirmish(page, { difficulty: 'Normal', waitForReady: true });
 
   // Click Infantry tab in sidebar
   const infantryTab = page.locator('[data-tab="infantry"], .sidebar-tab:has-text("Infantry")').first();

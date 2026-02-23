@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { join } from 'path';
+import { startSkirmish, startCampaign, waitForGameReady } from './helpers/game-navigation.js';
 
 /**
  * Automated screenshot suite — captures 10 key game moments to prove
@@ -14,53 +15,6 @@ async function screenshot(page: Page, name: string): Promise<void> {
   const path = join(SCREENSHOTS_DIR, `${name}.png`);
   await page.screenshot({ path, fullPage: false });
   console.log(`Screenshot saved: ${path}`);
-}
-
-async function startEasySkirmish(page: Page): Promise<void> {
-  await page.goto('/?ui=2d');
-
-  // House selection
-  await page.getByText('PLAY', { exact: true }).click();
-  await page.getByText('Choose Your House').waitFor();
-  await page.getByText('Atreides', { exact: true }).click();
-
-  // Game mode
-  await page.getByText('Select Game Mode').waitFor();
-  await page.getByText('Skirmish', { exact: true }).click();
-
-  // Subhouse
-  await page.getByText('Choose Your Subhouse Ally').waitFor();
-  await page.getByText('Fremen', { exact: true }).first().click();
-
-  // Difficulty
-  await page.getByText('Select Difficulty').waitFor();
-  await page.getByText('Easy', { exact: true }).click();
-
-  // Skirmish options
-  await page.getByRole('button', { name: 'Continue' }).click();
-
-  // Map selection — KOTH1 has terrain mesh + bin data
-  await page.getByText('Select Battlefield').waitFor();
-  await page.getByText('2-Player Maps').waitFor();
-  await page.getByText('KOTH1').click();
-
-  // Wait for in-game HUD
-  await expect(page.locator('#ui-overlay')).toBeVisible({ timeout: 60_000 });
-}
-
-async function waitForGameReady(page: Page): Promise<void> {
-  // Wait for loading screen to disappear
-  await page.waitForFunction(() => {
-    const loading = document.getElementById('loading-screen');
-    if (!loading) return true;
-    return loading.style.opacity === '0' || loading.style.display === 'none';
-  }, { timeout: 120_000 });
-
-  // Wait for game loop to tick
-  await page.waitForFunction(
-    () => (window as any).game?.getTickCount() > 5,
-    { timeout: 60_000 },
-  );
 }
 
 test.describe('Screenshot suite', () => {
@@ -83,47 +37,12 @@ test.describe('Screenshot suite', () => {
   });
 
   test('03 - Campaign territory map', async ({ page }) => {
-    await page.goto('/?ui=2d');
-    // Clear campaign state for clean start
-    await page.evaluate(() => {
-      localStorage.removeItem('ebfd_campaign');
-      localStorage.removeItem('ebfd_campaign_next');
-    });
-    await page.getByText('PLAY', { exact: true }).click();
-    await page.getByText('Choose Your House').waitFor();
-    await page.getByText('Atreides', { exact: true }).click();
-
-    await page.getByText('Select Game Mode').waitFor();
-    await page.getByText('Campaign', { exact: true }).click();
-
-    // Campaign skips subhouse selection — goes straight to difficulty
-    await page.getByText('Select Difficulty').waitFor();
-    await page.getByText('Easy', { exact: true }).click();
-
-    // Campaign map should appear
-    await page.waitForTimeout(3000);
+    await startCampaign(page);
     await screenshot(page, '03-campaign-map');
   });
 
   test('04 - Mission briefing', async ({ page }) => {
-    await page.goto('/?ui=2d');
-    await page.evaluate(() => {
-      localStorage.removeItem('ebfd_campaign');
-      localStorage.removeItem('ebfd_campaign_next');
-    });
-    await page.getByText('PLAY', { exact: true }).click();
-    await page.getByText('Choose Your House').waitFor();
-    await page.getByText('Atreides', { exact: true }).click();
-
-    await page.getByText('Select Game Mode').waitFor();
-    await page.getByText('Campaign', { exact: true }).click();
-
-    // Campaign skips subhouse — straight to difficulty
-    await page.getByText('Select Difficulty').waitFor();
-    await page.getByText('Easy', { exact: true }).click();
-
-    // Wait for campaign map then click an attackable territory
-    await page.waitForTimeout(3000);
+    await startCampaign(page);
 
     // Try clicking a territory with attack option
     const attackBtn = page.getByRole('button', { name: /Attack/i }).first();
@@ -143,14 +62,14 @@ test.describe('Screenshot suite', () => {
   });
 
   test('05 - Fresh in-game view', async ({ page }) => {
-    await startEasySkirmish(page);
+    await startSkirmish(page);
     await waitForGameReady(page);
     await page.waitForTimeout(2000); // Let terrain and initial buildings render
     await screenshot(page, '05-fresh-game');
   });
 
   test('06 - Units and buildings', async ({ page }) => {
-    await startEasySkirmish(page);
+    await startSkirmish(page);
     await waitForGameReady(page);
 
     // Spawn units near the player base
@@ -186,7 +105,7 @@ test.describe('Screenshot suite', () => {
   });
 
   test('07 - Combat with effects', async ({ page }) => {
-    await startEasySkirmish(page);
+    await startSkirmish(page);
     await waitForGameReady(page);
 
     // Speed up for faster combat
@@ -211,7 +130,7 @@ test.describe('Screenshot suite', () => {
   });
 
   test('08 - Base overview (zoomed out)', async ({ page }) => {
-    await startEasySkirmish(page);
+    await startSkirmish(page);
     await waitForGameReady(page);
 
     // Spawn extra buildings
@@ -236,7 +155,7 @@ test.describe('Screenshot suite', () => {
   });
 
   test('09 - Sidebar and minimap detail', async ({ page }) => {
-    await startEasySkirmish(page);
+    await startSkirmish(page);
     await waitForGameReady(page);
 
     // Click Buildings tab to show sidebar content
@@ -250,7 +169,7 @@ test.describe('Screenshot suite', () => {
   });
 
   test('10 - Victory screen', async ({ page }) => {
-    await startEasySkirmish(page);
+    await startSkirmish(page);
     await waitForGameReady(page);
 
     // Force victory

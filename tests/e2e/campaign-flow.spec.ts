@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { join } from 'path';
+import { startCampaign, waitForGameReady } from './helpers/game-navigation.js';
 
 /**
  * Campaign E2E test — exercises the full campaign loop:
@@ -20,30 +21,8 @@ test.describe('Campaign flow', () => {
   test.setTimeout(300_000);
 
   test('Atreides campaign: select territory, play mission, win', async ({ page }) => {
-    // Use ?ui=2d to force 2D campaign map with clickable DOM territories
-    await page.goto('/?ui=2d');
-    await page.evaluate(() => {
-      localStorage.removeItem('ebfd_campaign');
-      localStorage.removeItem('ebfd_campaign_next');
-      localStorage.removeItem('ebfd_save');
-      localStorage.removeItem('ebfd_forced_mission');
-    });
-
-    // 1. House selection → Atreides
-    await page.getByText('PLAY', { exact: true }).click();
-    await page.getByText('Choose Your House').waitFor();
-    await page.getByText('Atreides', { exact: true }).click();
-    console.log('Step 1: Selected Atreides');
-
-    // 2. Campaign mode (skips subhouse selection)
-    await page.getByText('Select Game Mode').waitFor();
-    await page.getByText('Campaign', { exact: true }).click();
-    console.log('Step 2: Selected Campaign');
-
-    // 3. Difficulty
-    await page.getByText('Select Difficulty').waitFor();
-    await page.getByText('Easy', { exact: true }).click();
-    console.log('Step 3: Selected Easy difficulty');
+    await startCampaign(page);
+    console.log('Steps 1-3: Selected Atreides, Campaign, Easy');
 
     // 4. Campaign map — 2D fallback with "STRATEGIC BATTLE MAP"
     await page.getByText('STRATEGIC BATTLE MAP').waitFor({ timeout: 15_000 });
@@ -74,13 +53,7 @@ test.describe('Campaign flow', () => {
 
     // 7. Wait for in-game HUD to appear
     await expect(page.locator('#ui-overlay')).toBeVisible({ timeout: 120_000 });
-
-    // Wait for game to be fully ready
-    await page.waitForFunction(() => {
-      const loading = document.getElementById('loading-screen');
-      if (loading && loading.style.opacity !== '0' && loading.style.display !== 'none') return false;
-      return (window as any).game?.getTickCount() > 5;
-    }, { timeout: 120_000 });
+    await waitForGameReady(page);
     console.log('Step 7: Game loaded and running');
 
     await page.waitForTimeout(2000);

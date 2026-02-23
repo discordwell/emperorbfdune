@@ -260,6 +260,18 @@ export class QemuController {
     throw new Error(`Desktop did not become ready within ${timeoutMs}ms`);
   }
 
+  /**
+   * Reset the guest OS without restarting the QEMU process.
+   * Equivalent to pressing the reset button — reboots the guest
+   * and waits for the desktop to be ready again.
+   */
+  async resetGuest(): Promise<void> {
+    console.log('[QEMU] Resetting guest OS...');
+    await this.qmpCommand('system_reset');
+    // Wait for the guest to reboot and become responsive
+    await this.waitForDesktop();
+  }
+
   async shutdown(): Promise<void> {
     console.log('[QEMU] Shutting down VM...');
     try {

@@ -197,6 +197,7 @@ async function main(): Promise<void> {
     }
 
     // Process each scenario
+    let isFirstQemuScenario = true;
     for (const scenario of scenarios) {
       console.log(`\n${'='.repeat(60)}`);
       console.log(`Scenario: ${scenario.name}`);
@@ -207,6 +208,12 @@ async function main(): Promise<void> {
 
       // Capture original
       if (!opts.skipOriginal && qemu) {
+        // Reset guest between scenarios so each starts from a clean boot
+        if (!isFirstQemuScenario) {
+          await qemu.resetGuest();
+        }
+        isFirstQemuScenario = false;
+
         console.log('[Original] Navigating to scenario state...');
         await qemu.executeInputSequence(scenario.original.setupKeys);
 

@@ -1,38 +1,8 @@
 import { expect, test } from '@playwright/test';
-
-async function startSkirmish(page: import('@playwright/test').Page): Promise<void> {
-  await page.goto('/?ui=2d');
-
-  await page.getByText('PLAY', { exact: true }).click();
-  await page.getByText('Choose Your House').waitFor();
-  await page.getByText('Atreides', { exact: true }).click();
-
-  await page.getByText('Select Game Mode').waitFor();
-  await page.getByText('Skirmish', { exact: true }).click();
-
-  await page.getByText('Choose Your Subhouse Ally').waitFor();
-  await page.getByText('Fremen', { exact: true }).first().click();
-
-  await page.getByText('Select Difficulty').waitFor();
-  await page.getByText('Normal', { exact: true }).click();
-
-  await page.getByRole('button', { name: 'Continue' }).click();
-  await page.getByText('Select Battlefield').waitFor();
-  await page.getByText('2-Player Maps').waitFor();
-  await page.getByText('KOTH1').click();
-
-  await expect(page.locator('#ui-overlay')).toBeVisible({ timeout: 120_000 });
-
-  // Wait for game loop to actually tick
-  await page.waitForFunction(() => {
-    const loading = document.getElementById('loading-screen');
-    if (loading && loading.style.opacity !== '0' && loading.style.display !== 'none') return false;
-    return (window as any).game?.getTickCount() > 5;
-  }, { timeout: 60_000 });
-}
+import { startSkirmish } from './helpers/game-navigation.js';
 
 test('starts a skirmish and reaches the in-game HUD', async ({ page }) => {
-  await startSkirmish(page);
+  await startSkirmish(page, { difficulty: 'Normal', waitForReady: true });
 
   const timer = page.locator('#game-timer');
   await expect(timer).toHaveText('00:00');
@@ -44,7 +14,7 @@ test('starts a skirmish and reaches the in-game HUD', async ({ page }) => {
 });
 
 test('pause menu can save to slot 1', async ({ page }) => {
-  await startSkirmish(page);
+  await startSkirmish(page, { difficulty: 'Normal', waitForReady: true });
 
   await page.waitForTimeout(800);
   await page.locator('#game-canvas').click({ position: { x: 80, y: 80 } });
@@ -59,7 +29,7 @@ test('pause menu can save to slot 1', async ({ page }) => {
 });
 
 test('sidebar shows building and unit tabs', async ({ page }) => {
-  await startSkirmish(page);
+  await startSkirmish(page, { difficulty: 'Normal', waitForReady: true });
 
   // Verify sidebar tabs exist
   await expect(page.getByRole('button', { name: /Buildings/ })).toBeVisible();

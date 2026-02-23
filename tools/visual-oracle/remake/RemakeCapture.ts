@@ -1,4 +1,10 @@
 import { chromium, type Browser, type Page } from 'playwright';
+import {
+  startSkirmish,
+  startCampaign,
+  waitForGameReady,
+  waitForTitleScreen,
+} from '../../../tests/e2e/helpers/game-navigation.js';
 
 export interface RemakeScenarioConfig {
   url: string;
@@ -11,7 +17,7 @@ export interface RemakeScenarioConfig {
 
 /**
  * Captures screenshots from the web remake using Playwright.
- * Reuses navigation patterns from the E2E test suite.
+ * Delegates navigation to the shared E2E helpers.
  */
 export class RemakeCapture {
   private browser: Browser | null = null;
@@ -50,7 +56,7 @@ export class RemakeCapture {
 
       // Wait for game to be ready if needed
       if (config.waitForGame) {
-        await this.waitForGameReady(page);
+        await waitForGameReady(page);
       }
 
       // Wait the configured delay before capturing
@@ -78,104 +84,25 @@ export class RemakeCapture {
 
   /**
    * Execute a named setup sequence to get the game into the right state.
-   * These mirror the patterns from screenshots.spec.ts.
+   * Delegates to shared E2E navigation helpers.
    */
   private async runSetup(page: Page, setupName: string): Promise<void> {
     switch (setupName) {
       case 'titleScreen':
-        await this.setupTitleScreen(page);
+        await waitForTitleScreen(page);
+        console.log('[Remake] Title screen ready');
         break;
       case 'startEasySkirmish':
-        await this.setupEasySkirmish(page);
+        await startSkirmish(page, { navigate: false });
+        console.log('[Remake] Easy skirmish started');
         break;
       case 'startCampaign':
-        await this.setupCampaign(page);
+        await startCampaign(page, { navigate: false });
+        console.log('[Remake] Campaign map ready');
         break;
       default:
         throw new Error(`Unknown setup: ${setupName}`);
     }
-  }
-
-  private async setupTitleScreen(page: Page): Promise<void> {
-    // Just wait for the title to render
-    await page.getByText('PLAY', { exact: true }).waitFor({ timeout: 30_000 });
-    await page.waitForTimeout(1000);
-    console.log('[Remake] Title screen ready');
-  }
-
-  private async setupEasySkirmish(page: Page): Promise<void> {
-    // House selection
-    await page.getByText('PLAY', { exact: true }).click();
-    await page.getByText('Choose Your House').waitFor();
-    await page.getByText('Atreides', { exact: true }).click();
-
-    // Game mode
-    await page.getByText('Select Game Mode').waitFor();
-    await page.getByText('Skirmish', { exact: true }).click();
-
-    // Subhouse
-    await page.getByText('Choose Your Subhouse Ally').waitFor();
-    await page.getByText('Fremen', { exact: true }).first().click();
-
-    // Difficulty
-    await page.getByText('Select Difficulty').waitFor();
-    await page.getByText('Easy', { exact: true }).click();
-
-    // Skirmish options
-    await page.getByRole('button', { name: 'Continue' }).click();
-
-    // Map selection
-    await page.getByText('Select Battlefield').waitFor();
-    await page.getByText('2-Player Maps').waitFor();
-    await page.getByText('KOTH1').click();
-
-    // Wait for in-game HUD
-    await page.locator('#ui-overlay').waitFor({ state: 'visible', timeout: 60_000 });
-    console.log('[Remake] Easy skirmish started');
-  }
-
-  private async setupCampaign(page: Page): Promise<void> {
-    // Clear campaign state for clean start
-    await page.evaluate(() => {
-      localStorage.removeItem('ebfd_campaign');
-      localStorage.removeItem('ebfd_campaign_next');
-    });
-
-    // House selection
-    await page.getByText('PLAY', { exact: true }).click();
-    await page.getByText('Choose Your House').waitFor();
-    await page.getByText('Atreides', { exact: true }).click();
-
-    // Game mode
-    await page.getByText('Select Game Mode').waitFor();
-    await page.getByText('Campaign', { exact: true }).click();
-
-    // Campaign skips subhouse selection — straight to difficulty
-    await page.getByText('Select Difficulty').waitFor();
-    await page.getByText('Easy', { exact: true }).click();
-
-    // Wait for campaign map
-    await page.waitForTimeout(3000);
-    console.log('[Remake] Campaign map ready');
-  }
-
-  private async waitForGameReady(page: Page): Promise<void> {
-    console.log('[Remake] Waiting for game to be ready...');
-
-    // Wait for loading screen to disappear
-    await page.waitForFunction(() => {
-      const loading = document.getElementById('loading-screen');
-      if (!loading) return true;
-      return loading.style.opacity === '0' || loading.style.display === 'none';
-    }, { timeout: 120_000 });
-
-    // Wait for game loop to tick
-    await page.waitForFunction(
-      () => (window as any).game?.getTickCount() > 5,
-      { timeout: 60_000 },
-    );
-
-    console.log('[Remake] Game ready');
   }
 
   async shutdown(): Promise<void> {

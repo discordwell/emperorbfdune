@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import Anthropic from '@anthropic-ai/sdk';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { startSkirmish, waitForGameReady } from './helpers/game-navigation.js';
 
 /**
  * LLM-powered visual and game state sanity checks.
@@ -13,43 +14,13 @@ import { join } from 'path';
 const SCREENSHOTS_DIR = join(import.meta.dirname, '..', '..', 'screenshots');
 const HAS_API_KEY = !!process.env.ANTHROPIC_API_KEY;
 
-async function startEasySkirmish(page: Page): Promise<void> {
-  await page.goto('/?ui=2d');
-  await page.getByText('PLAY', { exact: true }).click();
-  await page.getByText('Choose Your House').waitFor();
-  await page.getByText('Atreides', { exact: true }).click();
-  await page.getByText('Select Game Mode').waitFor();
-  await page.getByText('Skirmish', { exact: true }).click();
-  await page.getByText('Choose Your Subhouse Ally').waitFor();
-  await page.getByText('Fremen', { exact: true }).first().click();
-  await page.getByText('Select Difficulty').waitFor();
-  await page.getByText('Easy', { exact: true }).click();
-  await page.getByRole('button', { name: 'Continue' }).click();
-  await page.getByText('Select Battlefield').waitFor();
-  await page.getByText('2-Player Maps').waitFor();
-  await page.getByText('KOTH1').click();
-  await expect(page.locator('#ui-overlay')).toBeVisible({ timeout: 60_000 });
-}
-
-async function waitForGameReady(page: Page): Promise<void> {
-  await page.waitForFunction(() => {
-    const loading = document.getElementById('loading-screen');
-    if (!loading) return true;
-    return loading.style.opacity === '0' || loading.style.display === 'none';
-  }, { timeout: 120_000 });
-  await page.waitForFunction(
-    () => (window as any).game?.getTickCount() > 5,
-    { timeout: 60_000 },
-  );
-}
-
 test.describe('LLM sanity checks', () => {
   test.setTimeout(300_000);
 
   test('vision check - screenshots look like an RTS game', async ({ page }) => {
     test.skip(!HAS_API_KEY, 'ANTHROPIC_API_KEY not set');
 
-    await startEasySkirmish(page);
+    await startSkirmish(page);
     await waitForGameReady(page);
     await page.evaluate(() => (window as any).game.setSpeed(2.0));
 
@@ -118,7 +89,7 @@ If no anomalies, return empty array. Be generous — this is a web remake of a 2
   test('game state sanity check', async ({ page }) => {
     test.skip(!HAS_API_KEY, 'ANTHROPIC_API_KEY not set');
 
-    await startEasySkirmish(page);
+    await startSkirmish(page);
     await waitForGameReady(page);
     await page.evaluate(() => (window as any).game.setSpeed(2.0));
 
