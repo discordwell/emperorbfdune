@@ -39,6 +39,9 @@ export class SandwormSystem implements GameSystem {
   private unitTypeNames: string[] = [];
   // Thumper locations: deployed by units, attract worms
   private thumpers: Array<{ x: number; z: number; ticksLeft: number }> = [];
+  // Persistent per-side worm attraction/repulsion flags (set by mission scripts)
+  private sideAttractsWorms = new Set<number>();
+  private sideRepelsWorms = new Set<number>();
 
   constructor(terrain: TerrainRenderer, effects: EffectsManager) {
     this.terrain = terrain;
@@ -58,6 +61,28 @@ export class SandwormSystem implements GameSystem {
   deployThumper(x: number, z: number): void {
     this.thumpers.push({ x, z, ticksLeft: GameConstants.THUMPER_DURATION });
     EventBus.emit('thumper:deployed', { x, z });
+  }
+
+  /** Mark a side's units as permanently attracting worms (mission script flag). */
+  setSideAttractsWorms(side: number): void {
+    this.sideAttractsWorms.add(side);
+    this.sideRepelsWorms.delete(side); // mutually exclusive
+  }
+
+  /** Mark a side's units as permanently repelling worms (mission script flag). */
+  setSideRepelsWorms(side: number): void {
+    this.sideRepelsWorms.add(side);
+    this.sideAttractsWorms.delete(side); // mutually exclusive
+  }
+
+  /** Check if a side attracts worms. */
+  doesSideAttractWorms(side: number): boolean {
+    return this.sideAttractsWorms.has(side);
+  }
+
+  /** Check if a side repels worms. */
+  doesSideRepelWorms(side: number): boolean {
+    return this.sideRepelsWorms.has(side);
   }
 
   update(world: World, _dt: number): void {
@@ -323,6 +348,11 @@ export class SandwormSystem implements GameSystem {
           else if (def.wormAttraction < 0) attractionMult *= 3.0; // Negative values repel worms
         }
       }
+      // Persistent side-level worm flags from mission scripts
+      const unitOwner = Owner.playerId[eid];
+      if (this.sideAttractsWorms.has(unitOwner)) attractionMult *= 0.3; // strongly attracts
+      if (this.sideRepelsWorms.has(unitOwner)) continue; // skip entirely
+
       const dist = distance2D(worm.x, worm.z, Position.x[eid], Position.z[eid]);
       const effectiveDist = dist * attractionMult;
 

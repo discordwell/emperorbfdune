@@ -317,7 +317,7 @@ export class TokFunctionDispatch {
       }
 
       case FUNC.GetSideSpice:
-        // Script-side "spice" tracks available economy budget in campaign scripts.
+        // Scripts use GetSideSpice interchangeably with GetSideCash for affordability checks.
         return ctx.harvestSystem.getSolaris(asInt(args[0]));
 
       case FUNC.GetObjectSide: {
@@ -811,9 +811,12 @@ export class TokFunctionDispatch {
       }
 
       case FUNC.SideAIEncounterAttack: {
-        // Mark side as aggressive on encounter — implemented via attack-move
+        // Persistent flag: side attacks enemies on encounter
         const side = asInt(args[0]);
-        this.setAttackMoveForSide(ctx, side);
+        const ai = ctx.aiPlayers.find(a => (a as any).playerId === side);
+        if (ai && typeof (ai as any).setEncounterBehavior === 'function') {
+          (ai as any).setEncounterBehavior('attack');
+        }
         return 0;
       }
 
@@ -848,8 +851,12 @@ export class TokFunctionDispatch {
       }
 
       case FUNC.SideAIEncounterIgnore: {
+        // Persistent flag: side ignores enemies on encounter
         const side = asInt(args[0]);
-        this.setAIBehavior(ctx, side, 'defensive');
+        const ai = ctx.aiPlayers.find(a => (a as any).playerId === side);
+        if (ai && typeof (ai as any).setEncounterBehavior === 'function') {
+          (ai as any).setEncounterBehavior('ignore');
+        }
         return 0;
       }
 
@@ -925,7 +932,13 @@ export class TokFunctionDispatch {
         const text = getMissionMessage(this.housePrefix, msgId)
           ?? getCampaignString(`#${msgId}`)
           ?? `[Timer ${msgId}]`;
-        ctx.selectionPanel.addMessage(text, '#ffaa00');
+        // Persistent on-screen display (stays until TimerMessageRemove)
+        const panel = ctx.selectionPanel as any;
+        if (typeof panel?.addTimerMessage === 'function') {
+          panel.addTimerMessage(text, '#ffaa00');
+        } else {
+          ctx.selectionPanel.addMessage(text, '#ffaa00');
+        }
         return 0;
       }
 
@@ -933,8 +946,6 @@ export class TokFunctionDispatch {
         const panel = ctx.selectionPanel as any;
         if (typeof panel?.removeTimerMessage === 'function') {
           panel.removeTimerMessage();
-        } else if (typeof panel?.clearMessages === 'function') {
-          panel.clearMessages();
         }
         return 0;
       }
@@ -1077,10 +1088,7 @@ export class TokFunctionDispatch {
       case FUNC.ReplaceShroud: {
         const pos = asPos(args[0]);
         const radius = args.length > 1 ? asInt(args[1]) : 10;
-        const fog = ctx.fogOfWar as any;
-        if (typeof fog?.coverWorldArea === 'function') {
-          fog.coverWorldArea(pos.x, pos.z, radius);
-        }
+        ctx.fogOfWar.coverWorldArea(pos.x, pos.z, radius);
         return 0;
       }
 
@@ -1215,9 +1223,11 @@ export class TokFunctionDispatch {
       // Special weapons / Worms
       // -------------------------------------------------------------------
       case FUNC.ForceWormStrike: {
+        // Force an immediate worm attack at position — deploy a cluster of thumpers
         const pos = asPos(args[0]);
-        // Deploy a thumper at position to attract worms
         ctx.sandwormSystem.deployThumper(pos.x, pos.z);
+        ctx.sandwormSystem.deployThumper(pos.x + 2, pos.z + 2);
+        ctx.sandwormSystem.deployThumper(pos.x - 2, pos.z - 2);
         return 0;
       }
 
@@ -1303,20 +1313,16 @@ export class TokFunctionDispatch {
       }
 
       case FUNC.SideAttractsWorms: {
+        // Persistent flag: this side's units always attract worms
         const side = asInt(args[0]);
-        const pos = this.getSidePosition(ctx, ev, side);
-        ctx.sandwormSystem.deployThumper(pos.x, pos.z);
+        ctx.sandwormSystem.setSideAttractsWorms(side);
         return 0;
       }
 
       case FUNC.SideRepelsWorms: {
+        // Persistent flag: worms avoid this side's units entirely
         const side = asInt(args[0]);
-        const pos = this.getSidePosition(ctx, ev, side);
-        const mapW = ctx.terrain.getMapWidth() * 2;
-        const mapH = ctx.terrain.getMapHeight() * 2;
-        const awayX = Math.max(5, Math.min(mapW - 5, mapW - pos.x));
-        const awayZ = Math.max(5, Math.min(mapH - 5, mapH - pos.z));
-        ctx.sandwormSystem.deployThumper(awayX, awayZ);
+        ctx.sandwormSystem.setSideRepelsWorms(side);
         return 0;
       }
 

@@ -113,6 +113,8 @@ export class AIPlayer implements GameSystem {
 
   // Script-controlled behavior override (set by tok SideAIBehaviour* functions)
   private behaviorOverride: string | null = null;
+  // Persistent encounter behavior: 'attack' | 'ignore' | null (default)
+  private encounterBehavior: 'attack' | 'ignore' | null = null;
 
   // --- Original Data-Driven AI Mode ---
   private originalData: OriginalAIData | null = null;
@@ -132,6 +134,16 @@ export class AIPlayer implements GameSystem {
   /** Get the current behavior override (if any). */
   getBehaviorOverride(): string | null {
     return this.behaviorOverride;
+  }
+
+  /** Set persistent encounter behavior from mission scripts. */
+  setEncounterBehavior(behavior: 'attack' | 'ignore' | null): void {
+    this.encounterBehavior = behavior;
+  }
+
+  /** Get the current encounter behavior (if any). */
+  getEncounterBehavior(): 'attack' | 'ignore' | null {
+    return this.encounterBehavior;
   }
 
   /** Enable data-driven AI mode using original game data files. */

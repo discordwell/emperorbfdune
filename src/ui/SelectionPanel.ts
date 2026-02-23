@@ -30,6 +30,7 @@ export class SelectionPanel {
   // Message log
   private messageLog: string[] = [];
   private messageContainer: HTMLDivElement;
+  private timerMessageEl: HTMLDivElement | null = null;
   private sellConfirmEid: number | null = null;
   private sellConfirmTimer: ReturnType<typeof setTimeout> | null = null;
   private passengerCountFn: ((eid: number) => number) | null = null;
@@ -167,6 +168,30 @@ export class SelectionPanel {
 
     setTimeout(() => { msg.style.opacity = '0'; }, 3000);
     setTimeout(() => { msg.remove(); }, 6000);
+  }
+
+  /** Display a persistent timer/objective message that stays until removed. */
+  addTimerMessage(text: string, color = '#ffaa00'): void {
+    this.removeTimerMessage();
+    const el = document.createElement('div');
+    el.style.cssText = `
+      position: fixed; top: 60px; left: 50%; transform: translateX(-50%);
+      font-family: 'Segoe UI', Tahoma, sans-serif; font-size: 14px; font-weight: bold;
+      color: ${color}; text-shadow: 0 0 6px #000, 0 0 3px #000;
+      background: rgba(0,0,0,0.5); padding: 6px 16px; border-radius: 4px;
+      pointer-events: none; z-index: 20;
+    `;
+    el.textContent = text;
+    document.body.appendChild(el);
+    this.timerMessageEl = el;
+  }
+
+  /** Remove the persistent timer message. */
+  removeTimerMessage(): void {
+    if (this.timerMessageEl) {
+      this.timerMessageEl.remove();
+      this.timerMessageEl = null;
+    }
   }
 
   private render(): void {

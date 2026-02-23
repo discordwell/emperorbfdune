@@ -193,6 +193,8 @@ export function createMockCtx(): MockCtx {
     damageNumbers: {},
     sandwormSystem: {
       deployThumper: vi.fn(),
+      setSideAttractsWorms: vi.fn(),
+      setSideRepelsWorms: vi.fn(),
     },
     abilitySystem: {
       getTransportPassengers: vi.fn(() => new Map<number, number[]>()),

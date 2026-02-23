@@ -419,8 +419,9 @@ describe('TokFunctionDispatch', () => {
     it('supports side worm attract/repel directives', () => {
       spawnMockUnit(ctx, 'CubScout', 2, 20, 25);
       call(FUNC.SideAttractsWorms, [lit(2)]);
+      expect(ctx.sandwormSystem.setSideAttractsWorms).toHaveBeenCalledWith(2);
       call(FUNC.SideRepelsWorms, [lit(2)]);
-      expect(ctx.sandwormSystem.deployThumper).toHaveBeenCalledTimes(2);
+      expect(ctx.sandwormSystem.setSideRepelsWorms).toHaveBeenCalledWith(2);
     });
   });
 
