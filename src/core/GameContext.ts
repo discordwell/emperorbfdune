@@ -28,6 +28,7 @@ import type { VictorySystem, GameStats } from '../ui/VictoryScreen';
 import type { SelectionPanel } from '../ui/SelectionPanel';
 import type { Sidebar } from '../ui/Sidebar';
 import type { IconRenderer } from '../rendering/IconRenderer';
+import type { PIPRenderer } from '../rendering/PIPRenderer';
 import type { GameRules } from '../config/RulesParser';
 import type { ArtEntry } from '../config/ArtIniParser';
 import type { HouseChoice, OpponentConfig } from '../ui/HouseSelect';
@@ -38,6 +39,7 @@ import type { SimulationHashTracker } from './SimulationHash';
 import type { ReplayRecorder, ReplayPlayer } from './ReplaySystem';
 import type { MissionScriptRunnerInterface } from '../campaign/scripting/MissionScriptTypes';
 import type { MapMetadata } from '../config/MapLoader';
+import type { DeliverySystem } from '../simulation/DeliverySystem';
 
 // Save/Load types
 export interface SavedEntity {
@@ -146,8 +148,10 @@ export interface GameContext {
   selectionPanel: SelectionPanel;
   sidebar: Sidebar;
   iconRenderer: IconRenderer;
+  pipRenderer: PIPRenderer;
   aiPlayers: AIPlayer[];
   agentAI: AIPlayer | null; // Agent mode: AIPlayer controlling player 0
+  deliverySystem: DeliverySystem;
 
   // Mission scripting
   missionScriptRunner: MissionScriptRunnerInterface | null;

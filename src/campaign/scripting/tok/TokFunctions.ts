@@ -21,6 +21,7 @@ import { getCampaignString, getMissionMessage } from '../../CampaignData';
 import { EventBus } from '../../../core/EventBus';
 import { simRng } from '../../../utils/DeterministicRNG';
 import { TILE_SIZE, tileToWorld, worldToTile } from '../../../utils/MathUtils';
+import { lookupSoundCategory, lookupSoundOgg } from '../../../audio/SoundIdTable';
 
 type CameraSnapshot = { x: number; z: number; zoom: number; rotation: number };
 type CameraSpinState = { active: boolean; speed: number; direction: number };
@@ -37,7 +38,7 @@ export class TokFunctionDispatch {
   private housePrefix: string = 'AT';
   // Air strike tracking: strikeId → { units, targetX, targetZ }
   private airStrikes = new Map<number, { units: number[]; targetX: number; targetZ: number }>();
-  // Tooltip storage (cosmetic, no UI hook yet)
+  // Tooltip storage: entity ID -> tooltip message ID
   private tooltipMap = new Map<number, number>();
   // Script-assigned side color overrides.
   private sideColors = new Map<number, number>();
@@ -60,6 +61,15 @@ export class TokFunctionDispatch {
 
   setHousePrefix(prefix: string): void {
     this.housePrefix = prefix;
+  }
+
+  getHousePrefix(): string {
+    return this.housePrefix;
+  }
+
+  /** Get the tooltip message ID for an entity, or undefined if none assigned. */
+  getTooltipId(eid: number): number | undefined {
+    return this.tooltipMap.get(eid);
   }
 
   serialize(eidToIndex: Map<number, number>): TokDispatchSaveState {
@@ -604,7 +614,7 @@ export class TokFunctionDispatch {
       }
 
       case FUNC.ObjectToolTip: {
-        // Store tooltip ID on entity (cosmetic, no UI hook yet)
+        // Store tooltip ID on entity for hover display
         const ttEid = asInt(args[0]);
         const ttId = asInt(args[1]);
         if (ttEid >= 0) this.tooltipMap.set(ttEid, ttId);
@@ -979,14 +989,23 @@ export class TokFunctionDispatch {
         return 0;
       }
 
-      case FUNC.CameraTrackObject:
-      case FUNC.PIPCameraTrackObject: {
+      case FUNC.CameraTrackObject: {
         const eid = asInt(args[0]);
         if (eid >= 0 && hasComponent(ctx.game.getWorld(), Position, eid)) {
           ctx.scene.panTo(Position.x[eid], Position.z[eid]);
         }
-        if (funcId === FUNC.CameraTrackObject) this.mainCameraTrackEid = eid;
-        else this.pipCameraTrackEid = eid;
+        this.mainCameraTrackEid = eid;
+        return 0;
+      }
+
+      case FUNC.PIPCameraTrackObject: {
+        const eid = asInt(args[0]);
+        const pip = ctx.pipRenderer;
+        if (eid >= 0 && hasComponent(ctx.game.getWorld(), Position, eid)) {
+          pip.panTo(Position.x[eid], Position.z[eid]);
+        }
+        pip.show();
+        this.pipCameraTrackEid = eid;
         return 0;
       }
 
@@ -994,37 +1013,57 @@ export class TokFunctionDispatch {
       case FUNC.PIPCameraPanToPoint:
       case FUNC.PIPCameraScrollToPoint: {
         const pos = asPos(args[0]);
-        ctx.scene.panTo(pos.x, pos.z);
+        ctx.pipRenderer.panTo(pos.x, pos.z);
         return 0;
       }
 
       case FUNC.PIPRelease:
         this.pipCameraTrackEid = null;
         this.pipCameraSpin.active = false;
+        ctx.pipRenderer.release();
         return currentTick;
 
-      case FUNC.CameraZoomTo:
-      case FUNC.PIPCameraZoomTo: {
+      case FUNC.CameraZoomTo: {
         const targetZoom = args.length > 1 ? asInt(args[1]) : asInt(args[0]);
         this.setCameraZoom(ctx, targetZoom);
         return 0;
       }
 
-      case FUNC.CameraViewFrom:
-      case FUNC.PIPCameraViewFrom: {
+      case FUNC.PIPCameraZoomTo: {
+        const targetZoom = args.length > 1 ? asInt(args[1]) : asInt(args[0]);
+        ctx.pipRenderer.setZoom(targetZoom);
+        ctx.pipRenderer.show();
+        return 0;
+      }
+
+      case FUNC.CameraViewFrom: {
         const pos = asPos(args[0]);
         ctx.scene.panTo(pos.x, pos.z);
         return 0;
       }
 
-      case FUNC.CameraStartRotate:
+      case FUNC.PIPCameraViewFrom: {
+        const pos = asPos(args[0]);
+        ctx.pipRenderer.panTo(pos.x, pos.z);
+        return 0;
+      }
+
+      case FUNC.CameraStartRotate: {
+        const speed = Math.max(0, asInt(args[0]));
+        const dirCode = args.length > 1 ? asInt(args[1]) : 1;
+        this.mainCameraSpin.active = true;
+        this.mainCameraSpin.speed = speed;
+        this.mainCameraSpin.direction = dirCode === 2 ? -1 : 1;
+        return 0;
+      }
+
       case FUNC.PIPCameraStartRotate: {
         const speed = Math.max(0, asInt(args[0]));
         const dirCode = args.length > 1 ? asInt(args[1]) : 1;
-        const spin = funcId === FUNC.CameraStartRotate ? this.mainCameraSpin : this.pipCameraSpin;
-        spin.active = true;
-        spin.speed = speed;
-        spin.direction = dirCode === 2 ? -1 : 1;
+        this.pipCameraSpin.active = true;
+        this.pipCameraSpin.speed = speed;
+        this.pipCameraSpin.direction = dirCode === 2 ? -1 : 1;
+        ctx.pipRenderer.show();
         return 0;
       }
 
@@ -1046,9 +1085,11 @@ export class TokFunctionDispatch {
 
       case FUNC.CameraIsPanning:
       case FUNC.CameraIsScrolling:
+        return this.isCameraPanning(ctx) ? 1 : 0;
+
       case FUNC.PIPCameraIsPanning:
       case FUNC.PIPCameraIsScrolling:
-        return this.isCameraPanning(ctx) ? 1 : 0;
+        return ctx.pipRenderer.isPanning() ? 1 : 0;
 
       case FUNC.CameraIsSpinning:
         return this.mainCameraSpin.active ? 1 : 0;
@@ -1061,7 +1102,7 @@ export class TokFunctionDispatch {
         return 0;
 
       case FUNC.PIPCameraStore:
-        this.pipCameraStored = this.captureCamera(ctx);
+        this.pipCameraStored = this.capturePIPCamera(ctx);
         return 0;
 
       case FUNC.CameraRestore:
@@ -1069,7 +1110,7 @@ export class TokFunctionDispatch {
         return 0;
 
       case FUNC.PIPCameraRestore:
-        if (this.pipCameraStored) this.restoreCamera(ctx, this.pipCameraStored);
+        if (this.pipCameraStored) this.restorePIPCamera(ctx, this.pipCameraStored);
         return 0;
 
       case FUNC.CentreCursor:
@@ -1374,35 +1415,126 @@ export class TokFunctionDispatch {
       // -------------------------------------------------------------------
       case FUNC.CarryAllDelivery: {
         // CarryAllDelivery(side, type, pos)
+        // Animated: Carryall flies in from map entrance, drops unit, flies out.
         if (args.length < 3) return -1;
         const side = asInt(args[0]);
         const typeIdx = asInt(args[1]);
         const pos = asPos(args[2]);
-        return this.spawnDeliveryObjects(ctx, ev, side, pos, [typeIdx]);
+        const typeName = this.resolveString(typeIdx);
+        const entrance = this.getEntrancePoint(ctx, side);
+        ctx.deliverySystem.queueDelivery(ctx, {
+          side,
+          typeNames: [typeName],
+          destX: pos.x,
+          destZ: pos.z,
+          entranceX: entrance.x,
+          entranceZ: entrance.z,
+          kind: 'carryall',
+          onSpawned: (eids) => {
+            for (const eid of eids) {
+              ev.events.objectDelivered(side, eid);
+            }
+          },
+        });
+        // Return 0 since the entity hasn't been spawned yet (async delivery).
+        // Scripts that need the entity ID should use a delivery-complete condition.
+        return 0;
       }
 
-      case FUNC.Delivery:
-      case FUNC.StarportDelivery: {
-        // Delivery/StarportDelivery(side, pos, type1, type2, ...)
-        // Keep a fallback for legacy decoded order (side, type, pos).
+      case FUNC.Delivery: {
+        // Delivery(side, pos, type1, type2, ...)
+        // Animated: Carryall flies in from map entrance, drops unit(s), flies out.
         if (args.length < 3) return -1;
         const side = asInt(args[0]);
         const deliveryPos = isPos(args[1]) ? asPos(args[1]) : asPos(args[2]);
         const typeStart = isPos(args[1]) ? 2 : 1;
-        const typeIndices: number[] = [];
+        const typeNames: string[] = [];
         for (let i = typeStart; i < args.length; i++) {
-          if (!isPos(args[i])) typeIndices.push(asInt(args[i]));
+          if (!isPos(args[i])) typeNames.push(this.resolveString(asInt(args[i])));
         }
-        return this.spawnDeliveryObjects(ctx, ev, side, deliveryPos, typeIndices);
+        const entrance = this.getEntrancePoint(ctx, side);
+        ctx.deliverySystem.queueDelivery(ctx, {
+          side,
+          typeNames,
+          destX: deliveryPos.x,
+          destZ: deliveryPos.z,
+          entranceX: entrance.x,
+          entranceZ: entrance.z,
+          kind: 'carryall',
+          onSpawned: (eids) => {
+            for (const eid of eids) {
+              ev.events.objectDelivered(side, eid);
+            }
+          },
+        });
+        return 0;
+      }
+
+      case FUNC.StarportDelivery: {
+        // StarportDelivery(side, pos, type1, type2, ...)
+        // Uses starport landing pad descent animation instead of carryall.
+        if (args.length < 3) return -1;
+        const side = asInt(args[0]);
+        const deliveryPos = isPos(args[1]) ? asPos(args[1]) : asPos(args[2]);
+        const typeStart = isPos(args[1]) ? 2 : 1;
+        const typeNames: string[] = [];
+        for (let i = typeStart; i < args.length; i++) {
+          if (!isPos(args[i])) typeNames.push(this.resolveString(asInt(args[i])));
+        }
+        const entrance = this.getEntrancePoint(ctx, side);
+        ctx.deliverySystem.queueDelivery(ctx, {
+          side,
+          typeNames,
+          destX: deliveryPos.x,
+          destZ: deliveryPos.z,
+          entranceX: entrance.x,
+          entranceZ: entrance.z,
+          kind: 'starport',
+          onSpawned: (eids) => {
+            for (const eid of eids) {
+              ev.events.objectDelivered(side, eid);
+            }
+          },
+        });
+        return 0;
       }
 
       case FUNC.BuildObject: {
         // BuildObject(side, type) in original scripts; optional position fallback.
+        // Queues production for sides that have the requisite buildings,
+        // otherwise falls back to instant spawn (scripted AI reinforcements).
         if (args.length < 2) return -1;
         const side = asInt(args[0]);
         const typeIdx = asInt(args[1]);
         const pos = args.length >= 3 ? asPos(args[2]) : this.getSidePosition(ctx, ev, side);
         const typeName = this.resolveString(typeIdx);
+        const isBuilding = ctx.typeRegistry.buildingTypeIdMap.has(typeName);
+
+        // Try to queue via ProductionSystem for a more natural build experience.
+        // Only attempt this for non-building types (units) where side has production buildings.
+        if (!isBuilding && ctx.productionSystem.canBuild(side, typeName, false)) {
+          const started = ctx.productionSystem.startProduction(side, typeName, false);
+          if (started) {
+            // Production system will handle spawning via production:complete event.
+            // Fire script events when the unit eventually spawns.
+            const evRef = ev;
+            const sideRef = side;
+            const typeNameRef = typeName;
+            const handler = ({ unitType, owner }: { unitType: string; owner: number }) => {
+              if (owner === sideRef && unitType === typeNameRef) {
+                EventBus.off('production:complete', handler);
+                // The actual entity is spawned by the production:complete handler,
+                // so we just fire the script events.
+                evRef.events.objectConstructed(sideRef, -1);
+                evRef.events.objectTypeConstructed(sideRef, typeNameRef);
+              }
+            };
+            EventBus.on('production:complete', handler);
+            return 0;
+          }
+        }
+
+        // Fallback: instant spawn (scripted AI sides without production buildings)
         const eid = this.spawnObject(ctx, typeName, side, pos.x, pos.z);
         if (eid >= 0) {
           ev.events.objectConstructed(side, eid);
@@ -1517,26 +1649,38 @@ export class TokFunctionDispatch {
     const dt = this.lastCameraTick < 0 ? 1 : Math.max(1, currentTick - this.lastCameraTick);
     this.lastCameraTick = currentTick;
 
-    this.applyCameraTrack(ctx, this.mainCameraTrackEid);
-    this.applyCameraTrack(ctx, this.pipCameraTrackEid);
-    this.applyCameraSpin(ctx, this.mainCameraSpin, dt);
-    this.applyCameraSpin(ctx, this.pipCameraSpin, dt);
+    // Main camera tracking & spin
+    this.applyCameraTrack(ctx, this.mainCameraTrackEid, false);
+    this.applyCameraSpin(ctx, this.mainCameraSpin, dt, false);
+
+    // PIP camera tracking & spin (independent)
+    this.applyCameraTrack(ctx, this.pipCameraTrackEid, true);
+    this.applyCameraSpin(ctx, this.pipCameraSpin, dt, true);
   }
 
-  private applyCameraTrack(ctx: GameContext, trackEid: number | null): void {
+  private applyCameraTrack(ctx: GameContext, trackEid: number | null, isPip: boolean): void {
     if (trackEid === null) return;
     const w = ctx.game.getWorld();
     if (trackEid < 0 || !hasComponent(w, Position, trackEid)) return;
     if (hasComponent(w, Health, trackEid) && Health.current[trackEid] <= 0) return;
-    ctx.scene.panTo(Position.x[trackEid], Position.z[trackEid]);
+    if (isPip) {
+      ctx.pipRenderer.panTo(Position.x[trackEid], Position.z[trackEid]);
+    } else {
+      ctx.scene.panTo(Position.x[trackEid], Position.z[trackEid]);
+    }
   }
 
-  private applyCameraSpin(ctx: GameContext, spin: CameraSpinState, dt: number): void {
+  private applyCameraSpin(ctx: GameContext, spin: CameraSpinState, dt: number, isPip: boolean): void {
     if (!spin.active) return;
-    const scene = ctx.scene as any;
-    if (typeof scene?.rotateCamera !== 'function') return;
     const delta = spin.speed * 0.01 * spin.direction * dt;
-    scene.rotateCamera(delta);
+    if (isPip) {
+      ctx.pipRenderer.rotateCamera(delta);
+    } else {
+      const scene = ctx.scene as any;
+      if (typeof scene?.rotateCamera === 'function') {
+        scene.rotateCamera(delta);
+      }
+    }
   }
 
   private setCameraZoom(ctx: GameContext, targetZoom: number): void {
@@ -1584,6 +1728,16 @@ export class TokFunctionDispatch {
     }
   }
 
+  private capturePIPCamera(ctx: GameContext): CameraSnapshot {
+    const pip = ctx.pipRenderer;
+    return pip.captureState();
+  }
+
+  private restorePIPCamera(ctx: GameContext, snap: CameraSnapshot): void {
+    const pip = ctx.pipRenderer;
+    pip.restoreState(snap);
+  }
+
   private isObjectCarried(ctx: GameContext, eid: number): boolean {
     if (eid < 0) return false;
     const ability = ctx.abilitySystem as any;
@@ -1623,15 +1777,25 @@ export class TokFunctionDispatch {
   private playScriptSound(ctx: GameContext, soundId: number): void {
     const audio = ctx.audioManager as any;
     if (typeof audio?.playSfx !== 'function') return;
-    const mapped: string =
-      soundId === 1 ? 'move' :
-        soundId === 2 ? 'attack' :
-          soundId === 3 ? 'explosion' :
-            soundId === 4 ? 'build' :
-              soundId === 5 ? 'sell' :
-                soundId === 6 ? 'powerlow' :
-                  'select';
-    audio.playSfx(mapped);
+
+    // Look up the sound ID in the AUDIO.BAG table (945 entries).
+    // First try a direct OGG file if the SampleBank has it loaded.
+    const oggPath = lookupSoundOgg(soundId);
+    if (oggPath && audio.sampleBank && audio.sampleBank.has(oggPath)) {
+      audio.sampleBank.play(oggPath, 0.35, false);
+      return;
+    }
+
+    // Fall back to SfxManifest category routing (picks a random variant).
+    const category = lookupSoundCategory(soundId);
+    if (category) {
+      audio.playSfx(category);
+      return;
+    }
+
+    // Unknown sound ID -- fall back to generic 'select' so it's audible.
+    console.warn(`[Tok] PlaySound: unmapped sound ID ${soundId}`);
+    audio.playSfx('select');
   }
 
   private replaceObject(ctx: GameContext, eid: number, typeName: string, side: number): number {

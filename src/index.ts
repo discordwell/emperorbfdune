@@ -31,8 +31,15 @@ import { isAgentMode, getAgentConfig, pickTerritoryWithContext, startAgent, stop
 import { AIPlayer } from './ai/AIPlayer';
 import { startConsoleCapture, createTelemetrySystem } from './ai/AgentTelemetry';
 import { loadOriginalAIData } from './ai/OriginalAIData';
+import { isEditorMode, launchEditor } from './editor/EditorEntry';
 
 async function main() {
+  // Check for ?mode=editor to launch standalone map editor (no game systems)
+  if (isEditorMode()) {
+    await launchEditor();
+    return;
+  }
+
   // Check for ?agent=XX URL param to start agent mode (without reload)
   const urlParams = new URLSearchParams(window.location.search);
   const agentParam = urlParams.get('agent')?.toUpperCase();

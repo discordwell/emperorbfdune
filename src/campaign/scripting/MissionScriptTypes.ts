@@ -105,6 +105,8 @@ export interface MissionScriptRunnerInterface {
   serialize(eidToIndex: Map<number, number>): MissionScriptState;
   restore(state: MissionScriptState, indexToEid: Map<number, number>): void;
   dispose(): void;
+  /** Get tooltip info for an entity assigned via ObjectToolTip, or undefined. */
+  getTooltipForEntity?(eid: number): { tooltipId: number; housePrefix: string } | undefined;
 }
 
 /** Saved script runtime state for save/load. */

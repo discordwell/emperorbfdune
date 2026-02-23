@@ -293,4 +293,5 @@ export interface TokDispatchSaveState {
   pipCameraSpin: { active: boolean; speed: number; direction: number };
   mainCameraStored: { x: number; z: number; zoom: number; rotation: number } | null;
   pipCameraStored: { x: number; z: number; zoom: number; rotation: number } | null;
+  sideBasePositions: Array<{ side: number; x: number; z: number }>;
 }

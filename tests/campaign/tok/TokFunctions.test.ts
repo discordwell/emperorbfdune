@@ -265,7 +265,7 @@ describe('TokFunctionDispatch', () => {
 
       const eid = spawnMockUnit(ctx, 'CubScout', 0, 33, 44);
       call(FUNC.PIPCameraTrackObject, [lit(eid)]);
-      expect(ctx.scene.panTo).toHaveBeenCalledWith(33, 44);
+      expect(ctx.pipRenderer.panTo).toHaveBeenCalledWith(33, 44);
     });
 
     it('stores/restores camera state and tracks spin flags', () => {
@@ -426,22 +426,15 @@ describe('TokFunctionDispatch', () => {
   });
 
   describe('delivery and production', () => {
-    it('handles Delivery(side, pos, type...) and marks EventObjectDelivered', () => {
+    it('handles Delivery(side, pos, type...) via delivery system', () => {
       setPosVar(ev, 0, 70, 90);
       const t1 = indexOfType('CubScout');
       const t2 = indexOfType('FRCamp');
 
-      const last = call(FUNC.Delivery, [lit(9), posVar(0), lit(t1), lit(t2)]);
-      expect(last).toBeGreaterThanOrEqual(0);
-      expect(Owner.playerId[last]).toBe(9);
-      expect(ctx.__spawns.units.length + ctx.__spawns.buildings.length).toBe(2);
-
-      expect(call(FUNC.EventObjectDelivered, [lit(9), objVar(5)])).toBe(1);
-      const firstDelivered = ev.getVar(5, VarType.Obj) as number;
-      expect(firstDelivered).toBeGreaterThanOrEqual(0);
-      expect(call(FUNC.EventObjectDelivered, [lit(9), objVar(5)])).toBe(1);
-      const secondDelivered = ev.getVar(5, VarType.Obj) as number;
-      expect(secondDelivered).not.toBe(firstDelivered);
+      const result = call(FUNC.Delivery, [lit(9), posVar(0), lit(t1), lit(t2)]);
+      // Delivery is now async — returns 0, queues via deliverySystem
+      expect(result).toBe(0);
+      expect(ctx.deliverySystem.queueDelivery).toHaveBeenCalled();
     });
 
     it('supports BuildObject(side, type) and emits constructed events', () => {

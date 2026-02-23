@@ -90,6 +90,9 @@ export function registerTickHandler(ctx: GameContext): void {
       ctx.missionScriptRunner.tick(ctx, currentTick);
     }
 
+    // Tick delivery animations (Carryall fly-in/drop/fly-out)
+    ctx.deliverySystem.update(ctx);
+
     // Process starport descent animations
     for (const [eid, desc] of descendingUnits) {
       if (Health.current[eid] <= 0 || !hasComponent(world, Position, eid)) {

@@ -157,33 +157,79 @@ export class MinimapRenderer {
     const mapW = this.terrain.getMapWidth();
     const mapH = this.terrain.getMapHeight();
 
-    // Apply fog of war overlay
+    // Apply fog of war overlay with smooth tri-state rendering
     if (this.fogOfWar && this.fogOfWar.isEnabled()) {
       const vis = this.fogOfWar.getVisibility();
       const fogW = this.fogOfWar.getMapWidth();
+
+      // Build a fog overlay using ImageData for pixel-level alpha control
+      const imgData = this.ctx.getImageData(0, 0, 200, 200);
+      const pixels = imgData.data;
       const tileScaleX = 200 / mapW;
       const tileScaleZ = 200 / mapH;
-      this.ctx.fillStyle = '#000';
-      for (let tz = 0; tz < mapH; tz++) {
-        for (let tx = 0; tx < mapW; tx++) {
+
+      for (let py = 0; py < 200; py++) {
+        // Map pixel to fractional tile coordinate
+        const ftz = (py / 200) * mapH;
+        const tz = Math.min(Math.floor(ftz), mapH - 1);
+
+        for (let px = 0; px < 200; px++) {
+          const ftx = (px / 200) * mapW;
+          const tx = Math.min(Math.floor(ftx), mapW - 1);
+
           const fogIdx = tz * fogW + tx;
           if (fogIdx >= vis.length) {
-            // Treat out-of-bounds as unexplored (fully fogged)
-            this.ctx.globalAlpha = 0.85;
-            this.ctx.fillRect(tx * tileScaleX, tz * tileScaleZ, Math.ceil(tileScaleX), Math.ceil(tileScaleZ));
+            // Out of bounds: treat as shroud
+            const pidx = (py * 200 + px) * 4;
+            // Darken towards black
+            pixels[pidx] = Math.round(pixels[pidx] * 0.12);
+            pixels[pidx + 1] = Math.round(pixels[pidx + 1] * 0.12);
+            pixels[pidx + 2] = Math.round(pixels[pidx + 2] * 0.12);
             continue;
           }
+
           const v = vis[fogIdx];
-          if (v === FOG_VISIBLE) continue; // Fully visible
-          if (v === FOG_EXPLORED) {
-            this.ctx.globalAlpha = 0.4;
-          } else {
-            this.ctx.globalAlpha = 0.85;
-          }
-          this.ctx.fillRect(tx * tileScaleX, tz * tileScaleZ, Math.ceil(tileScaleX), Math.ceil(tileScaleZ));
+          if (v === FOG_VISIBLE) continue; // No darkening
+
+          // Sample neighbors for smooth edge transition
+          // Use bilinear-like sampling of adjacent tile fog states
+          const tx1 = Math.min(tx + 1, mapW - 1);
+          const tz1 = Math.min(tz + 1, mapH - 1);
+          const fracX = ftx - tx;
+          const fracZ = ftz - tz;
+
+          // Get alpha values for 2x2 tile neighborhood
+          const getAlpha = (ttx: number, ttz: number): number => {
+            const fi = ttz * fogW + ttx;
+            if (fi >= vis.length) return 0.92;
+            const sv = vis[fi];
+            if (sv === FOG_VISIBLE) return 0;
+            if (sv === FOG_EXPLORED) return 0.45;
+            return 0.92; // Shroud
+          };
+
+          const a00 = getAlpha(tx, tz);
+          const a10 = getAlpha(tx1, tz);
+          const a01 = getAlpha(tx, tz1);
+          const a11 = getAlpha(tx1, tz1);
+
+          // Bilinear interpolation for smooth edges
+          const top = a00 + (a10 - a00) * fracX;
+          const bot = a01 + (a11 - a01) * fracX;
+          const alpha = top + (bot - top) * fracZ;
+
+          if (alpha <= 0) continue;
+
+          // Apply darkening to existing pixel color
+          const pidx = (py * 200 + px) * 4;
+          const keep = 1 - alpha;
+          pixels[pidx] = Math.round(pixels[pidx] * keep);
+          pixels[pidx + 1] = Math.round(pixels[pidx + 1] * keep);
+          pixels[pidx + 2] = Math.round(pixels[pidx + 2] * keep);
         }
       }
-      this.ctx.globalAlpha = 1.0;
+
+      this.ctx.putImageData(imgData, 0, 0);
     }
 
     // World units to minimap pixels

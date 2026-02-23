@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { RenderSystem } from '../core/Game';
 import type { MapLighting } from '../config/MapLoader';
+import type { PIPRenderer } from './PIPRenderer';
 
 export class SceneManager implements RenderSystem {
   readonly scene: THREE.Scene;
@@ -29,6 +30,9 @@ export class SceneManager implements RenderSystem {
   // Sand particle system
   private sandParticles: THREE.Points | null = null;
   private sandParticlePositions: Float32Array | null = null;
+
+  // PIP (Picture-in-Picture) camera renderer
+  private pipRenderer: PIPRenderer | null = null;
 
   // Sun light for shadow tracking
   private sunLight: THREE.DirectionalLight | null = null;
@@ -149,6 +153,16 @@ export class SceneManager implements RenderSystem {
     this.scene.add(this.sandParticles);
   }
 
+  /** Attach a PIP renderer to be rendered after the main scene each frame. */
+  setPIPRenderer(pip: PIPRenderer): void {
+    this.pipRenderer = pip;
+  }
+
+  /** Get the attached PIP renderer (if any). */
+  getPIPRenderer(): PIPRenderer | null {
+    return this.pipRenderer;
+  }
+
   init(): void {
     // Already set up in constructor
   }
@@ -191,12 +205,21 @@ export class SceneManager implements RenderSystem {
     }
 
     this.renderer.render(this.scene, this.camera);
+
+    // Render PIP viewport on top if active
+    if (this.pipRenderer) {
+      this.pipRenderer.render(this.renderer, this.scene);
+    }
   }
 
   /** Set map bounds for camera clamping (in world units) */
   setMapBounds(worldW: number, worldH: number): void {
     this.mapBoundsX = worldW;
     this.mapBoundsZ = worldH;
+    // Propagate to PIP camera
+    if (this.pipRenderer) {
+      this.pipRenderer.setMapBounds(worldW, worldH);
+    }
   }
 
   /** Set per-map lighting colors from test.lit data */
@@ -405,6 +428,10 @@ export class SceneManager implements RenderSystem {
     }
     if (this.scene.background instanceof THREE.Texture) {
       this.scene.background.dispose();
+    }
+    if (this.pipRenderer) {
+      this.pipRenderer.dispose();
+      this.pipRenderer = null;
     }
     if (this.ownsRenderer) this.renderer.dispose();
   }

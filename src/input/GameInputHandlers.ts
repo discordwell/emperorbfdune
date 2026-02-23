@@ -1,6 +1,7 @@
 import type { GameContext } from '../core/GameContext';
 import type { PauseMenu } from '../ui/PauseMenu';
 import { getDisplayName } from '../config/DisplayNames';
+import { getMissionMessage, getCampaignString } from '../campaign/CampaignData';
 import {
   hasComponent,
   Position, Health, Owner, UnitType,
@@ -136,9 +137,36 @@ export function registerInputHandlers(ctx: GameContext, pauseMenu: PauseMenu): v
             const ownerLabel = owner === 0 ? 'You' : `Player ${owner}`;
             const rank = hasComponent(w, Veterancy, hoverEid) ? Veterancy.rank[hoverEid] : 0;
             const rankStr = rank > 0 ? ` ${'*'.repeat(rank)}` : '';
+
+            // Check for mission script tooltip
+            let missionTooltipHtml = '';
+            const runner = ctx.missionScriptRunner;
+            if (runner?.getTooltipForEntity) {
+              const ttInfo = runner.getTooltipForEntity(hoverEid);
+              if (ttInfo) {
+                const ttText = getMissionMessage(ttInfo.housePrefix, ttInfo.tooltipId)
+                  ?? getCampaignString(`#${ttInfo.tooltipId}`)
+                  ?? null;
+                if (ttText) {
+                  // Strip "Mentat : " prefix for cleaner tooltip display
+                  const cleanText = ttText.replace(/^Mentat\s*:\s*/i, '');
+                  missionTooltipHtml = `<div style="margin-top:4px;padding-top:4px;border-top:1px solid #554400;color:#f0c040;font-size:11px;font-style:italic;">${cleanText}</div>`;
+                }
+              }
+            }
+
             tooltipEl.innerHTML = `<div style="font-weight:bold;color:#fff;">${displayName}${rankStr}</div>`
               + `<div style="color:${hpColor};">HP: ${Math.round(hp)}/${Math.round(maxHp)} (${hpPct}%)</div>`
-              + `<div style="color:#aaa;font-size:10px;">${ownerLabel}${isBuilding ? ' | Building' : ''}</div>`;
+              + `<div style="color:#aaa;font-size:10px;">${ownerLabel}${isBuilding ? ' | Building' : ''}</div>`
+              + missionTooltipHtml;
+
+            // Apply mission tooltip border styling when tooltip text is present
+            if (missionTooltipHtml) {
+              tooltipEl.style.borderColor = '#aa8800';
+            } else {
+              tooltipEl.style.borderColor = '#555';
+            }
+
             tooltipEl.style.display = 'block';
           }
           const tx = Math.min(e.clientX + 16, window.innerWidth - 260);
@@ -149,6 +177,7 @@ export function registerInputHandlers(ctx: GameContext, pauseMenu: PauseMenu): v
       } else {
         if (tooltipEl && lastTooltipEid !== -1) {
           tooltipEl.style.display = 'none';
+          tooltipEl.style.borderColor = '#555';
           lastTooltipEid = -1;
         }
       }

@@ -123,6 +123,13 @@ export class TokInterpreter {
     return this.evaluator.sides;
   }
 
+  /** Get tooltip info for an entity, or undefined if none assigned. */
+  getTooltipForEntity(eid: number): { tooltipId: number; housePrefix: string } | undefined {
+    const ttId = this.functions.getTooltipId(eid);
+    if (ttId === undefined) return undefined;
+    return { tooltipId: ttId, housePrefix: this.functions.getHousePrefix() };
+  }
+
   dispose(): void {
     for (const off of this.eventListeners) {
       off();

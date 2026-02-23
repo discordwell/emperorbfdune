@@ -30,6 +30,7 @@ import { SandwormSystem } from '../simulation/SandwormSystem';
 import { AbilitySystem } from '../simulation/AbilitySystem';
 import { SuperweaponSystem } from '../simulation/SuperweaponSystem';
 import { WallSystem } from '../simulation/WallSystem';
+import { DeliverySystem } from '../simulation/DeliverySystem';
 import { AIPlayer } from '../ai/AIPlayer';
 import { AudioManager } from '../audio/AudioManager';
 import { BuildingPlacement } from '../input/BuildingPlacement';
@@ -37,6 +38,7 @@ import { VictorySystem, GameStats } from '../ui/VictoryScreen';
 import { SelectionPanel } from '../ui/SelectionPanel';
 import { Sidebar } from '../ui/Sidebar';
 import { IconRenderer } from '../rendering/IconRenderer';
+import { PIPRenderer } from '../rendering/PIPRenderer';
 import { EventBus } from './EventBus';
 import { GameConstants } from '../utils/Constants';
 import { worldToTile } from '../utils/MathUtils';
@@ -116,6 +118,7 @@ export function initializeSystems(config: SystemInitConfig): GameContext {
   const harvestSystem = new HarvestSystem(terrain);
   commandManager.setForceReturnFn((eid) => harvestSystem.forceReturn(eid));
   const productionSystem = new ProductionSystem(gameRules, harvestSystem);
+  const deliverySystem = new DeliverySystem();
 
   const playerDifficulty = house.difficulty ?? 'normal';
   productionSystem.setDifficulty(0, playerDifficulty, false);
@@ -262,6 +265,12 @@ export function initializeSystems(config: SystemInitConfig): GameContext {
     }
     console.log(`AI ${playerId}: ${opponents[i].prefix}, sub-house: ${availableSubhouses[i % availableSubhouses.length]}, difficulty: ${aiDifficulty}`);
   }
+  // Configure delivery system house prefixes for Carryall model selection
+  deliverySystem.setHousePrefix(0, house.prefix);
+  for (let i = 0; i < opponents.length; i++) {
+    deliverySystem.setHousePrefix(i + 1, opponents[i].prefix);
+  }
+
   if (opponents.length > 0) {
     const ai1Difficulty = missionRuntime?.aiDifficulty ?? opponents[0].difficulty;
     productionSystem.setDifficulty(1, ai1Difficulty, true);
@@ -468,6 +477,10 @@ export function initializeSystems(config: SystemInitConfig): GameContext {
 
   const iconRenderer = new IconRenderer();
 
+  // PIP (Picture-in-Picture) camera renderer
+  const pipRenderer = new PIPRenderer();
+  scene.setPIPRenderer(pipRenderer);
+
   // Build the GameContext
   const ctx: GameContext = {
     game, gameRules, artMap, typeRegistry, house,
@@ -480,8 +493,8 @@ export function initializeSystems(config: SystemInitConfig): GameContext {
     minimapRenderer, fogOfWar, effectsManager, damageNumbers,
     sandwormSystem, abilitySystem, superweaponSystem, wallSystem,
     audioManager, buildingPlacement, victorySystem, gameStats,
-    selectionPanel, sidebar, iconRenderer, aiPlayers,
-    agentAI: null,
+    selectionPanel, sidebar, iconRenderer, pipRenderer, aiPlayers,
+    agentAI: null, deliverySystem,
 
     missionScriptRunner: null,
 

@@ -178,7 +178,10 @@ export function createMockCtx(): MockCtx {
         solaris.set(playerId, (solaris.get(playerId) ?? 0) + amount);
       }),
     },
-    productionSystem: {},
+    productionSystem: {
+      canBuild: vi.fn(() => false),
+      startProduction: vi.fn(() => false),
+    },
     minimapRenderer: {
       setRadarActive: vi.fn(),
     },
@@ -219,7 +222,33 @@ export function createMockCtx(): MockCtx {
     },
     sidebar: {},
     iconRenderer: {},
+    pipRenderer: {
+      panTo: vi.fn(),
+      snapTo: vi.fn(),
+      show: vi.fn(),
+      hide: vi.fn(),
+      release: vi.fn(),
+      rotateCamera: vi.fn(),
+      setRotation: vi.fn(),
+      getCameraRotation: vi.fn(() => 0),
+      setZoom: vi.fn(),
+      getZoom: vi.fn(() => 50),
+      getCameraTarget: vi.fn(() => ({ x: 0, z: 0 })),
+      isPanning: vi.fn(() => false),
+      captureState: vi.fn(() => ({ x: 0, z: 0, zoom: 50, rotation: 0 })),
+      restoreState: vi.fn(),
+      setMapBounds: vi.fn(),
+      visible: false,
+    },
     aiPlayers: [],
+    agentAI: null,
+    deliverySystem: {
+      queueDelivery: vi.fn(),
+      update: vi.fn(),
+      setHousePrefix: vi.fn(),
+      getActiveCount: vi.fn(() => 0),
+      hasActiveDeliveries: vi.fn(() => false),
+    },
 
     missionScriptRunner: null,
 
