@@ -35,3 +35,6 @@ oldpad.md
 playwright-report/
 test-results/
 screenshots/
+
+# Visual Oracle VM disk images
+*.qcow2

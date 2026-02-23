@@ -1,0 +1,25 @@
+{
+  "id": "title-screen",
+  "name": "Title Screen",
+  "description": "Main menu / title screen comparison",
+  "original": {
+    "setupKeys": [
+      { "action": "wait", "ms": 10000, "comment": "wait for title screen to fully load" }
+    ],
+    "captureDelay": 0,
+    "captureCount": 2,
+    "captureInterval": 1000
+  },
+  "remake": {
+    "url": "/",
+    "setup": "titleScreen",
+    "waitForGame": false,
+    "captureDelay": 2000,
+    "captureCount": 2,
+    "captureInterval": 1000
+  },
+  "judge": {
+    "aspects": ["logo", "menu_layout", "background_art", "color_palette", "typography"],
+    "minimumScore": 3
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "id": "skirmish-combat-atreides",
+  "name": "Atreides Skirmish — Combat",
+  "description": "Units engaging in combat after ~30 seconds of gameplay",
+  "original": {
+    "setupKeys": [
+      { "action": "wait", "ms": 8000, "comment": "wait for title screen" },
+      { "action": "key", "keys": ["ret"], "comment": "dismiss intro" },
+      { "action": "wait", "ms": 3000 },
+      { "action": "key", "keys": ["ret"], "comment": "press play" },
+      { "action": "wait", "ms": 2000 },
+      { "action": "key", "keys": ["1"], "comment": "select Atreides" },
+      { "action": "wait", "ms": 2000 },
+      { "action": "key", "keys": ["ret"], "comment": "confirm house" },
+      { "action": "wait", "ms": 2000 },
+      { "action": "key", "keys": ["2"], "comment": "select skirmish" },
+      { "action": "wait", "ms": 2000 },
+      { "action": "key", "keys": ["ret"], "comment": "start game" }
+    ],
+    "captureDelay": 35000,
+    "captureCount": 5,
+    "captureInterval": 3000
+  },
+  "remake": {
+    "url": "/?ui=2d",
+    "setup": "startEasySkirmish",
+    "waitForGame": true,
+    "captureDelay": 30000,
+    "captureCount": 5,
+    "captureInterval": 3000
+  },
+  "judge": {
+    "aspects": ["terrain", "units", "combat_effects", "health_bars", "ui_layout"],
+    "minimumScore": 3
+  }
+}
