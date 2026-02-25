@@ -38,3 +38,6 @@ screenshots/
 
 # Visual Oracle VM disk images
 *.qcow2
+
+# Visual Oracle Wine prefix (500MB+)
+tools/visual-oracle/wine/prefix/

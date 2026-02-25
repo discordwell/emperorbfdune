@@ -15,8 +15,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { QemuController } from './qemu/QemuController.js';
+import type { OriginalGameController } from './backends/OriginalGameController.js';
+import { QemuBackend } from './backends/QemuBackend.js';
+import { WineBackend } from './backends/WineBackend.js';
 import { QEMU_CONFIG } from './qemu/qemu-config.js';
+import { WINE_CONFIG } from './backends/wine-config.js';
 import { RemakeCapture } from './remake/RemakeCapture.js';
 import { LlmJudge } from './judge/LlmJudge.js';
 import { generateHtmlReport, type ScenarioReport } from './report/HtmlReport.js';
@@ -62,6 +65,7 @@ function parseArgs(): {
   skipRemake: boolean;
   captureOnly: boolean;
   baseUrl: string;
+  backend: 'wine' | 'qemu';
 } {
   const args = process.argv.slice(2);
   let scenario: string | null = null;
@@ -69,9 +73,20 @@ function parseArgs(): {
   let skipRemake = false;
   let captureOnly = false;
   let baseUrl = 'http://localhost:8080';
+  let backend: 'wine' | 'qemu' = 'wine';
 
   for (let i = 0; i < args.length; i++) {
-    switch (args[i]) {
+    const arg = args[i];
+    // Handle --key=value style arguments
+    if (arg.startsWith('--backend=')) {
+      backend = arg.split('=')[1] as 'wine' | 'qemu';
+      if (backend !== 'wine' && backend !== 'qemu') {
+        console.error(`Invalid backend: ${backend}. Must be "wine" or "qemu".`);
+        process.exit(1);
+      }
+      continue;
+    }
+    switch (arg) {
       case '--scenario':
         scenario = args[++i];
         break;
@@ -87,13 +102,20 @@ function parseArgs(): {
       case '--base-url':
         baseUrl = args[++i];
         break;
+      case '--backend':
+        backend = args[++i] as 'wine' | 'qemu';
+        if (backend !== 'wine' && backend !== 'qemu') {
+          console.error(`Invalid backend: ${backend}. Must be "wine" or "qemu".`);
+          process.exit(1);
+        }
+        break;
       case '--help':
         printHelp();
         process.exit(0);
     }
   }
 
-  return { scenario, skipOriginal, skipRemake, captureOnly, baseUrl };
+  return { scenario, skipOriginal, skipRemake, captureOnly, baseUrl, backend };
 }
 
 function printHelp(): void {
@@ -105,16 +127,18 @@ Usage:
 
 Options:
   --scenario <name>     Run only the named scenario (filename without .json)
-  --skip-original       Skip QEMU original game capture (use cached or empty)
+  --backend <type>      Backend for original game: "wine" (default) or "qemu"
+  --skip-original       Skip original game capture (use cached or empty)
   --skip-remake         Skip Playwright remake capture (use cached or empty)
   --capture-only        Only capture screenshots, don't run LLM judge
   --base-url <url>      Remake server URL (default: http://localhost:8080)
   --help                Show this help message
 
 Examples:
-  npx tsx tools/visual-oracle/cli.ts --skip-original --scenario skirmish-base
-  npx tsx tools/visual-oracle/cli.ts --capture-only
+  npx tsx tools/visual-oracle/cli.ts --scenario title-screen --capture-only
+  npx tsx tools/visual-oracle/cli.ts --backend=qemu --skip-original
   npx tsx tools/visual-oracle/cli.ts --skip-original
+  npx tsx tools/visual-oracle/cli.ts --backend=wine --scenario title-screen
 `);
 }
 
@@ -169,24 +193,41 @@ async function main(): Promise<void> {
   const opts = parseArgs();
   const scenarios = loadScenarios(opts.scenario);
 
-  let qemu: QemuController | null = null;
+  let original: OriginalGameController | null = null;
   let remake: RemakeCapture | null = null;
   const reports: ScenarioReport[] = [];
 
   try {
-    // Boot QEMU if needed
+    // Boot original game backend if needed
     if (!opts.skipOriginal) {
-      if (!fs.existsSync(QEMU_CONFIG.diskImage)) {
-        console.warn(
-          `[WARN] QEMU disk image not found: ${QEMU_CONFIG.diskImage}\n` +
-          '       Skipping original game capture. Use --skip-original to suppress this warning.\n' +
-          '       See tools/visual-oracle/vm/README.md for setup instructions.'
-        );
-        opts.skipOriginal = true;
+      if (opts.backend === 'qemu') {
+        if (!fs.existsSync(QEMU_CONFIG.diskImage)) {
+          console.warn(
+            `[WARN] QEMU disk image not found: ${QEMU_CONFIG.diskImage}\n` +
+            '       Skipping original game capture. Use --skip-original to suppress this warning.\n' +
+            '       See tools/visual-oracle/vm/README.md for setup instructions.'
+          );
+          opts.skipOriginal = true;
+        } else {
+          console.log('[Backend] Using QEMU backend');
+          original = new QemuBackend();
+          await original.boot();
+          await original.waitForDesktop();
+        }
       } else {
-        qemu = new QemuController();
-        await qemu.boot();
-        await qemu.waitForDesktop();
+        if (!fs.existsSync(WINE_CONFIG.gameDir)) {
+          console.warn(
+            `[WARN] Wine game directory not found: ${WINE_CONFIG.gameDir}\n` +
+            '       Skipping original game capture. Use --skip-original to suppress this warning.\n' +
+            '       Run: bash tools/visual-oracle/wine/setup-wine.sh'
+          );
+          opts.skipOriginal = true;
+        } else {
+          console.log('[Backend] Using Wine backend');
+          original = new WineBackend();
+          await original.boot();
+          await original.waitForDesktop();
+        }
       }
     }
 
@@ -197,7 +238,7 @@ async function main(): Promise<void> {
     }
 
     // Process each scenario
-    let isFirstQemuScenario = true;
+    let isFirstScenario = true;
     for (const scenario of scenarios) {
       console.log(`\n${'='.repeat(60)}`);
       console.log(`Scenario: ${scenario.name}`);
@@ -207,22 +248,22 @@ async function main(): Promise<void> {
       let remakeScreenshots: Buffer[];
 
       // Capture original
-      if (!opts.skipOriginal && qemu) {
-        // Reset guest between scenarios so each starts from a clean boot
-        if (!isFirstQemuScenario) {
-          await qemu.resetGuest();
+      if (!opts.skipOriginal && original) {
+        // Reset guest between scenarios so each starts from a clean state
+        if (!isFirstScenario) {
+          await original.resetGuest();
         }
-        isFirstQemuScenario = false;
+        isFirstScenario = false;
 
         console.log('[Original] Navigating to scenario state...');
-        await qemu.executeInputSequence(scenario.original.setupKeys);
+        await original.executeInputSequence(scenario.original.setupKeys);
 
         if (scenario.original.captureDelay > 0) {
           console.log(`[Original] Waiting ${scenario.original.captureDelay}ms before capture...`);
           await sleep(scenario.original.captureDelay);
         }
 
-        originalScreenshots = await qemu.captureMultiple(
+        originalScreenshots = await original.captureMultiple(
           scenario.id,
           scenario.original.captureCount,
           scenario.original.captureInterval,
@@ -267,9 +308,9 @@ async function main(): Promise<void> {
     }
 
     // Shutdown capture systems
-    if (qemu) await qemu.shutdown();
+    if (original) await original.shutdown();
     if (remake) await remake.shutdown();
-    qemu = null;
+    original = null;
     remake = null;
 
     // Run LLM judge
@@ -341,7 +382,7 @@ async function main(): Promise<void> {
   } catch (error) {
     console.error('[ERROR]', error);
     // Clean up
-    if (qemu) await qemu.shutdown().catch(() => {});
+    if (original) await original.shutdown().catch(() => {});
     if (remake) await remake.shutdown().catch(() => {});
     process.exit(1);
   }
