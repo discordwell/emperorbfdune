@@ -1,17 +1,24 @@
-import { spawn, execSync, type ChildProcess } from 'node:child_process';
+import { spawn, execSync, execFileSync, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { OriginalGameController } from './OriginalGameController.js';
 import type { InputStep } from '../qemu/input-sequences.js';
 import { QEMU_TO_MAC_KEYCODE } from './keycode-map.js';
 import { WINE_CONFIG } from './wine-config.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const CAPTURE_TOOL = path.resolve(__dirname, '..', 'wine', 'capture-window');
 
 /**
  * Runs the original Emperor: Battle for Dune via Wine on macOS.
  *
  * Uses:
  * - `wine explorer /desktop=...` to launch in a virtual desktop
- * - `screencapture -l <windowID>` for native macOS window capture (PNG)
+ * - `capture-window` (Swift/ScreenCaptureKit) for D3D screenshot capture
+ *   (screencapture -l and CGWindowListCreateImage return blank for Wine's
+ *   Vulkan/Metal D3D surfaces; ScreenCaptureKit display capture filtered to
+ *   Wine's app only, with brief activation for D3D buffer rendering)
  * - `osascript` (AppleScript) for keyboard input
  * - Python/Quartz CGWindowListCopyWindowInfo for window ID discovery
  */
@@ -28,10 +35,26 @@ export class WineBackend implements OriginalGameController {
       );
     }
 
+    const launcherPath = path.join(WINE_CONFIG.gameDir, 'launcher.exe');
+    if (!fs.existsSync(launcherPath)) {
+      throw new Error(
+        `launcher.exe not found in ${WINE_CONFIG.gameDir}\n` +
+        'Run: bash tools/visual-oracle/wine/setup-wine.sh'
+      );
+    }
+
     if (!fs.existsSync(path.join(WINE_CONFIG.gameDir, 'GAME.EXE'))) {
       throw new Error(
         `GAME.EXE not found in ${WINE_CONFIG.gameDir}\n` +
         'Run: bash tools/visual-oracle/wine/setup-wine.sh'
+      );
+    }
+
+    if (!fs.existsSync(CAPTURE_TOOL)) {
+      throw new Error(
+        `capture-window tool not found at ${CAPTURE_TOOL}\n` +
+        'Build: cd tools/visual-oracle/wine && swiftc -O -o capture-window capture-window.swift ' +
+        '-framework ScreenCaptureKit -framework CoreGraphics -framework ImageIO -framework AppKit'
       );
     }
 
@@ -41,7 +64,7 @@ export class WineBackend implements OriginalGameController {
     const args = [
       'explorer',
       `/desktop=${this.desktopName},${width}x${height}`,
-      WINE_CONFIG.gameExeWin,
+      WINE_CONFIG.launcherExeWin,
     ];
 
     const env = {
@@ -59,18 +82,30 @@ export class WineBackend implements OriginalGameController {
       console.error('[Wine] Process error:', err.message);
     });
 
+    // Track this specific process to avoid race with resetGuest():
+    // if the old process's exit fires after boot() sets a new this.proc,
+    // we must not nullify the new reference.
+    const thisProc = this.proc;
     this.proc.on('exit', (code) => {
       console.log(`[Wine] Process exited with code ${code}`);
-      this.proc = null;
+      if (this.proc === thisProc) {
+        this.proc = null;
+      }
     });
 
     // Pipe Wine stderr for debugging (Wine is very chatty on stderr)
     this.proc.stderr?.on('data', (data: Buffer) => {
       const line = data.toString().trim();
-      // Only log non-fixme lines to reduce noise
-      if (line && !line.startsWith('fixme:') && !line.startsWith('warn:')) {
-        console.log(`[Wine:stderr] ${line}`);
-      }
+      // Filter noise: fixme/warn, MoltenVK extension listings, Vulkan info
+      if (!line) return;
+      if (line.startsWith('fixme:') || line.startsWith('warn:')) return;
+      if (line.startsWith('[mvk-info]') || line.startsWith('[mvk-warn]')) return;
+      if (line.startsWith('\tVK_') || line.startsWith('\t\t')) return;
+      if (line.includes('Vulkan extensions') || line.includes('Vulkan version')) return;
+      if (line.includes('GPU Family') || line.includes('GPU device') || line.includes('GPU memory')) return;
+      if (line.includes('Metal Shading Language') || line.includes('pipelineCacheUUID')) return;
+      if (line.includes('vendorID') || line.includes('deviceID')) return;
+      console.log(`[Wine:stderr] ${line}`);
     });
   }
 
@@ -80,7 +115,7 @@ export class WineBackend implements OriginalGameController {
 
     while (Date.now() < deadline) {
       try {
-        this.windowId = findWineWindow(this.desktopName);
+        this.windowId = findWineWindow();
         if (this.windowId !== null) {
           console.log(`[Wine] Found window ID: ${this.windowId}`);
 
@@ -104,10 +139,7 @@ export class WineBackend implements OriginalGameController {
     while (Date.now() < deadline) {
       try {
         if (this.windowId !== null) {
-          execSync(
-            `screencapture -l ${this.windowId} -x -o "${tmpPath}"`,
-            { timeout: 5000 },
-          );
+          captureWineWindow(this.windowId, tmpPath);
 
           if (fs.existsSync(tmpPath)) {
             const stat = fs.statSync(tmpPath);
@@ -174,9 +206,7 @@ export class WineBackend implements OriginalGameController {
     `;
 
     try {
-      execSync(`osascript -e '${script.replace(/'/g, "'\\''")}'`, {
-        timeout: 5000,
-      });
+      execFileSync('osascript', ['-e', script], { timeout: 5000 });
     } catch (err) {
       console.warn(`[Wine] AppleScript key send failed: ${(err as Error).message}`);
     }
@@ -187,11 +217,7 @@ export class WineBackend implements OriginalGameController {
       throw new Error('No Wine window ID — call boot() and waitForDesktop() first');
     }
 
-    // screencapture -l captures a specific window by CGWindowID, -x suppresses sound, -o no shadow
-    execSync(
-      `screencapture -l ${this.windowId} -x -o "${outputPath}"`,
-      { timeout: 10_000 },
-    );
+    captureWineWindow(this.windowId, outputPath);
 
     if (!fs.existsSync(outputPath)) {
       throw new Error(
@@ -251,7 +277,6 @@ export class WineBackend implements OriginalGameController {
     if (this.windowId === null) return;
 
     // Use AppleScript to bring the Wine window to front by process name
-    // Wine processes are typically named "wine-preloader" or "wine64-preloader"
     const script = `
       tell application "System Events"
         set wineProcs to every process whose name contains "wine"
@@ -262,9 +287,7 @@ export class WineBackend implements OriginalGameController {
     `;
 
     try {
-      execSync(`osascript -e '${script.replace(/'/g, "'\\''")}'`, {
-        timeout: 3000,
-      });
+      execFileSync('osascript', ['-e', script], { timeout: 3000 });
       // Small delay after focus
       await sleep(100);
     } catch {
@@ -291,8 +314,9 @@ export class WineBackend implements OriginalGameController {
 
     // Also kill any lingering Wine processes from our prefix
     try {
+      const wineserverBin = findWineBinary().replace(/\/wine$/, '/wineserver');
       execSync(
-        `WINEPREFIX="${WINE_CONFIG.prefix}" wineserver -k 2>/dev/null || true`,
+        `WINEPREFIX="${WINE_CONFIG.prefix}" "${wineserverBin}" -k 2>/dev/null || true`,
         { timeout: 5000 },
       );
     } catch {
@@ -307,7 +331,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-/** Find the Wine binary on macOS. Checks common Homebrew and crossover paths. */
+/** Find the Wine binary on macOS. Returns an absolute path. */
 function findWineBinary(): string {
   const candidates = [
     'wine',
@@ -321,10 +345,16 @@ function findWineBinary(): string {
 
   for (const candidate of candidates) {
     try {
-      execSync(`which "${candidate}" 2>/dev/null || test -x "${candidate}"`, {
-        timeout: 3000,
-      });
-      return candidate;
+      if (candidate.startsWith('/')) {
+        // Absolute path — check if executable
+        execFileSync('test', ['-x', candidate], { timeout: 3000 });
+        return candidate;
+      } else {
+        // Bare name — resolve to absolute path via `which`
+        const resolved = execFileSync('which', [candidate], { timeout: 3000 })
+          .toString().trim();
+        if (resolved) return resolved;
+      }
     } catch {
       continue;
     }
@@ -337,21 +367,23 @@ function findWineBinary(): string {
 }
 
 /**
- * Find the Wine virtual desktop window ID using CGWindowListCopyWindowInfo.
- * Uses a Python one-liner via the Quartz framework (built into macOS).
+ * Find the Wine D3D game window ("Dune") using CGWindowListCopyWindowInfo.
+ * Only matches a window named exactly "Dune" owned by a Wine process.
+ * Returns null if not found yet (the D3D window appears after launcher.exe
+ * completes IPC handoff to GAME.EXE).
  */
-function findWineWindow(desktopName: string): number | null {
+function findWineWindow(): number | null {
   const pythonScript = `
 import Quartz
 windows = Quartz.CGWindowListCopyWindowInfo(
-    Quartz.kCGWindowListOptionOnScreenOnly, Quartz.kCGNullWindowID
+    Quartz.kCGWindowListOptionAll, Quartz.kCGNullWindowID
 )
 for w in windows:
     name = w.get('kCGWindowName', '') or ''
     owner = w.get('kCGWindowOwnerName', '') or ''
-    if '${desktopName}' in name or ('wine' in owner.lower() and w.get('kCGWindowLayer', -1) == 0):
+    if name == 'Dune' and 'wine' in owner.lower():
         print(w['kCGWindowNumber'])
-        break
+        exit()
 `.trim();
 
   try {
@@ -368,6 +400,19 @@ for w in windows:
   }
 
   return null;
+}
+
+/**
+ * Capture a Wine window using ScreenCaptureKit via the capture-window tool.
+ * Uses --wine-only mode: briefly activates Wine, captures display filtered to
+ * only Wine's app, cropped to window bounds, then restores the previous app.
+ */
+function captureWineWindow(windowId: number, outputPath: string): void {
+  execFileSync(
+    CAPTURE_TOOL,
+    ['--wine-only', String(windowId), outputPath],
+    { timeout: 15_000 },
+  );
 }
 
 /** Build the AppleScript modifier clause for key code commands. */

@@ -39,5 +39,6 @@ screenshots/
 # Visual Oracle VM disk images
 *.qcow2
 
-# Visual Oracle Wine prefix (500MB+)
+# Visual Oracle Wine prefix (500MB+) and compiled Swift tool
 tools/visual-oracle/wine/prefix/
+tools/visual-oracle/wine/capture-window

@@ -11,8 +11,8 @@ export const WINE_CONFIG = {
   /** Wine prefix directory (contains the virtual C: drive). */
   prefix,
 
-  /** Path to GAME.EXE inside the Wine prefix (Windows-style). */
-  gameExeWin: 'C:\\Westwood\\Emperor\\GAME.EXE',
+  /** Path to launcher.exe inside the Wine prefix (Windows-style). */
+  launcherExeWin: 'C:\\Westwood\\Emperor\\launcher.exe',
 
   /** Path to game install dir inside Wine prefix (Unix-style, for file checks). */
   gameDir: path.join(prefix, 'drive_c', 'Westwood', 'Emperor'),
