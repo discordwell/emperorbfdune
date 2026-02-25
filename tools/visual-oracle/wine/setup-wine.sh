@@ -30,8 +30,8 @@ DATA_DIR="$GAME_DIR/data"
 # Track mounted ISOs for cleanup on error
 MOUNTED_ISOS=()
 cleanup_mounts() {
-  for mnt in "${MOUNTED_ISOS[@]}"; do
-    hdiutil detach "$mnt" 2>/dev/null || true
+  for mnt in "${MOUNTED_ISOS[@]+"${MOUNTED_ISOS[@]}"}"; do
+    [[ -n "$mnt" ]] && hdiutil detach "$mnt" 2>/dev/null || true
   done
 }
 trap cleanup_mounts EXIT
@@ -92,8 +92,8 @@ if [[ -d "$PREFIX" ]]; then
   echo "  Wine prefix already exists at $PREFIX"
   echo "  To recreate, delete it first: rm -rf $PREFIX"
 else
-  echo "  Creating 32-bit Wine prefix at $PREFIX ..."
-  WINEARCH=win32 WINEPREFIX="$PREFIX" wineboot --init 2>/dev/null
+  echo "  Creating Wine prefix at $PREFIX ..."
+  WINEPREFIX="$PREFIX" wineboot --init 2>/dev/null
   echo "  ✓ Wine prefix created"
 fi
 
@@ -276,13 +276,75 @@ echo "  ✓ resource.cfg rewritten (all paths local)"
 mkdir -p "$DATA_DIR"/{model,ai/scripts,ui,audio,3ddata,maps,campaign,missions,movies,saves,details,strings,record,sounds}
 mkdir -p "$GAME_DIR/logs"
 
-# --- Step 5: Test launch ---
+# --- Step 5: Mount ISO as D: drive ---
 
 echo ""
-echo "=== Step 5: Test launch ==="
+echo "=== Step 5: Mounting ISO as D: drive ==="
+
+# Emperor's SecuROM check needs a CD in the drive
+ln -sfn "$ISOS_DIR/EMPEROR1.iso" "$PREFIX/dosdevices/d::" 2>/dev/null || true
+echo "  Note: The game requires either a mounted ISO or a no-CD patched GAME.EXE"
+echo "  Mount ISO before running: hdiutil attach $ISOS_DIR/EMPEROR1.iso -nobrowse -readonly"
+echo "  Then link: ln -sfn /Volumes/EMPEROR1 $PREFIX/dosdevices/d:"
+echo ""
+echo "  SecuROM 4.x copy protection may still prevent the game from starting under Wine."
+echo "  If the game exits immediately, you need a no-CD patched GAME.EXE (v1.09)."
+echo "  Search: 'Emperor Battle for Dune v1.09 no-CD' on GameCopyWorld or similar."
+echo "  Place the patched GAME.EXE in: $GAME_DIR/"
+
+# --- Step 6: Add registry entries ---
+
+echo ""
+echo "=== Step 6: Adding registry entries ==="
+
+cat > /tmp/emperor-reg.reg << 'REGEOF'
+Windows Registry Editor Version 5.00
+
+[HKEY_LOCAL_MACHINE\Software\Westwood\Emperor]
+"InstallPath"="C:\\Westwood\\Emperor\\"
+"Version"="1.0"
+"Language"="English"
+"Serial"="000000000000"
+
+[HKEY_LOCAL_MACHINE\Software\Westwood\Emperor\Options]
+
+[HKEY_LOCAL_MACHINE\Software\Westwood\Emperor\Options\Graphics]
+"ScreenWidth"=dword:00000400
+"ScreenHeight"=dword:00000300
+"BitDepth"=dword:00000010
+
+[HKEY_LOCAL_MACHINE\Software\Westwood\Emperor\Options\Sound]
+"SFXVolume"=dword:00000064
+"MusicVolume"=dword:00000064
+"DialogVolume"=dword:00000064
+
+[HKEY_LOCAL_MACHINE\Software\Westwood\Emperor\Options\Game]
+
+[HKEY_LOCAL_MACHINE\Software\Westwood\Emperor\Options\Movies]
+
+[HKEY_CURRENT_USER\Software\Wine\AppDefaults\GAME.EXE]
+"Version"="winxp"
+REGEOF
+
+WINEPREFIX="$PREFIX" wine regedit /tmp/emperor-reg.reg 2>/dev/null
+rm -f /tmp/emperor-reg.reg
+echo "  ✓ Registry entries added"
+
+# --- Step 7: Test launch ---
+
+echo ""
+echo "=== Step 7: Test launch ==="
+
+# Mount ISO for CD check
+ISO_MNT=$(hdiutil attach "$ISOS_DIR/EMPEROR1.iso" -nobrowse -readonly 2>/dev/null | grep -o '/Volumes/.*' | head -1)
+if [[ -n "$ISO_MNT" ]]; then
+  ln -sfn "$ISO_MNT" "$PREFIX/dosdevices/d:"
+  MOUNTED_ISOS+=("$ISO_MNT")
+fi
+
 echo "  Starting game with 10s timeout to verify it launches ..."
 
-WINEPREFIX="$PREFIX" WINEARCH=win32 wine explorer /desktop=EmperorTest,1024x768 "C:\\Westwood\\Emperor\\GAME.EXE" &
+WINEPREFIX="$PREFIX" wine explorer /desktop=EmperorTest,1024x768 "C:\\Westwood\\Emperor\\GAME.EXE" 2>/dev/null &
 WINE_PID=$!
 
 sleep 10
@@ -290,12 +352,17 @@ sleep 10
 # Check if Wine process is still running (game didn't crash immediately)
 if kill -0 "$WINE_PID" 2>/dev/null; then
   echo "  ✓ Game launched successfully (still running after 10s)"
-  # Kill the test launch
   WINEPREFIX="$PREFIX" wineserver -k 2>/dev/null || kill "$WINE_PID" 2>/dev/null || true
   wait "$WINE_PID" 2>/dev/null || true
 else
-  echo "  ✗ Game process exited early — may indicate a problem"
-  echo "    Try running manually: WINEPREFIX=$PREFIX wine explorer /desktop=Emperor,1024x768 C:\\\\Westwood\\\\Emperor\\\\GAME.EXE"
+  echo "  ✗ Game process exited early"
+  echo "    This is likely SecuROM copy protection detecting Wine."
+  echo "    Replace GAME.EXE with a no-CD patched version (v1.09) to fix this."
+fi
+
+if [[ -n "$ISO_MNT" ]]; then
+  hdiutil detach "$ISO_MNT" 2>/dev/null || true
+  MOUNTED_ISOS=("${MOUNTED_ISOS[@]/$ISO_MNT}")
 fi
 
 # --- Done ---

@@ -47,7 +47,6 @@ export class WineBackend implements OriginalGameController {
     const env = {
       ...process.env,
       WINEPREFIX: WINE_CONFIG.prefix,
-      WINEARCH: 'win32',
     };
 
     console.log(`[Wine] Launching: ${wineBinary} ${args.join(' ')}`);
