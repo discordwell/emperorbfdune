@@ -1,4 +1,4 @@
-import { spawn, execSync, execFileSync, type ChildProcess } from 'node:child_process';
+import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,6 +9,11 @@ import { WINE_CONFIG } from './wine-config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CAPTURE_TOOL = path.resolve(__dirname, '..', 'wine', 'capture-window');
+
+export type SessionOp =
+  | { type: 'capture'; path: string }
+  | { type: 'click'; gameX: number; gameY: number }
+  | { type: 'wait'; ms: number };
 
 /**
  * Runs the original Emperor: Battle for Dune via Wine on macOS.
@@ -143,32 +148,55 @@ export class WineBackend implements OriginalGameController {
   }
 
   private async waitForGameLoad(): Promise<void> {
-    console.log('[Wine] Waiting for game to load...');
-    const deadline = Date.now() + WINE_CONFIG.loadTimeout;
-    const tmpPath = '/tmp/ebfd-wine-probe.png';
+    // Wine's D3D (MoltenVK/Metal) only renders when Wine is macOS frontmost.
+    // D3D SetDisplayMode resizes the window from 1024x768→800x600 only when
+    // frontmost. The Metal surface needs ~10-15s of continuous foreground time
+    // before it starts presenting frames to ScreenCaptureKit.
+    //
+    // CRITICAL: The long wait must happen INSIDE the Swift capture tool process.
+    // When the Swift process exits, macOS restores focus to Terminal, so
+    // TypeScript-side sleeps do NOT keep Wine frontmost.
+    //
+    // Strategy: wait 15s for game to init D3D, then run a single batchOps
+    // with a 10s internal wait + verification capture (1 focus steal, ~15s).
+    console.log('[Wine] Waiting 20s for game to init D3D...');
+    await sleep(20_000);
 
-    while (Date.now() < deadline) {
-      try {
-        if (this.windowId !== null) {
-          // Probe capture: activate + restore each time (brief flicker during boot)
-          captureWineWindow(this.windowId, tmpPath, { activate: true, restore: true });
+    if (this.windowId !== null) {
+      const tmpPath = '/tmp/ebfd-wine-warmup.png';
 
-          if (fs.existsSync(tmpPath)) {
-            const stat = fs.statSync(tmpPath);
-            if (stat.size > WINE_CONFIG.minScreenshotSize) {
-              fs.unlinkSync(tmpPath);
-              console.log('[Wine] Game appears loaded');
-              return;
-            }
-            fs.unlinkSync(tmpPath);
-          }
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        // Run warmup inside a single Swift process: activate, wait 10s
+        // (Wine stays frontmost the entire time), capture, restore.
+        const waitMs = attempt === 1 ? 10_000 : 15_000;
+        console.log(`[Wine] Warmup ${attempt}/3: activate + ${waitMs / 1000}s hold + capture...`);
+        batchOps(this.windowId, [
+          `wait:${waitMs}`,
+          `capture:${tmpPath}`,
+        ]);
+
+        const size = fs.existsSync(tmpPath) ? fs.statSync(tmpPath).size : 0;
+        console.log(`[Wine] Warmup capture: ${size} bytes`);
+        try { fs.unlinkSync(tmpPath); } catch {}
+
+        if (size > 100_000) {
+          console.log('[Wine] D3D rendering confirmed');
+          break;
         }
-      } catch {
-        // Not ready yet
+
+        if (attempt < 3) {
+          console.log('[Wine] Blank capture, retrying in 5s...');
+          await sleep(5_000);
+        } else {
+          console.log('[Wine] WARNING: D3D not rendering after 3 attempts');
+        }
       }
-      await sleep(2000);
+    } else {
+      console.log('[Wine] Waiting 30s for game to load...');
+      await sleep(30_000);
     }
-    console.warn('[Wine] Game load timeout — proceeding anyway');
+
+    console.log('[Wine] Game load complete');
   }
 
   async executeInputSequence(steps: InputStep[]): Promise<void> {
@@ -180,6 +208,9 @@ export class WineBackend implements OriginalGameController {
         console.log(`[Wine] Sending keys: ${step.keys.join('+')}${step.comment ? ` (${step.comment})` : ''}`);
         await this.sendKey(step.keys);
         await sleep(200);
+      } else if (step.action === 'click' && step.x !== undefined && step.y !== undefined) {
+        console.log(`[Wine] Clicking (${step.x}, ${step.y})${step.comment ? ` (${step.comment})` : ''}`);
+        await this.sendClick(step.x, step.y);
       }
     }
   }
@@ -224,13 +255,51 @@ export class WineBackend implements OriginalGameController {
     }
   }
 
+  /**
+   * Click at game-space coordinates. Uses the batch capture tool so that
+   * activate → click → capture → restore happens in one process (no focus gap).
+   * Returns the post-click screenshot as a Buffer, or null if capture path not provided.
+   */
+  async sendClick(gameX: number, gameY: number, capturePath?: string): Promise<Buffer | null> {
+    if (this.windowId === null) {
+      throw new Error('No Wine window ID — call boot() and waitForDesktop() first');
+    }
+
+    const bounds = getWineWindowBounds();
+    if (!bounds) {
+      console.warn('[Wine] Cannot find Wine window on screen — click skipped');
+      return null;
+    }
+
+    // Game coords map 1:1 to window point coords (800x600 game → 800x600 window)
+    const screenX = Math.round(bounds.x + gameX);
+    const screenY = Math.round(bounds.y + gameY);
+    console.log(`[Wine:click] Game (${gameX}, ${gameY}) → Screen (${screenX}, ${screenY}) [window ${bounds.width}x${bounds.height} at (${bounds.x},${bounds.y})]`);
+
+    const outPath = capturePath || '/tmp/ebfd-click-capture.png';
+
+    try {
+      batchCapture(this.windowId, [outPath], 0, {
+        click: { x: screenX, y: screenY },
+        waitAfterClick: 2000,
+      });
+    } catch (err) {
+      console.warn(`[Wine:click] Capture tool failed: ${(err as Error).message}`);
+    }
+
+    if (capturePath && fs.existsSync(capturePath)) {
+      return fs.readFileSync(capturePath);
+    }
+    return null;
+  }
+
   async captureScreenshot(outputPath: string): Promise<Buffer> {
     if (this.windowId === null) {
       throw new Error('No Wine window ID — call boot() and waitForDesktop() first');
     }
 
     // Single capture: activate Wine, capture, restore previous app
-    captureWineWindow(this.windowId, outputPath, { activate: true, restore: true });
+    batchOps(this.windowId, [`capture:${outputPath}`]);
 
     if (!fs.existsSync(outputPath)) {
       throw new Error(
@@ -254,30 +323,60 @@ export class WineBackend implements OriginalGameController {
     const outDir = path.join(WINE_CONFIG.screenshotDir, scenarioId, 'original');
     fs.mkdirSync(outDir, { recursive: true });
 
-    // Each capture activates Wine (1s wait for D3D render), captures, then
-    // the last one restores the previous app. Activation is needed per-capture
-    // because the capture-window process launch itself can disrupt macOS focus.
-    const buffers: Buffer[] = [];
+    // Batch mode: activate once, take all captures, restore once.
+    // This minimizes focus stealing to 1 activation per batch (~3s total).
+    const outputPaths: string[] = [];
     for (let i = 0; i < count; i++) {
-      const isLast = i === count - 1;
-      const outPath = path.join(outDir, `capture-${String(i).padStart(2, '0')}.png`);
-      console.log(`[Wine] Capturing screenshot ${i + 1}/${count} → ${outPath}`);
+      outputPaths.push(path.join(outDir, `capture-${String(i).padStart(2, '0')}.png`));
+    }
 
-      captureWineWindow(this.windowId, outPath, {
-        activate: true,
-        restore: isLast,
-      });
+    console.log(`[Wine] Batch capturing ${count} screenshots (1 focus steal)...`);
+    batchCapture(this.windowId, outputPaths, intervalMs);
 
+    const buffers: Buffer[] = [];
+    for (const outPath of outputPaths) {
       if (!fs.existsSync(outPath)) {
         throw new Error(`Screenshot file not created: ${outPath}`);
       }
       buffers.push(fs.readFileSync(outPath));
-
-      if (!isLast) {
-        await sleep(intervalMs);
-      }
     }
     return buffers;
+  }
+
+  /**
+   * Execute all captures and clicks in ONE focus steal.
+   * Activates Wine once, runs all ops sequentially, restores focus once.
+   *
+   * Ops: { type: 'capture', path: string } | { type: 'click', gameX, gameY } | { type: 'wait', ms }
+   */
+  async runSession(ops: SessionOp[]): Promise<void> {
+    if (this.windowId === null) {
+      throw new Error('No Wine window ID — call boot() and waitForDesktop() first');
+    }
+
+    const batchOpsStr: string[] = [];
+    for (const op of ops) {
+      switch (op.type) {
+        case 'capture':
+          // Ensure directory exists
+          fs.mkdirSync(path.dirname(op.path), { recursive: true });
+          batchOpsStr.push(`capture:${op.path}`);
+          break;
+        case 'click':
+          // Use gameclick: — Swift tool translates to screen coords using
+          // fresh window bounds queried AFTER activation (no TOCTOU race)
+          console.log(`[Wine:session] Click game (${op.gameX},${op.gameY})`);
+          batchOpsStr.push(`gameclick:${op.gameX};${op.gameY}`);
+          break;
+        case 'wait':
+          batchOpsStr.push(`wait:${op.ms}`);
+          break;
+      }
+    }
+
+    const captureCount = batchOpsStr.filter(o => o.startsWith('capture:')).length;
+    console.log(`[Wine:session] Running ${ops.length} ops (${captureCount} captures) — 1 focus steal`);
+    batchOps(this.windowId, batchOpsStr);
   }
 
   async resetGuest(): Promise<void> {
@@ -432,25 +531,60 @@ for w in windows:
 }
 
 /**
- * Capture a Wine window using ScreenCaptureKit via the capture-window tool.
+ * Execute a batch of operations with a SINGLE activation/restore cycle.
+ * Operations: capture, click, wait — all within one focus steal.
  *
- * Wine's D3D surface only renders to the capture buffer when frontmost.
- * Use `activate: true` to bring Wine to front before capture, and
- * `restore: true` to return focus to the previous app afterward.
- *
- * For batch captures: activate on first, restore on last → one focus-steal.
+ * Uses the --ops format: "capture:/path,click:x;y,wait:ms"
  */
-function captureWineWindow(
+function batchOps(
   windowId: number,
-  outputPath: string,
-  opts: { activate?: boolean; restore?: boolean } = {},
+  ops: string[],
+  opts: { activate?: boolean; restore?: boolean } = { activate: true, restore: true },
 ): void {
-  const args = ['--wine-only'];
-  if (opts.activate) args.push('--activate');
-  if (opts.restore) args.push('--restore');
-  args.push(String(windowId), outputPath);
+  const args = ['--batch',
+    '--windowid', String(windowId),
+    '--ops', ops.join(','),
+  ];
+  if (opts.activate !== false) args.push('--activate');
+  if (opts.restore !== false) args.push('--restore');
 
-  execFileSync(CAPTURE_TOOL, args, { timeout: 15_000 });
+  // Estimate timeout: 15s base + sum of waits + 5s per capture
+  const captureCount = ops.filter(o => o.startsWith('capture:')).length;
+  const waitSum = ops
+    .filter(o => o.startsWith('wait:'))
+    .reduce((sum, o) => sum + parseInt(o.split(':')[1] || '0', 10), 0);
+  const timeout = 15_000 + captureCount * 5000 + waitSum;
+
+  const result = execFileSync(CAPTURE_TOOL, args, { timeout }).toString().trim();
+  if (result) {
+    for (const line of result.split('\n')) {
+      console.log(`[Wine:capture] ${line}`);
+    }
+  }
+}
+
+/** Convenience: batch capture N screenshots (single activation). */
+function batchCapture(
+  windowId: number,
+  outputPaths: string[],
+  delayMs: number,
+  opts?: { click?: { x: number; y: number }; waitAfterClick?: number },
+): void {
+  const ops: string[] = [];
+
+  if (opts?.click) {
+    ops.push(`click:${opts.click.x};${opts.click.y}`);
+    ops.push(`wait:${opts.waitAfterClick || 2000}`);
+  }
+
+  for (let i = 0; i < outputPaths.length; i++) {
+    ops.push(`capture:${outputPaths[i]}`);
+    if (i < outputPaths.length - 1 && delayMs > 0) {
+      ops.push(`wait:${delayMs}`);
+    }
+  }
+
+  batchOps(windowId, ops);
 }
 
 /** Build the AppleScript modifier clause for key code commands. */
@@ -469,3 +603,32 @@ function buildModifierClause(modifiers: string[]): string {
   if (mapped.length === 0) return '';
   return ` using {${mapped.join(', ')}}`;
 }
+
+/**
+ * Get the Wine "Dune" window's screen-space bounds from macOS.
+ * Returns {x, y, width, height} in macOS screen points.
+ */
+function getWineWindowBounds(): { x: number; y: number; width: number; height: number } | null {
+  const script = `
+import Quartz, json
+windows = Quartz.CGWindowListCopyWindowInfo(
+    Quartz.kCGWindowListOptionAll, Quartz.kCGNullWindowID
+)
+for w in windows:
+    name = w.get('kCGWindowName', '') or ''
+    owner = w.get('kCGWindowOwnerName', '') or ''
+    if name == 'Dune' and 'wine' in owner.lower():
+        b = w['kCGWindowBounds']
+        print(json.dumps({"x": b["X"], "y": b["Y"], "width": b["Width"], "height": b["Height"]}))
+        exit()
+`.trim();
+
+  try {
+    const result = execFileSync('python3', ['-c', script], { timeout: 5000 }).toString().trim();
+    if (result) return JSON.parse(result);
+  } catch {
+    // Window not found
+  }
+  return null;
+}
+

@@ -26,8 +26,9 @@ export const WINE_CONFIG = {
   /** Timeout waiting for game to finish loading (screenshot size check). */
   loadTimeout: 60_000,
 
-  /** Minimum PNG screenshot size (bytes) indicating game has loaded. */
-  minScreenshotSize: 50_000,
+  /** Minimum PNG screenshot size (bytes) indicating game has loaded.
+   *  Black/blank D3D frames compress to ~62KB; real game content is 800KB+. */
+  minScreenshotSize: 200_000,
 
   /** Directory for saving captured screenshots. */
   screenshotDir: path.join(ROOT, 'artifacts', 'visual-oracle', 'captures'),

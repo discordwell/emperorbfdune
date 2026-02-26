@@ -11,15 +11,10 @@
 //   --activate: activate Wine (bring to front) before capture
 //   --restore:  restore previously-focused app after capture
 //
-// For single captures, pass both: --activate --restore
-// For batch captures: first=--activate, middle=neither, last=--restore
-//
 // Usage:
-//   capture-window --wine-only <windowID> <output.png>                          (capture only)
-//   capture-window --wine-only --activate --restore <windowID> <output.png>     (full cycle)
-//   capture-window --wine-only --activate <windowID> <output.png>               (activate, no restore)
-//   capture-window --wine-only --restore <windowID> <output.png>                (restore after capture)
-//   capture-window --find-wine                                                   (list wine windows)
+//   capture-window --batch --activate --restore --windowid <id> --ops capture:/tmp/a.png,wait:1000,capture:/tmp/b.png
+//   capture-window --batch --activate --restore --windowid <id> --ops gameclick:404;407,wait:3000,capture:/tmp/after.png
+//   capture-window --find-wine
 //
 // Build: swiftc -O -o capture-window capture-window.swift \
 //          -framework ScreenCaptureKit -framework CoreGraphics -framework ImageIO -framework AppKit
@@ -35,7 +30,7 @@ let _ = NSApplication.shared
 let args = CommandLine.arguments
 guard args.count >= 2 else {
     fputs("""
-    Usage: \(args[0]) --wine-only <windowID> <output.png>
+    Usage: \(args[0]) --batch --windowid <id> --ops <ops> [--activate] [--restore]
            \(args[0]) --find-wine
 
     """, stderr)
@@ -57,6 +52,109 @@ func savePNG(_ image: CGImage, to outputPath: String) throws {
     print("Saved to \(outputPath) (\(fileSize) bytes)")
 }
 
+/// Send a mouse click at screen coordinates via CGEvent.
+func sendClick(x: Double, y: Double) {
+    let point = CGPoint(x: x, y: y)
+
+    // Move mouse to position
+    if let moveEvent = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved,
+                                mouseCursorPosition: point, mouseButton: .left) {
+        moveEvent.post(tap: .cghidEventTap)
+    }
+    Thread.sleep(forTimeInterval: 0.1)
+
+    // Mouse down
+    if let downEvent = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown,
+                                mouseCursorPosition: point, mouseButton: .left) {
+        downEvent.post(tap: .cghidEventTap)
+    }
+    Thread.sleep(forTimeInterval: 0.05)
+
+    // Mouse up
+    if let upEvent = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp,
+                              mouseCursorPosition: point, mouseButton: .left) {
+        upEvent.post(tap: .cghidEventTap)
+    }
+
+    print("Clicked at screen (\(Int(x)), \(Int(y)))")
+}
+
+/// Parse --windowid N from args. Returns window ID.
+func parseWindowID() -> UInt32? {
+    for (i, arg) in args.enumerated() {
+        if arg == "--windowid" && i + 1 < args.count {
+            return UInt32(args[i + 1])
+        }
+    }
+    return nil
+}
+
+/// Activate Wine and wait for D3D to render. Returns the previous app.
+@MainActor
+func activateWine(wineApp: SCRunningApplication) async throws -> NSRunningApplication? {
+    let previousApp = NSWorkspace.shared.frontmostApplication
+
+    let wineNSApp = NSRunningApplication(processIdentifier: wineApp.processID)
+
+    for attempt in 1...5 {
+        wineNSApp?.activate(options: [.activateAllWindows])
+        try await Task.sleep(nanoseconds: 500_000_000) // 0.5s
+
+        if let frontmost = NSWorkspace.shared.frontmostApplication,
+           frontmost.processIdentifier == wineApp.processID {
+            print("Wine activated (attempt \(attempt))")
+            break
+        }
+
+        if attempt < 5 {
+            fputs("Activation attempt \(attempt) failed, retrying...\n", stderr)
+            if attempt >= 3 {
+                let task = Process()
+                task.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+                task.arguments = ["-e", """
+                    tell application "System Events"
+                        set wineProcs to every process whose name contains "wine"
+                        repeat with p in wineProcs
+                            set frontmost of p to true
+                        end repeat
+                    end tell
+                """]
+                try? task.run()
+                task.waitUntilExit()
+            }
+        } else {
+            fputs("WARNING: Could not activate Wine after 5 attempts\n", stderr)
+        }
+    }
+
+    // Wait for D3D frame render after activation.
+    // D3D's Metal surface needs several seconds to start presenting frames
+    // after being in the background. 5s gives reliable results.
+    try await Task.sleep(nanoseconds: 5_000_000_000) // 5s
+    return previousApp
+}
+
+/// Capture a single frame from the Wine window.
+@MainActor
+func captureFrame(display: SCDisplay, wineApp: SCRunningApplication,
+                  window: SCWindow, applications: [SCRunningApplication]) async throws -> CGImage {
+    let nonWineApps = applications.filter { $0.processID != wineApp.processID }
+    let filter = SCContentFilter(
+        display: display,
+        excludingApplications: nonWineApps,
+        exceptingWindows: []
+    )
+
+    let config = SCStreamConfiguration()
+    config.width = Int(window.frame.width) * 2
+    config.height = Int(window.frame.height) * 2
+    config.showsCursor = false
+    config.captureResolution = .best
+    config.sourceRect = window.frame
+
+    return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+}
+
 @MainActor
 func run() async throws {
     let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
@@ -73,30 +171,28 @@ func run() async throws {
         exit(0)
     }
 
-    // --wine-only: capture display filtered to Wine app, crop to window bounds.
-    // Uses excludingApplications (not including:) because Wine has no bundle ID
-    // and the including: filter fails with -3811 for unbundled apps.
-    // CALLER must ensure Wine is frontmost before invoking — this tool does NOT
-    // activate Wine itself.
-    if args[1] == "--wine-only" {
-        // Parse flags
+    // --batch: batch mode. Activate once, execute ops (captures/clicks/waits), restore once.
+    // ONE focus steal for the entire session.
+    //
+    // Operations via --ops (comma-separated):
+    //   capture:/path/to/file.png   — take screenshot, save to path
+    //   click:x;y                   — send mouse click at screen coords (semicolon separator)
+    //   gameclick:gameX;gameY        — click at game-space coords (translated via fresh window bounds)
+    //   wait:ms                     — wait N milliseconds
+    if args[1] == "--batch" {
         let activate = args.contains("--activate")
         let restore = args.contains("--restore")
-        let positionalArgs = args.dropFirst(2).filter { !$0.hasPrefix("--") }
-        guard positionalArgs.count >= 2,
-              let windowID = UInt32(positionalArgs[positionalArgs.startIndex]) else {
-            fputs("Error: --wine-only [--activate] [--restore] <windowID> <output.png>\n", stderr)
+
+        guard let windowID = parseWindowID() else {
+            fputs("Error: --batch requires --windowid <id>\n", stderr)
             exit(1)
         }
-        let outputPath = positionalArgs[positionalArgs.startIndex + 1]
 
-        // Find the target window
         guard let window = content.windows.first(where: { $0.windowID == CGWindowID(windowID) }) else {
             fputs("Error: window \(windowID) not found\n", stderr)
             exit(1)
         }
 
-        // Find the Wine app
         guard let wineApp = window.owningApplication else {
             fputs("Error: window has no owning application\n", stderr)
             exit(1)
@@ -107,41 +203,83 @@ func run() async throws {
             exit(1)
         }
 
-        // Save current app before any activation (needed for --restore)
-        let previousApp = NSWorkspace.shared.frontmostApplication
-
-        // If --activate: bring Wine to front and wait for D3D render
-        if activate {
-            if let wineNSApp = NSRunningApplication(processIdentifier: wineApp.processID) {
-                wineNSApp.activate(options: [.activateAllWindows])
+        // Parse --ops list
+        var ops: [(String, String)] = []  // (type, arg)
+        for (i, arg) in args.enumerated() {
+            if arg == "--ops" && i + 1 < args.count {
+                for opStr in args[i + 1].split(separator: ",") {
+                    let parts = opStr.split(separator: ":", maxSplits: 1)
+                    if parts.count == 2 {
+                        ops.append((String(parts[0]), String(parts[1])))
+                    }
+                }
             }
-            // Wait for activation + D3D frame render.
-            // 2s is needed: ~200ms for macOS activation, plus time for Wine's D3D
-            // to restart rendering after being in the background. Games often pause
-            // their render loop when inactive, so D3D needs to "warm up" again.
-            try await Task.sleep(nanoseconds: 2_000_000_000)
         }
 
-        // Exclude all apps except Wine — captures display showing only Wine's content
-        let nonWineApps = content.applications.filter { $0.processID != wineApp.processID }
-        let filter = SCContentFilter(
-            display: display,
-            excludingApplications: nonWineApps,
-            exceptingWindows: []
-        )
+        guard !ops.isEmpty else {
+            fputs("Error: --batch requires --ops\n", stderr)
+            exit(1)
+        }
 
-        let config = SCStreamConfiguration()
-        config.width = Int(window.frame.width) * 2
-        config.height = Int(window.frame.height) * 2
-        config.showsCursor = false
-        config.captureResolution = .best
-        config.sourceRect = window.frame
+        // Activate Wine once
+        var previousApp: NSRunningApplication? = nil
+        if activate {
+            previousApp = try await activateWine(wineApp: wineApp)
+        }
 
-        let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
-        print("Captured: \(image.width)x\(image.height) (window \(windowID): \(window.title ?? "?"))")
-        try savePNG(image, to: outputPath)
+        // Re-query window state AFTER activation.
+        // Wine's D3D SetDisplayMode changes the window from 1024x768 → 800x600
+        // only when Wine is frontmost. We need the updated frame for captures.
+        let freshContent = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+        let freshWindow = freshContent.windows.first(where: { $0.windowID == CGWindowID(windowID) }) ?? window
+        let freshDisplay = freshContent.displays.first ?? display
+        let freshApps = freshContent.applications
+        print("Window after activation: \(Int(freshWindow.frame.width))x\(Int(freshWindow.frame.height)) at (\(Int(freshWindow.frame.origin.x)),\(Int(freshWindow.frame.origin.y)))")
 
-        // If --restore: bring back the previously-focused app
+        // Execute operations sequentially
+        var captureCount = 0
+        let totalCaptures = ops.filter { $0.0 == "capture" }.count
+        for (opType, opArg) in ops {
+            switch opType {
+            case "capture":
+                captureCount += 1
+                let image = try await captureFrame(
+                    display: freshDisplay, wineApp: wineApp,
+                    window: freshWindow, applications: freshApps
+                )
+                print("Captured \(captureCount)/\(totalCaptures): \(image.width)x\(image.height)")
+                try savePNG(image, to: opArg)
+
+            case "click":
+                let parts = opArg.split(separator: ";")
+                if parts.count == 2, let x = Double(parts[0]), let y = Double(parts[1]) {
+                    sendClick(x: x, y: y)
+                } else {
+                    fputs("Warning: invalid click coords '\(opArg)', expected x;y\n", stderr)
+                }
+
+            case "gameclick":
+                // Game-space click: translate using fresh window bounds (post-activation)
+                let gcParts = opArg.split(separator: ";")
+                if gcParts.count == 2, let gx = Double(gcParts[0]), let gy = Double(gcParts[1]) {
+                    let screenX = Double(freshWindow.frame.origin.x) + gx
+                    let screenY = Double(freshWindow.frame.origin.y) + gy
+                    sendClick(x: screenX, y: screenY)
+                } else {
+                    fputs("Warning: invalid gameclick coords '\(opArg)', expected gameX;gameY\n", stderr)
+                }
+
+            case "wait":
+                if let ms = UInt64(opArg) {
+                    try await Task.sleep(nanoseconds: ms * 1_000_000)
+                }
+
+            default:
+                fputs("Warning: unknown op '\(opType)'\n", stderr)
+            }
+        }
+
+        // Restore once
         if restore, let prev = previousApp {
             prev.activate(options: [])
         }
@@ -149,7 +287,7 @@ func run() async throws {
         exit(0)
     }
 
-    fputs("Error: unknown command \(args[1]). Use --wine-only or --find-wine.\n", stderr)
+    fputs("Error: unknown command \(args[1]). Use --batch or --find-wine.\n", stderr)
     exit(1)
 }
 

@@ -4,9 +4,12 @@
  */
 
 export interface InputStep {
-  action: 'key' | 'wait';
+  action: 'key' | 'wait' | 'click';
   keys?: string[];
   ms?: number;
+  /** Game-space coordinates for click actions (1024x768 resolution). */
+  x?: number;
+  y?: number;
   comment?: string;
 }
 
