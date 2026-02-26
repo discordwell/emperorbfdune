@@ -6,13 +6,20 @@
 // uses ScreenCaptureKit's display-level capture with app filtering to capture
 // the actual rendered content.
 //
-// Wine's D3D surface only renders to the capture buffer when the app is frontmost,
-// so this tool briefly activates Wine before each capture. The activation is
-// minimal (~0.5s) and the tool re-activates the previously-focused app afterward.
+// Wine's D3D surface only renders to the capture buffer when the app is frontmost.
+// Focus management via flags:
+//   --activate: activate Wine (bring to front) before capture
+//   --restore:  restore previously-focused app after capture
+//
+// For single captures, pass both: --activate --restore
+// For batch captures: first=--activate, middle=neither, last=--restore
 //
 // Usage:
-//   capture-window --wine-only <windowID> <output.png>  (capture with brief activation)
-//   capture-window --find-wine                           (list wine windows)
+//   capture-window --wine-only <windowID> <output.png>                          (capture only)
+//   capture-window --wine-only --activate --restore <windowID> <output.png>     (full cycle)
+//   capture-window --wine-only --activate <windowID> <output.png>               (activate, no restore)
+//   capture-window --wine-only --restore <windowID> <output.png>                (restore after capture)
+//   capture-window --find-wine                                                   (list wine windows)
 //
 // Build: swiftc -O -o capture-window capture-window.swift \
 //          -framework ScreenCaptureKit -framework CoreGraphics -framework ImageIO -framework AppKit
@@ -69,15 +76,19 @@ func run() async throws {
     // --wine-only: capture display filtered to Wine app, crop to window bounds.
     // Uses excludingApplications (not including:) because Wine has no bundle ID
     // and the including: filter fails with -3811 for unbundled apps.
-    // Briefly activates Wine so D3D renders to the capture buffer, then restores
-    // the previously-focused app.
+    // CALLER must ensure Wine is frontmost before invoking — this tool does NOT
+    // activate Wine itself.
     if args[1] == "--wine-only" {
-        guard args.count >= 4,
-              let windowID = UInt32(args[2]) else {
-            fputs("Error: --wine-only <windowID> <output.png>\n", stderr)
+        // Parse flags
+        let activate = args.contains("--activate")
+        let restore = args.contains("--restore")
+        let positionalArgs = args.dropFirst(2).filter { !$0.hasPrefix("--") }
+        guard positionalArgs.count >= 2,
+              let windowID = UInt32(positionalArgs[positionalArgs.startIndex]) else {
+            fputs("Error: --wine-only [--activate] [--restore] <windowID> <output.png>\n", stderr)
             exit(1)
         }
-        let outputPath = args[3]
+        let outputPath = positionalArgs[positionalArgs.startIndex + 1]
 
         // Find the target window
         guard let window = content.windows.first(where: { $0.windowID == CGWindowID(windowID) }) else {
@@ -96,15 +107,20 @@ func run() async throws {
             exit(1)
         }
 
-        // Remember current foreground app so we can restore it after capture
+        // Save current app before any activation (needed for --restore)
         let previousApp = NSWorkspace.shared.frontmostApplication
 
-        // Activate Wine so D3D surface renders to the capture buffer
-        if let wineNSApp = NSRunningApplication(processIdentifier: wineApp.processID) {
-            wineNSApp.activate(options: [.activateAllWindows])
+        // If --activate: bring Wine to front and wait for D3D render
+        if activate {
+            if let wineNSApp = NSRunningApplication(processIdentifier: wineApp.processID) {
+                wineNSApp.activate(options: [.activateAllWindows])
+            }
+            // Wait for activation + D3D frame render.
+            // 2s is needed: ~200ms for macOS activation, plus time for Wine's D3D
+            // to restart rendering after being in the background. Games often pause
+            // their render loop when inactive, so D3D needs to "warm up" again.
+            try await Task.sleep(nanoseconds: 2_000_000_000)
         }
-        // Wait for activation and D3D frame render
-        try await Task.sleep(nanoseconds: 500_000_000)
 
         // Exclude all apps except Wine — captures display showing only Wine's content
         let nonWineApps = content.applications.filter { $0.processID != wineApp.processID }
@@ -125,8 +141,8 @@ func run() async throws {
         print("Captured: \(image.width)x\(image.height) (window \(windowID): \(window.title ?? "?"))")
         try savePNG(image, to: outputPath)
 
-        // Restore the previously-focused app
-        if let prev = previousApp {
+        // If --restore: bring back the previously-focused app
+        if restore, let prev = previousApp {
             prev.activate(options: [])
         }
 

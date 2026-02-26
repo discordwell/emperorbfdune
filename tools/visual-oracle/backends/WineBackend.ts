@@ -19,6 +19,10 @@ const CAPTURE_TOOL = path.resolve(__dirname, '..', 'wine', 'capture-window');
  *   (screencapture -l and CGWindowListCreateImage return blank for Wine's
  *   Vulkan/Metal D3D surfaces; ScreenCaptureKit display capture filtered to
  *   Wine's app only, with brief activation for D3D buffer rendering)
+ * - Focus management: Wine's D3D only renders when frontmost. Each capture
+ *   briefly activates Wine (~2s), captures, and the last one restores the
+ *   previous app. Activation per-capture is required because the capture
+ *   tool process launch itself disrupts macOS focus.
  * - `osascript` (AppleScript) for keyboard input
  * - Python/Quartz CGWindowListCopyWindowInfo for window ID discovery
  */
@@ -28,6 +32,10 @@ export class WineBackend implements OriginalGameController {
   private desktopName = 'Emperor';
 
   async boot(): Promise<void> {
+    if (this.proc) {
+      throw new Error('Wine already running — call shutdown() or resetGuest() first');
+    }
+
     if (!fs.existsSync(WINE_CONFIG.gameDir)) {
       throw new Error(
         `Wine game directory not found: ${WINE_CONFIG.gameDir}\n` +
@@ -74,9 +82,12 @@ export class WineBackend implements OriginalGameController {
 
     console.log(`[Wine] Launching: ${wineBinary} ${args.join(' ')}`);
     this.proc = spawn(wineBinary, args, {
-      stdio: 'pipe',
+      stdio: ['ignore', 'pipe', 'pipe'],
       env,
     });
+
+    // Drain stdout to prevent pipe buffer deadlock
+    this.proc.stdout?.resume();
 
     this.proc.on('error', (err) => {
       console.error('[Wine] Process error:', err.message);
@@ -139,7 +150,8 @@ export class WineBackend implements OriginalGameController {
     while (Date.now() < deadline) {
       try {
         if (this.windowId !== null) {
-          captureWineWindow(this.windowId, tmpPath);
+          // Probe capture: activate + restore each time (brief flicker during boot)
+          captureWineWindow(this.windowId, tmpPath, { activate: true, restore: true });
 
           if (fs.existsSync(tmpPath)) {
             const stat = fs.statSync(tmpPath);
@@ -217,7 +229,8 @@ export class WineBackend implements OriginalGameController {
       throw new Error('No Wine window ID — call boot() and waitForDesktop() first');
     }
 
-    captureWineWindow(this.windowId, outputPath);
+    // Single capture: activate Wine, capture, restore previous app
+    captureWineWindow(this.windowId, outputPath, { activate: true, restore: true });
 
     if (!fs.existsSync(outputPath)) {
       throw new Error(
@@ -234,16 +247,33 @@ export class WineBackend implements OriginalGameController {
     count: number,
     intervalMs: number,
   ): Promise<Buffer[]> {
+    if (this.windowId === null) {
+      throw new Error('No Wine window ID — call boot() and waitForDesktop() first');
+    }
+
     const outDir = path.join(WINE_CONFIG.screenshotDir, scenarioId, 'original');
     fs.mkdirSync(outDir, { recursive: true });
 
+    // Each capture activates Wine (1s wait for D3D render), captures, then
+    // the last one restores the previous app. Activation is needed per-capture
+    // because the capture-window process launch itself can disrupt macOS focus.
     const buffers: Buffer[] = [];
     for (let i = 0; i < count; i++) {
+      const isLast = i === count - 1;
       const outPath = path.join(outDir, `capture-${String(i).padStart(2, '0')}.png`);
       console.log(`[Wine] Capturing screenshot ${i + 1}/${count} → ${outPath}`);
-      const buf = await this.captureScreenshot(outPath);
-      buffers.push(buf);
-      if (i < count - 1) {
+
+      captureWineWindow(this.windowId, outPath, {
+        activate: true,
+        restore: isLast,
+      });
+
+      if (!fs.existsSync(outPath)) {
+        throw new Error(`Screenshot file not created: ${outPath}`);
+      }
+      buffers.push(fs.readFileSync(outPath));
+
+      if (!isLast) {
         await sleep(intervalMs);
       }
     }
@@ -315,10 +345,10 @@ export class WineBackend implements OriginalGameController {
     // Also kill any lingering Wine processes from our prefix
     try {
       const wineserverBin = findWineBinary().replace(/\/wine$/, '/wineserver');
-      execSync(
-        `WINEPREFIX="${WINE_CONFIG.prefix}" "${wineserverBin}" -k 2>/dev/null || true`,
-        { timeout: 5000 },
-      );
+      execFileSync(wineserverBin, ['-k'], {
+        timeout: 5000,
+        env: { ...process.env, WINEPREFIX: WINE_CONFIG.prefix },
+      });
     } catch {
       // wineserver may not be running
     }
@@ -347,7 +377,7 @@ function findWineBinary(): string {
     try {
       if (candidate.startsWith('/')) {
         // Absolute path — check if executable
-        execFileSync('test', ['-x', candidate], { timeout: 3000 });
+        fs.accessSync(candidate, fs.constants.X_OK);
         return candidate;
       } else {
         // Bare name — resolve to absolute path via `which`
@@ -387,10 +417,9 @@ for w in windows:
 `.trim();
 
   try {
-    const result = execSync(
-      `python3 -c "${pythonScript.replace(/"/g, '\\"')}"`,
-      { timeout: 5000 },
-    ).toString().trim();
+    const result = execFileSync('python3', ['-c', pythonScript], {
+      timeout: 5000,
+    }).toString().trim();
 
     if (result) {
       return parseInt(result, 10);
@@ -404,15 +433,24 @@ for w in windows:
 
 /**
  * Capture a Wine window using ScreenCaptureKit via the capture-window tool.
- * Uses --wine-only mode: briefly activates Wine, captures display filtered to
- * only Wine's app, cropped to window bounds, then restores the previous app.
+ *
+ * Wine's D3D surface only renders to the capture buffer when frontmost.
+ * Use `activate: true` to bring Wine to front before capture, and
+ * `restore: true` to return focus to the previous app afterward.
+ *
+ * For batch captures: activate on first, restore on last → one focus-steal.
  */
-function captureWineWindow(windowId: number, outputPath: string): void {
-  execFileSync(
-    CAPTURE_TOOL,
-    ['--wine-only', String(windowId), outputPath],
-    { timeout: 15_000 },
-  );
+function captureWineWindow(
+  windowId: number,
+  outputPath: string,
+  opts: { activate?: boolean; restore?: boolean } = {},
+): void {
+  const args = ['--wine-only'];
+  if (opts.activate) args.push('--activate');
+  if (opts.restore) args.push('--restore');
+  args.push(String(windowId), outputPath);
+
+  execFileSync(CAPTURE_TOOL, args, { timeout: 15_000 });
 }
 
 /** Build the AppleScript modifier clause for key code commands. */
