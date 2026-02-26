@@ -72,30 +72,35 @@ func parseStringArg(_ name: String) -> String? {
     return nil
 }
 
-/// Send a click via Wine's Windows API (SetCursorPos + mouse_event).
-/// Runs click.exe inside Wine — bypasses macOS input handling entirely.
-/// Wine's D3D DirectInput reads from Wine's internal input queue, not macOS events.
-func sendWineClick(x: Int, y: Int, wineBin: String, winePrefix: String, clickExe: String) {
+/// Send an input command via Wine's inputctl.exe (DInput hook shared memory IPC).
+/// Injects synthetic DirectInput state directly into GAME.EXE's input polling —
+/// the only approach that works with DirectInput 7 EXCLUSIVE mode.
+/// No macOS focus disruption, no D3D rendering interruption.
+///
+/// Commands: "click <x> <y>", "move <x> <y>", "key <dikCode>"
+func sendInputCtl(command: String, args cmdArgs: [String], wineBin: String, winePrefix: String, inputctlExe: String) {
     let task = Process()
     task.executableURL = URL(fileURLWithPath: wineBin)
-    task.arguments = [clickExe, String(x), String(y)]
+    // Launch inside the Emperor desktop (same desktop = same WINEPREFIX session)
+    task.arguments = ["explorer", "/desktop=Emperor,1024x768", inputctlExe, command] + cmdArgs
     task.environment = ProcessInfo.processInfo.environment.merging(
         ["WINEPREFIX": winePrefix], uniquingKeysWith: { _, new in new }
     )
-    // Suppress Wine's stderr noise
     task.standardError = FileHandle.nullDevice
-    task.standardOutput = Pipe()
+    let pipe = Pipe()
+    task.standardOutput = pipe
 
     do {
         try task.run()
         task.waitUntilExit()
+        let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if task.terminationStatus == 0 {
-            print("Wine click at (\(x), \(y)) — OK")
+            print("inputctl \(command) \(cmdArgs.joined(separator: " ")) — OK (\(output))")
         } else {
-            fputs("Warning: wine click.exe exited with status \(task.terminationStatus)\n", stderr)
+            fputs("Warning: inputctl \(command) exited with status \(task.terminationStatus): \(output)\n", stderr)
         }
     } catch {
-        fputs("Warning: wine click failed: \(error)\n", stderr)
+        fputs("Warning: inputctl failed: \(error)\n", stderr)
     }
 }
 
@@ -186,9 +191,10 @@ func run() async throws {
     //
     // Operations via --ops (comma-separated):
     //   capture:/path/to/file.png          — take screenshot, save to path
-    //   click:x;y                          — send mouse click at screen coords
-    //   gameclick:gameX;gameY              — click at game-space coords (translated via fresh window bounds)
+    //   wineclick:gameX;gameY              — click at game-space coords via DInput hook
+    //   winekey:dikCode                    — key press via DInput hook (DIK_ scan code)
     //   verifiedclick:gameX;gameY[;waitMs] — click + verify screen changed (retries 3x)
+    //   warmup:maxSeconds                  — poll until D3D renders real content
     //   wait:ms                            — wait N milliseconds
     if args[1] == "--batch" {
         let activate = args.contains("--activate")
@@ -214,10 +220,10 @@ func run() async throws {
             exit(1)
         }
 
-        // Parse Wine config for wineclick ops
+        // Parse Wine config for wineclick/winekey ops
         let wineBin = parseStringArg("--wine-bin") ?? "/opt/homebrew/bin/wine"
         let winePrefix = parseStringArg("--wine-prefix") ?? ""
-        let clickExe = parseStringArg("--click-exe") ?? ""
+        let inputctlExe = parseStringArg("--inputctl-exe") ?? ""
 
         // Parse --ops list
         var ops: [(String, String)] = []  // (type, arg)
@@ -274,24 +280,53 @@ func run() async throws {
                 print("Captured \(captureCount)/\(totalCaptures): \(image.width)x\(image.height)")
                 try savePNG(image, to: opArg)
 
-            case "wineclick":
-                // Click via Wine's Windows API — goes through Wine's internal input pipeline.
-                // This is what the game's DirectInput actually reads.
-                let wcParts = opArg.split(separator: ";")
-                if wcParts.count == 2, let wx = Int(wcParts[0]), let wy = Int(wcParts[1]) {
-                    if !clickExe.isEmpty {
-                        sendWineClick(x: wx, y: wy, wineBin: wineBin, winePrefix: winePrefix, clickExe: clickExe)
-                    } else {
-                        fputs("Warning: wineclick requires --click-exe <path>\n", stderr)
+            case "winekey":
+                // Send keyboard input via DInput hook's shared memory IPC.
+                // inputctl.exe writes key command → hook injects into GetDeviceState.
+                // No focus disruption — input goes directly into DirectInput.
+                //
+                // Format: winekey:<dikCode> (e.g., winekey:28 for DIK_RETURN)
+                if let dikCode = Int(opArg) {
+                    guard !inputctlExe.isEmpty else {
+                        fputs("Warning: winekey requires --inputctl-exe\n", stderr)
+                        break
                     }
+                    sendInputCtl(command: "key", args: ["\(dikCode)"],
+                                 wineBin: wineBin, winePrefix: winePrefix, inputctlExe: inputctlExe)
+                    // Brief settle time for game to process the key
+                    try await Task.sleep(nanoseconds: 200_000_000) // 200ms
                 } else {
-                    fputs("Warning: invalid wineclick coords '\(opArg)', expected x;y\n", stderr)
+                    fputs("Warning: invalid winekey code '\(opArg)', expected integer\n", stderr)
+                }
+
+            case "wineclick":
+                // Click via DInput hook's shared memory IPC.
+                // inputctl.exe writes click command → hook injects mouse deltas + button
+                // state across multiple game frames via GetDeviceState.
+                // No macOS focus disruption — bypasses OS input entirely.
+                //
+                // Coordinates stay in game space (0-799, 0-599). The DInput hook
+                // handles relative delta translation internally.
+                // Format: wineclick:gameX;gameY
+                let wcParts = opArg.split(separator: ";")
+                if wcParts.count == 2, let gx = Int(wcParts[0]), let gy = Int(wcParts[1]) {
+                    guard !inputctlExe.isEmpty else {
+                        fputs("Warning: wineclick requires --inputctl-exe\n", stderr)
+                        break
+                    }
+                    print("Click: game (\(gx),\(gy)) via DInput hook")
+                    sendInputCtl(command: "click", args: ["\(gx)", "\(gy)"],
+                                 wineBin: wineBin, winePrefix: winePrefix, inputctlExe: inputctlExe)
+                    // Brief settle time for game to process the click
+                    try await Task.sleep(nanoseconds: 300_000_000) // 300ms
+                } else {
+                    fputs("Warning: invalid wineclick coords '\(opArg)', expected gameX;gameY\n", stderr)
                 }
 
             case "verifiedclick":
                 // Game-space click with verification: capture before, click, capture after,
                 // retry up to 3 times if captures are identical (click didn't register).
-                // Uses Wine API click (not CGEvent) for DirectInput compatibility.
+                // Uses DInput hook via inputctl.exe for DirectInput compatibility.
                 // Format: verifiedclick:gameX;gameY;waitMs (waitMs = post-click settle time)
                 let vcParts = opArg.split(separator: ";")
                 if vcParts.count >= 2, let gx = Int(vcParts[0]), let gy = Int(vcParts[1]) {
@@ -304,13 +339,13 @@ func run() async throws {
                     )
 
                     for clickAttempt in 1...3 {
-                        guard !clickExe.isEmpty else {
-                            fputs("Warning: verifiedclick requires --click-exe\n", stderr)
+                        guard !inputctlExe.isEmpty else {
+                            fputs("Warning: verifiedclick requires --inputctl-exe\n", stderr)
                             break
                         }
-                        sendWineClick(x: gx, y: gy, wineBin: wineBin, winePrefix: winePrefix, clickExe: clickExe)
-                        // Re-activate Wine — click.exe disrupts macOS focus, stopping D3D rendering
-                        _ = try await activateWine(wineApp: wineApp)
+                        sendInputCtl(command: "click", args: ["\(gx)", "\(gy)"],
+                                     wineBin: wineBin, winePrefix: winePrefix, inputctlExe: inputctlExe)
+                        // No re-activation needed — DInput hook doesn't disrupt focus
                         try await Task.sleep(nanoseconds: waitMs * 1_000_000)
 
                         // Capture after click

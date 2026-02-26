@@ -1,0 +1,3 @@
+LIBRARY dinput
+EXPORTS
+    DirectInputCreateEx @1

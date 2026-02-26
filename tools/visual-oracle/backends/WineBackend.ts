@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { OriginalGameController } from './OriginalGameController.js';
 import type { InputStep } from '../qemu/input-sequences.js';
-import { QEMU_TO_MAC_KEYCODE } from './keycode-map.js';
+import { QEMU_TO_DIK_CODE } from './keycode-map.js';
 import { WINE_CONFIG } from './wine-config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -14,6 +14,7 @@ export type SessionOp =
   | { type: 'capture'; path: string }
   | { type: 'click'; gameX: number; gameY: number }
   | { type: 'verifiedclick'; gameX: number; gameY: number; waitMs?: number }
+  | { type: 'key'; keys: string[] }
   | { type: 'wait'; ms: number };
 
 /**
@@ -29,7 +30,9 @@ export type SessionOp =
  *   briefly activates Wine (~2s), captures, and the last one restores the
  *   previous app. Activation per-capture is required because the capture
  *   tool process launch itself disrupts macOS focus.
- * - `osascript` (AppleScript) for keyboard input
+ * - DInput hook proxy DLL for mouse/keyboard input injection — intercepts
+ *   DirectInput7 GetDeviceState via COM vtable patching, injects synthetic
+ *   input state from shared memory IPC (inputctl.exe → dinput.dll proxy)
  * - Python/Quartz CGWindowListCopyWindowInfo for window ID discovery
  */
 export class WineBackend implements OriginalGameController {
@@ -71,6 +74,10 @@ export class WineBackend implements OriginalGameController {
       );
     }
 
+    // Deploy DInput hook: copy Wine's real dinput.dll → dinput_real.dll,
+    // then copy our proxy dinput.dll + inputctl.exe to the game directory.
+    this.deployDInputHook();
+
     const wineBinary = findWineBinary();
     const { width, height } = WINE_CONFIG.resolution;
 
@@ -83,6 +90,9 @@ export class WineBackend implements OriginalGameController {
     const env = {
       ...process.env,
       WINEPREFIX: WINE_CONFIG.prefix,
+      // Force native DLL search order for dinput — loads our proxy from the
+      // game directory instead of Wine's built-in dinput.dll.
+      WINEDLLOVERRIDES: 'dinput=n',
     };
 
     console.log(`[Wine] Launching: ${wineBinary} ${args.join(' ')}`);
@@ -164,43 +174,8 @@ export class WineBackend implements OriginalGameController {
   }
 
   async sendKey(keys: string[]): Promise<void> {
-    // Focus the Wine window first
-    await this.focusWindow();
-
-    // Separate modifiers from regular keys
-    const modifiers: string[] = [];
-    const regularKeys: string[] = [];
-
-    for (const key of keys) {
-      const code = QEMU_TO_MAC_KEYCODE[key];
-      if (code === undefined) {
-        console.warn(`[Wine] Unknown keycode: ${key}, skipping`);
-        continue;
-      }
-      if (code < 0) {
-        modifiers.push(key);
-      } else {
-        regularKeys.push(key);
-      }
-    }
-
-    if (regularKeys.length === 0) return;
-
-    // Build AppleScript for the key press
-    const keyCode = QEMU_TO_MAC_KEYCODE[regularKeys[0]];
-    const modifierClause = buildModifierClause(modifiers);
-
-    const script = `
-      tell application "System Events"
-        key code ${keyCode}${modifierClause}
-      end tell
-    `;
-
-    try {
-      execFileSync('osascript', ['-e', script], { timeout: 5000 });
-    } catch (err) {
-      console.warn(`[Wine] AppleScript key send failed: ${(err as Error).message}`);
-    }
+    // Route through runSession() for DInput hook injection
+    await this.runSession([{ type: 'key', keys }]);
   }
 
   /**
@@ -306,11 +281,26 @@ export class WineBackend implements OriginalGameController {
           batchOpsStr.push(`capture:${op.path}`);
           break;
         case 'click':
-          // Use wineclick: — runs click.exe inside Wine, bypassing macOS input.
-          // Wine's DirectInput reads from Wine's internal input queue, not CGEvents.
+          // Use wineclick: — runs inputctl.exe to inject via DInput hook shared memory.
+          // Coordinates stay in game space; the hook handles relative delta translation.
           console.log(`[Wine:session] Click game (${op.gameX},${op.gameY})`);
           batchOpsStr.push(`wineclick:${op.gameX};${op.gameY}`);
           break;
+        case 'key': {
+          // Send keyboard input via DInput hook shared memory IPC.
+          // Encodes each key as a separate winekey:<dikCode> op.
+          // The DInput hook injects these directly into GetDeviceState.
+          for (const key of op.keys) {
+            const dikCode = QEMU_TO_DIK_CODE[key];
+            if (dikCode === undefined) {
+              console.warn(`[Wine:session] Unknown keycode: ${key}, skipping`);
+              continue;
+            }
+            console.log(`[Wine:session] Key '${key}' (DIK=0x${dikCode.toString(16).toUpperCase()})`);
+            batchOpsStr.push(`winekey:${dikCode}`);
+          }
+          break;
+        }
         case 'verifiedclick': {
           // Click with screenshot-based verification + retry (up to 3 attempts)
           const waitMs = op.waitMs || 2000;
@@ -350,6 +340,51 @@ export class WineBackend implements OriginalGameController {
     this.proc = null;
     this.windowId = null;
     console.log('[Wine] Shut down');
+  }
+
+  /**
+   * Deploy the DInput hook proxy DLL and inputctl.exe to the game directory.
+   * Also ensures Wine's real dinput.dll is backed up as dinput_real.dll in system32.
+   */
+  private deployDInputHook(): void {
+    const wineDir = path.resolve(__dirname, '..', 'wine');
+    const sys32 = path.join(WINE_CONFIG.prefix, 'drive_c', 'windows', 'system32');
+    const gameDir = WINE_CONFIG.gameDir;
+
+    // Source files (compiled in the wine/ directory)
+    const proxyDll = path.join(wineDir, 'dinput.dll');
+    const inputctlExe = path.join(wineDir, 'inputctl.exe');
+
+    if (!fs.existsSync(proxyDll)) {
+      throw new Error(
+        `DInput hook proxy not found at ${proxyDll}\n` +
+        'Build: cd tools/visual-oracle/wine && ' +
+        'i686-w64-mingw32-gcc -shared -O2 -o dinput.dll dinput-hook.c dinput.def -ldxguid -luser32 -lole32 -Wl,--enable-stdcall-fixup'
+      );
+    }
+    if (!fs.existsSync(inputctlExe)) {
+      throw new Error(
+        `inputctl.exe not found at ${inputctlExe}\n` +
+        'Build: cd tools/visual-oracle/wine && i686-w64-mingw32-gcc -O2 -o inputctl.exe inputctl.c'
+      );
+    }
+
+    // Backup Wine's real dinput.dll → dinput_real.dll (only if not already done)
+    const realDinput = path.join(sys32, 'dinput.dll');
+    const backupDinput = path.join(sys32, 'dinput_real.dll');
+    if (!fs.existsSync(backupDinput)) {
+      if (fs.existsSync(realDinput)) {
+        fs.copyFileSync(realDinput, backupDinput);
+        console.log(`[Wine] Backed up system32/dinput.dll → dinput_real.dll`);
+      } else {
+        console.warn('[Wine] Warning: system32/dinput.dll not found — Wine may create it on first run');
+      }
+    }
+
+    // Copy proxy DLL and inputctl.exe to game directory
+    fs.copyFileSync(proxyDll, path.join(gameDir, 'dinput.dll'));
+    fs.copyFileSync(inputctlExe, path.join(gameDir, 'inputctl.exe'));
+    console.log('[Wine] Deployed DInput hook: dinput.dll + inputctl.exe → game directory');
   }
 
   private async focusWindow(): Promise<void> {
@@ -489,13 +524,13 @@ function batchOps(
   ops: string[],
   opts: { activate?: boolean; restore?: boolean } = { activate: true, restore: true },
 ): void {
-  const clickExePath = `C:\\Westwood\\Emperor\\click.exe`;
+  const inputctlExePath = `C:\\Westwood\\Emperor\\inputctl.exe`;
   const args = ['--batch',
     '--windowid', String(windowId),
     '--ops', ops.join(','),
     '--wine-bin', findWineBinary(),
     '--wine-prefix', WINE_CONFIG.prefix,
-    '--click-exe', clickExePath,
+    '--inputctl-exe', inputctlExePath,
   ];
   if (opts.activate !== false) args.push('--activate');
   if (opts.restore !== false) args.push('--restore');
@@ -524,23 +559,6 @@ function batchOps(
       console.log(`[Wine:capture] ${line}`);
     }
   }
-}
-
-/** Build the AppleScript modifier clause for key code commands. */
-function buildModifierClause(modifiers: string[]): string {
-  if (modifiers.length === 0) return '';
-
-  const mapped = modifiers.map((m) => {
-    switch (m) {
-      case 'shift': return 'shift down';
-      case 'ctrl': return 'control down';
-      case 'alt': return 'option down';
-      default: return null;
-    }
-  }).filter(Boolean);
-
-  if (mapped.length === 0) return '';
-  return ` using {${mapped.join(', ')}}`;
 }
 
 

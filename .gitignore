@@ -45,3 +45,5 @@ tools/visual-oracle/wine/capture-window
 tools/visual-oracle/wine/CaptureWindow.app/Contents/MacOS/
 tools/visual-oracle/wine/CaptureWindow.app/Contents/_CodeSignature/
 tools/visual-oracle/wine/*.exe
+tools/visual-oracle/wine/dinput.dll
+tools/visual-oracle/wine/dinput-hook.log

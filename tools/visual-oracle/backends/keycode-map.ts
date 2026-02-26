@@ -1,39 +1,42 @@
 /**
- * Maps QEMU keycode names (used in scenario definitions) to macOS virtual key codes
- * (used by AppleScript's `key code` command).
+ * Maps QEMU keycode names (used in scenario definitions) to DirectInput
+ * keyboard scan codes (DIK_ codes), used by the DInput hook proxy DLL.
  *
- * Only keys actually used in the visual oracle scenarios are included.
- * See: https://eastmanreference.com/complete-list-of-applescript-key-codes
+ * The DInput hook intercepts GetDeviceState and injects these codes into
+ * the 256-byte keyboard state array that DirectInput returns to GAME.EXE.
+ *
+ * See: https://learn.microsoft.com/en-us/previous-versions/windows/desktop/ee418641(v=vs.85)
  */
-export const QEMU_TO_MAC_KEYCODE: Record<string, number> = {
+export const QEMU_TO_DIK_CODE: Record<string, number> = {
   // Navigation keys
-  ret: 36,     // Return/Enter
-  esc: 53,     // Escape
+  ret: 0x1C,     // DIK_RETURN (28)
+  esc: 0x01,     // DIK_ESCAPE (1)
 
   // Number keys (top row)
-  '1': 18,
-  '2': 19,
-  '3': 20,
-  '4': 21,
-  '5': 23,
+  '1': 0x02,     // DIK_1 (2)
+  '2': 0x03,     // DIK_2 (3)
+  '3': 0x04,     // DIK_3 (4)
+  '4': 0x05,     // DIK_4 (5)
+  '5': 0x06,     // DIK_5 (6)
 
   // Arrow keys
-  up: 126,
-  down: 125,
-  left: 123,
-  right: 124,
+  up: 0xC8,      // DIK_UP (200)
+  down: 0xD0,    // DIK_DOWN (208)
+  left: 0xCB,    // DIK_LEFT (203)
+  right: 0xCD,   // DIK_RIGHT (205)
 
   // Function keys
-  f1: 122,
-  f2: 120,
-  f3: 99,
+  f1: 0x3B,      // DIK_F1 (59)
+  f2: 0x3C,      // DIK_F2 (60)
+  f3: 0x3D,      // DIK_F3 (61)
 
-  // Modifiers (for compound keys)
-  shift: -1,   // handled specially in AppleScript
-  ctrl: -2,    // handled specially in AppleScript
-  alt: -3,     // handled specially in AppleScript
+  // Modifiers
+  shift: 0x2A,   // DIK_LSHIFT (42)
+  ctrl: 0x1D,    // DIK_LCONTROL (29)
+  alt: 0x38,     // DIK_LMENU/LALT (56)
 
   // Common game keys
-  spc: 49,     // Space
-  tab: 48,
+  spc: 0x39,     // DIK_SPACE (57)
+  tab: 0x0F,     // DIK_TAB (15)
 };
+
