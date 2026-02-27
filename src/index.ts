@@ -25,7 +25,7 @@ import { setupGameUI } from './ui/GameUI';
 import { spawnFreshGame } from './core/FreshGameSpawn';
 import { simRng } from './utils/DeterministicRNG';
 import { restoreFromSave } from './core/SaveLoadSystem';
-import { hasComponent, Harvester, Owner, Position, Health, BuildingType as BT, buildingQuery, unitQuery, removeEntity } from './core/ECS';
+import { hasComponent, Harvester, Owner, Position, Health, BuildingType as BT, UnitType as UT, MoveTarget, AttackTarget, buildingQuery, unitQuery, removeEntity } from './core/ECS';
 import { loadDisplayNames } from './config/DisplayNames';
 import { isAgentMode, getAgentConfig, pickTerritoryWithContext, startAgent, stopAgent } from './ai/CampaignAgent';
 import { AIPlayer } from './ai/AIPlayer';
@@ -968,7 +968,8 @@ async function main() {
     }
     return { buildings, units };
   };
-  (window as any)._ecsRefs = { buildingQuery, unitQuery, Health, Owner };
+  (window as any)._ecsRefs = { buildingQuery, unitQuery, Health, Owner, Position, UnitType: UT, BuildingType: BT, Harvester, MoveTarget, AttackTarget, hasComponent };
+  (window as any)._eventBus = EventBus;
   (window as any).debug = {
     modelReport() {
       const report = ctx.modelManager.getLoadReport();

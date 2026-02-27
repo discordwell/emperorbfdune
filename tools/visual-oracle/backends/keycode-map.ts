@@ -29,6 +29,13 @@ export const QEMU_TO_DIK_CODE: Record<string, number> = {
   f1: 0x3B,      // DIK_F1 (59)
   f2: 0x3C,      // DIK_F2 (60)
   f3: 0x3D,      // DIK_F3 (61)
+  f4: 0x3E,      // DIK_F4 (62)
+  f5: 0x3F,      // DIK_F5 (63)
+  f6: 0x40,      // DIK_F6 (64)
+  f7: 0x41,      // DIK_F7 (65)
+  f8: 0x42,      // DIK_F8 (66)
+  f9: 0x43,      // DIK_F9 (67)
+  f10: 0x44,     // DIK_F10 (68)
 
   // Modifiers
   shift: 0x2A,   // DIK_LSHIFT (42)
