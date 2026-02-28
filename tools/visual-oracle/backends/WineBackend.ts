@@ -90,8 +90,9 @@ export class WineBackend implements OriginalGameController {
     const env = {
       ...process.env,
       WINEPREFIX: WINE_CONFIG.prefix,
-      // Force native DLL search order for dinput — loads our proxy from the
-      // game directory instead of Wine's built-in dinput.dll.
+      // dinput=n: native DLL search for dinput — loads our proxy from game dir
+      // instead of Wine's built-in. The proxy then loads the real Wine dinput
+      // via LOAD_LIBRARY_SEARCH_SYSTEM32 to avoid recursion.
       WINEDLLOVERRIDES: 'dinput=n',
     };
 
@@ -348,7 +349,6 @@ export class WineBackend implements OriginalGameController {
    */
   private deployDInputHook(): void {
     const wineDir = path.resolve(__dirname, '..', 'wine');
-    const sys32 = path.join(WINE_CONFIG.prefix, 'drive_c', 'windows', 'system32');
     const gameDir = WINE_CONFIG.gameDir;
 
     // Source files (compiled in the wine/ directory)
@@ -369,15 +369,21 @@ export class WineBackend implements OriginalGameController {
       );
     }
 
-    // Backup Wine's real dinput.dll → dinput_real.dll (only if not already done)
-    const realDinput = path.join(sys32, 'dinput.dll');
-    const backupDinput = path.join(sys32, 'dinput_real.dll');
-    if (!fs.existsSync(backupDinput)) {
+    // Copy Wine's real 32-bit dinput.dll as "wdinput7.dll" into game directory.
+    // The different name avoids WINEDLLOVERRIDES="dinput=n" matching and
+    // LoadLibrary recursion. We copy from Wine's i386-windows lib directory
+    // (the actual 32-bit PE implementation, not the prefix PE stubs).
+    const wdinput7Dest = path.join(gameDir, 'wdinput7.dll');
+    if (!fs.existsSync(wdinput7Dest)) {
+      const wineBin = findWineBinary();
+      // Resolve Wine's lib directory: .../bin/wine → .../lib/wine/i386-windows/dinput.dll
+      const wineLibDir = path.resolve(path.dirname(wineBin), '..', 'lib', 'wine', 'i386-windows');
+      const realDinput = path.join(wineLibDir, 'dinput.dll');
       if (fs.existsSync(realDinput)) {
-        fs.copyFileSync(realDinput, backupDinput);
-        console.log(`[Wine] Backed up system32/dinput.dll → dinput_real.dll`);
+        fs.copyFileSync(realDinput, wdinput7Dest);
+        console.log(`[Wine] Copied Wine's 32-bit dinput.dll → wdinput7.dll in game dir`);
       } else {
-        console.warn('[Wine] Warning: system32/dinput.dll not found — Wine may create it on first run');
+        console.warn(`[Wine] Warning: Wine's 32-bit dinput.dll not found at ${realDinput}`);
       }
     }
 

@@ -22,6 +22,7 @@ export interface UnitDef {
   techLevel: number;
   viewRange: number;
   primaryBuilding: string;
+  primaryBuildingAlts: string[];
   secondaryBuildings: string[];
   unitGroup: string;
   terrain: string[];
@@ -138,6 +139,7 @@ export function createDefaultUnitDef(name: string): UnitDef {
     techLevel: 0,
     viewRange: 5,
     primaryBuilding: '',
+    primaryBuildingAlts: [],
     secondaryBuildings: [],
     unitGroup: '',
     terrain: ['Sand', 'Rock'],

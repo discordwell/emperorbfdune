@@ -367,19 +367,20 @@ export class ProductionSystem {
 
     // Check prerequisites first
     if (def.primaryBuilding && !hasReq(def.primaryBuilding)) {
-      const bDef = isBuilding ? this.rules.buildings.get(typeName) : null;
-      const alts = bDef?.primaryBuildingAlts ?? [];
+      // primaryBuildingAlts: faction alternatives (e.g. ATFactory, ORFactory, HKFactory)
+      const alts = def.primaryBuildingAlts ?? [];
       if (alts.length === 0 || !alts.some(alt => hasReq(alt))) {
         const reqName = def.primaryBuilding.replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, '');
         return { reason: 'prereq', detail: reqName };
       }
     }
-    if (def.secondaryBuildings) {
-      for (const req of def.secondaryBuildings) {
-        if (!hasReq(req)) {
-          const reqName = req.replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, '');
-          return { reason: 'prereq', detail: reqName };
-        }
+    if (def.secondaryBuildings && def.secondaryBuildings.length > 0) {
+      // SecondaryBuilding entries are faction alternatives (e.g. ATSmWindtrap, ORSmWindtrap, HKSmWindtrap)
+      // Player needs ANY one of them, not all
+      const hasAny = def.secondaryBuildings.some(req => hasReq(req));
+      if (!hasAny) {
+        const reqName = def.secondaryBuildings[0].replace(/^(AT|HK|OR|GU|IX|FR|IM|TL)/, '');
+        return { reason: 'prereq', detail: reqName };
       }
     }
     // Check upgraded primary requirement

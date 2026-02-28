@@ -1,14 +1,18 @@
 /**
  * click.c — Send mouse click at specified coordinates inside Wine.
  *
- * Finds the game window ("Dune") and posts WM_LBUTTONDOWN/UP via PostMessage.
- * This enqueues directly to the window's message queue without affecting system
- * input state — no focus change, no DDSCL_EXCLUSIVE disruption.
+ * Uses PostMessage WM_LBUTTONDOWN/WM_LBUTTONUP to the game window.
+ * PostMessage enqueues to the window proc without affecting system
+ * input state — no DDSCL_EXCLUSIVE disruption, no D3D mode change.
+ * Coordinates are game client-relative (800x600 space).
  *
- * Falls back to mouse_event if FindWindow fails (e.g., wrong desktop).
+ * mouse_event()/SendInput() disrupt D3D exclusive mode on Wine/macOS,
+ * causing blank captures after clicks. PostMessage avoids this.
  *
- * Built as a GUI app (WinMain, -mwindows) to avoid creating a console window
- * that would steal focus from the D3D game within Wine's virtual desktop.
+ * Must be launched inside the same Wine virtual desktop as the game:
+ *   wine explorer /desktop=Emperor,1024x768 click.exe 405 420
+ *
+ * Built as a GUI app (WinMain, -mwindows) to avoid creating a console window.
  *
  * Usage: click.exe <x> <y>
  * Compile: i686-w64-mingw32-gcc -O2 -mwindows -o click.exe click.c -luser32
@@ -26,36 +30,22 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
         return 1;
     }
 
-    LPARAM lParam = MAKELPARAM(x, y);
-
-    /* Try to find the game window and send directly to it */
+    /* Find the game window */
     HWND hwnd = FindWindowA(NULL, "Dune");
     if (!hwnd) {
-        /* Try DirectDraw window class */
-        hwnd = FindWindowA("DirectDrawDeviceWnd", NULL);
+        return 2;
     }
 
-    if (hwnd) {
-        /* PostMessage: enqueues to window proc, non-blocking.
-         * Avoids disrupting DDSCL_EXCLUSIVE mode (no focus change).
-         * Coordinates are client-relative — in Wine virtual desktop at 800x600,
-         * the game window fills the desktop so client == screen coords. */
-        PostMessageA(hwnd, WM_MOUSEMOVE, 0, lParam);
-        Sleep(50);
-        PostMessageA(hwnd, WM_LBUTTONDOWN, MK_LBUTTON, lParam);
-        Sleep(50);
-        PostMessageA(hwnd, WM_LBUTTONUP, 0, lParam);
-        return 0;
-    }
-
-    /* Last resort: mouse_event. Uses screen-absolute coords which may differ
-     * from game client coords if the window isn't at (0,0). Also disrupts
-     * DDSCL_EXCLUSIVE mode. Only reached if FindWindow fails entirely. */
+    /* Move the cursor FIRST — game likely uses GetCursorPos for hit testing,
+     * not the coordinates in WM_LBUTTONDOWN.
+     * Then PostMessage the click — enqueues to window proc without
+     * disrupting D3D exclusive mode (unlike mouse_event). */
     SetCursorPos(x, y);
+    Sleep(50);
+    LPARAM lParam = MAKELPARAM(x, y);
+    PostMessageA(hwnd, WM_LBUTTONDOWN, MK_LBUTTON, lParam);
     Sleep(100);
-    mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
-    Sleep(100);
-    mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+    PostMessageA(hwnd, WM_LBUTTONUP, 0, lParam);
 
-    return 2; /* fallback used */
+    return 0;
 }

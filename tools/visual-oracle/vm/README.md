@@ -1,6 +1,18 @@
 # Visual Oracle — VM Setup
 
-One-time manual setup to create a QEMU VM with Emperor: Battle for Dune installed.
+One-time setup to create a QEMU VM running Windows 7 with Emperor: Battle for Dune
+and dgVoodoo2 for D3D7 software rendering via WARP.
+
+## Why Windows 7?
+
+Emperor uses Direct3D 7 (DDraw/D3DImm), and QEMU provides no GPU acceleration.
+dgVoodoo2 translates D3D7 → D3D11, then uses WARP (Windows software rasterizer)
+for CPU-based rendering. WARP requires D3D11, which means Windows 7 SP1 minimum.
+
+Windows XP was tested but **all D3D7 wrappers fail** on it:
+- dgVoodoo2: needs D3D11 (Win7+)
+- DXGL: needs `SHGetKnownFolderPath` (Vista+)
+- WineD3D: needs Vista+ APIs or `ucrtbase.dll`
 
 ## Prerequisites
 
@@ -8,68 +20,88 @@ One-time manual setup to create a QEMU VM with Emperor: Battle for Dune installe
 brew install qemu    # ~500MB, provides qemu-system-i386
 ```
 
-## Steps
-
-### 1. Create disk image
+## Quick Setup
 
 ```bash
-./tools/visual-oracle/vm/create-disk.sh
+# Downloads Win7 ISO, creates VM, installs everything
+bash tools/visual-oracle/vm/setup-win7.sh
 ```
 
-This creates a 20GB QCOW2 disk at `tools/visual-oracle/vm/emperor-win10.qcow2`.
-
-### 2. Install Windows
-
-Download a Windows 10 evaluation ISO from Microsoft, then boot the VM:
+Or run individual steps:
 
 ```bash
+bash tools/visual-oracle/vm/setup-win7.sh 1   # Install Windows 7
+bash tools/visual-oracle/vm/setup-win7.sh 2   # Install Emperor
+bash tools/visual-oracle/vm/setup-win7.sh 3   # Install dgVoodoo2
+```
+
+## Manual Setup
+
+### 1. Get Windows 7 SP1 x86 ISO
+
+Download from [Archive.org](https://archive.org/details/win-7-pro-sp1-english):
+```bash
+curl -L -o tools/visual-oracle/vm/win7-pro-sp1-x86.iso \
+  "https://archive.org/download/win-7-pro-sp1-english/Win7_Pro_SP1_English_x32.iso"
+```
+
+### 2. Create disk + install Windows
+
+```bash
+qemu-img create -f qcow2 tools/visual-oracle/vm/emperor-win7.qcow2 20G
+
 qemu-system-i386 \
-  -hda tools/visual-oracle/vm/emperor-win10.qcow2 \
-  -cdrom ~/Downloads/Win10_eval.iso \
-  -m 4G -vga std -boot d \
-  -usb -device usb-tablet
+  -hda tools/visual-oracle/vm/emperor-win7.qcow2 \
+  -cdrom tools/visual-oracle/vm/win7-pro-sp1-x86.iso \
+  -m 2G -vga std -accel tcg -cpu pentium3 \
+  -usb -device usb-tablet -display cocoa -boot d \
+  -qmp unix:/tmp/ebfd-visual-oracle-qmp.sock,server,nowait
 ```
 
-Complete the Windows installation (~30 min). Shut down the VM when done.
+### 3. Install Emperor from ISOs
 
-### 3. Install Emperor: Battle for Dune
-
-Boot the VM again with the game ISO mounted:
-
+Swap CDs via QMP:
 ```bash
-qemu-system-i386 \
-  -hda tools/visual-oracle/vm/emperor-win10.qcow2 \
-  -cdrom isos/Emperor_Battle_for_Dune_Disc_1.iso \
-  -m 4G -vga std \
-  -usb -device usb-tablet
+# Eject
+echo '{"execute":"eject","arguments":{"device":"ide1-cd0","force":true}}' | nc -U /tmp/ebfd-visual-oracle-qmp.sock
+# Insert next disc
+echo '{"execute":"blockdev-change-medium","arguments":{"device":"ide1-cd0","filename":"/path/to/EMPEROR2.iso"}}' | nc -U /tmp/ebfd-visual-oracle-qmp.sock
 ```
-
-Run the installer from the CD. You may need to swap ISOs during installation:
-- Use QEMU monitor (Ctrl+Alt+2) and `change ide1-cd0 path/to/disc2.iso`
 
 ### 4. Install dgVoodoo2
 
-Download dgVoodoo2 from the official site. Copy the D3D wrapper DLLs into the Emperor installation directory. This translates D3D7 calls to D3D11, which works better under QEMU's VGA emulation.
+Copy from `tools/visual-oracle/vm/dgvoodoo2/`:
+- `MS/x86/DDraw.dll` → `C:\Westwood\Emperor\`
+- `MS/x86/D3DImm.dll` → `C:\Westwood\Emperor\`
+- `dgVoodoo-emperor.conf` → `C:\Westwood\Emperor\dgVoodoo.conf`
 
-### 5. Test the game launches
+Key config: `OutputAPI = d3d11warp`, `Environment = QEmu`, `FullScreenMode = false`
 
-Boot the VM, launch Emperor, verify it reaches the title screen.
-
-### 6. Create a snapshot
+### 5. Create snapshot
 
 ```bash
-qemu-img snapshot -c ready tools/visual-oracle/vm/emperor-win10.qcow2
+qemu-img snapshot -c ready tools/visual-oracle/vm/emperor-win7.qcow2
 ```
 
-This saves the "game installed, ready to launch" state for fast restoration.
+## Headless Screenshot Mode
 
-## File Size
+Once set up, launch headless and capture screenshots via QMP:
+```bash
+qemu-system-i386 \
+  -hda tools/visual-oracle/vm/emperor-win7.qcow2 \
+  -cdrom isos/EMPEROR1.iso \
+  -m 2G -vga std -accel tcg -cpu pentium3 \
+  -display none \
+  -qmp unix:/tmp/ebfd-visual-oracle-qmp.sock,server,nowait
 
-The QCOW2 file will be ~8-12GB after Windows + Emperor installation. It is gitignored.
+# Screenshot via QMP
+echo '{"execute":"screendump","arguments":{"filename":"/tmp/screenshot.ppm"}}' | nc -U /tmp/ebfd-visual-oracle-qmp.sock
+```
 
 ## Troubleshooting
 
 - **Black screen**: Try `-vga cirrus` instead of `-vga std`
-- **No sound**: Sound is not needed for visual oracle — the VM runs headless
-- **Slow boot**: TCG (software emulation) on ARM Mac is slow; expect 2-3 min boot times
-- **Game won't start**: Ensure dgVoodoo2 DLLs are in the game directory
+- **No sound**: Not needed for visual oracle
+- **Slow boot**: TCG on ARM Mac is slow; expect 2-3 min boot times
+- **Game crashes**: Ensure dgVoodoo2 DLLs AND `dgVoodoo.conf` are in the game directory
+- **"d3d11warp" fails**: WARP is only available on Win7 SP1+ with Platform Update

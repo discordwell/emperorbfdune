@@ -380,14 +380,18 @@ HRESULT WINAPI DirectInputCreateEx(
 ) {
     hookLog("=== DirectInputCreateEx intercepted (version 0x%08X) ===", dwVersion);
 
-    /* Load real dinput from renamed copy in system32 */
+    /* Load Wine's real dinput implementation from "wdinput7.dll" — a copy of
+     * Wine's 32-bit builtin placed alongside our proxy in the game directory.
+     * The different name avoids WINEDLLOVERRIDES="dinput=n" and LoadLibrary
+     * recursion. Unlike system32 PE stubs, this is the actual PE implementation
+     * copied from Wine's i386-windows/ lib directory. */
     if (!g_realDInput) {
-        g_realDInput = LoadLibraryA("C:\\windows\\system32\\dinput_real.dll");
+        g_realDInput = LoadLibraryA("wdinput7.dll");
         if (!g_realDInput) {
-            hookLog("FATAL: Cannot load dinput_real.dll: %lu", GetLastError());
+            hookLog("FATAL: Cannot load wdinput7.dll: %lu (is it in the game dir?)", GetLastError());
             return DIERR_GENERIC;
         }
-        hookLog("Loaded real dinput from dinput_real.dll");
+        hookLog("Loaded real dinput from wdinput7.dll");
     }
 
     /* Get real DirectInputCreateEx */

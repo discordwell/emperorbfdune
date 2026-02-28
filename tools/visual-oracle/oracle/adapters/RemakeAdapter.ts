@@ -42,6 +42,7 @@ export class RemakeAdapter implements GameAdapter {
   private browser: Browser | null = null;
   private page: Page | null = null;
   private eventsInstalled = false;
+  private lastFailKey = '';
 
   constructor(config?: RemakeAdapterConfig) {
     this.config = { ...DEFAULTS, ...config };
@@ -51,6 +52,8 @@ export class RemakeAdapter implements GameAdapter {
     console.log(`[RemakeAdapter] Connecting to ${this.config.url}`);
     this.browser = await chromium.launch({ headless: false });
     const context = await this.browser.newContext({ viewport: { width: 1280, height: 960 } });
+    // Polyfill __name (esbuild/tsx decorator helper) for all page.evaluate() calls
+    await context.addInitScript({ content: 'if(typeof __name==="undefined"){globalThis.__name=function(fn){return fn}}' });
     this.page = await context.newPage();
 
     if (this.config.skipNavigation) {
@@ -69,6 +72,9 @@ export class RemakeAdapter implements GameAdapter {
     // Install event collector
     await installEventCollector(this.page);
     this.eventsInstalled = true;
+
+    // Install auto-placement for completed buildings (oracle is player 0)
+    await this.installBuildingAutoPlacement();
 
     console.log('[RemakeAdapter] Connected and game is running');
   }
@@ -139,12 +145,32 @@ export class RemakeAdapter implements GameAdapter {
         }, { eids: action.entityIds, x: action.x, z: action.z });
         break;
 
-      case 'produce':
-        await this.page!.evaluate(({ typeName, isBuilding }) => {
+      case 'produce': {
+        const result = await this.page!.evaluate(({ typeName, isBuilding }) => {
           const ctx = (window as any).ctx;
-          ctx.productionSystem.startProduction(0, typeName, isBuilding);
+          const ps = ctx.productionSystem;
+          const hs = ctx.harvestSystem;
+          const solaris = hs?.getSolaris(0) ?? -1;
+
+          const blockReason = ps?.getBuildBlockReason?.(0, typeName, isBuilding);
+          if (blockReason) {
+            return { ok: false, typeName, isBuilding, solaris, block: blockReason };
+          }
+
+          const ok = ps.startProduction(0, typeName, isBuilding);
+          return { ok, typeName, isBuilding, solaris };
         }, { typeName: action.typeName, isBuilding: action.isBuilding });
+
+        if (!result.ok) {
+          // Only log unique failures to reduce noise
+          const key = `${result.typeName}:${result.block?.reason}:${result.block?.detail}`;
+          if (key !== this.lastFailKey) {
+            console.log(`[RemakeAdapter] PRODUCE FAILED: ${JSON.stringify(result)}`);
+            this.lastFailKey = key;
+          }
+        }
         break;
+      }
 
       case 'build':
         await this.page!.evaluate(({ typeName, x, z }) => {
@@ -254,6 +280,72 @@ export class RemakeAdapter implements GameAdapter {
     if (!hasRefs) {
       console.warn('[RemakeAdapter] _ecsRefs incomplete — state extraction may be limited');
     }
+  }
+
+  /**
+   * Install a production:complete handler that auto-places completed buildings for player 0.
+   * In the real game, the player clicks to place buildings after production finishes.
+   * This handler mimics the AI auto-placement logic.
+   */
+  private async installBuildingAutoPlacement(): Promise<void> {
+    await this.page!.evaluate(() => {
+      const w = window as any;
+      const ctx = w.ctx;
+      const EB = w._eventBus;
+      if (!EB || !ctx) return;
+
+      // Track placed buildings for spacing
+      let nextOffset = 0;
+
+      EB.on('production:complete', (data: any) => {
+        if (!data.isBuilding || data.owner !== 0) return;
+
+        const typeName = data.unitType;
+        const rules = ctx.gameRules;
+        const bDef = rules.buildings.get(typeName);
+        if (!bDef) return;
+
+        // Find ConYard as base center
+        const ECS = w._ecsRefs;
+        const world = ctx.game.getWorld();
+        let baseX = 0, baseZ = 0;
+        for (const eid of ECS.buildingQuery(world)) {
+          if (ECS.Owner.playerId[eid] !== 0) continue;
+          if (ECS.Health.current[eid] <= 0) continue;
+          const typeId = ECS.BuildingType.id[eid];
+          const name = ctx.typeRegistry.buildingTypeNames[typeId] ?? '';
+          if (name.includes('ConYard')) {
+            baseX = ECS.Position.x[eid];
+            baseZ = ECS.Position.z[eid];
+            break;
+          }
+        }
+
+        // Simple spiral placement around base
+        const spacing = 6;
+        const ring = Math.floor(nextOffset / 4);
+        const side = nextOffset % 4;
+        let px = baseX, pz = baseZ;
+        const r = (ring + 2) * spacing;
+        switch (side) {
+          case 0: px += r; break;
+          case 1: px -= r; break;
+          case 2: pz += r; break;
+          case 3: pz -= r; break;
+        }
+        nextOffset++;
+
+        const eid = ctx.spawnBuilding(world, typeName, 0, px, pz);
+        if (eid >= 0) {
+          EB.emit('building:placed', { entityId: eid, buildingType: typeName, owner: 0 });
+          EB.emit('building:completed', { entityId: eid, playerId: 0, typeName });
+          // Spawn bonus unit if building provides one (e.g., Refinery → Harvester)
+          if (bDef.getUnitWhenBuilt) {
+            ctx.spawnUnit(world, bDef.getUnitWhenBuilt, 0, px + 3, pz + 3);
+          }
+        }
+      });
+    });
   }
 
   private ensurePage(): void {

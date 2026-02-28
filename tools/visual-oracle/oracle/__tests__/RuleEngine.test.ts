@@ -157,7 +157,7 @@ describe('RuleEngine', () => {
 
       const actions = engine.evaluate(state);
       const harvActions = actions.filter(
-        a => a.type === 'produce' && a.typeName === 'ATHarvester'
+        a => a.type === 'produce' && a.typeName === 'Harvester'
       );
       expect(harvActions.length).toBeGreaterThanOrEqual(1);
     });

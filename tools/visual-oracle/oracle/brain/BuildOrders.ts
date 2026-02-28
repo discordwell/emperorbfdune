@@ -1,6 +1,6 @@
 /**
- * House-specific build order templates.
- * Maps from AIPlayer.ts build phases to oracle's declarative format.
+ * House-specific build order templates and unit pools.
+ * Type names must match the canonical names from rules.txt sections.
  */
 
 export interface BuildOrderStep {
@@ -13,8 +13,11 @@ export type HousePrefix = 'AT' | 'HK' | 'OR';
 
 /**
  * Returns the build order for a given house prefix.
- * Phases 0-9 match AIPlayer.ts; beyond that, the RuleEngine
- * uses dynamic decisions (more refineries, factories, etc.)
+ * The RuleEngine walks this list against ownedBuildingTypes each tick,
+ * returning the first entry that isn't yet satisfied.
+ *
+ * Note: player starts with ConYard + SmWindtrap + Barracks + Factory + Refinery,
+ * so early entries will be skipped in fresh skirmish games.
  */
 export function getBuildOrder(prefix: HousePrefix): BuildOrderStep[] {
   return [
@@ -22,12 +25,14 @@ export function getBuildOrder(prefix: HousePrefix): BuildOrderStep[] {
     { typeName: `${prefix}Refinery`, isBuilding: true },      // 1: economy
     { typeName: `${prefix}Barracks`, isBuilding: true },      // 2: infantry production
     { typeName: `${prefix}Factory`, isBuilding: true },       // 3: vehicle production
-    { typeName: `${prefix}Outpost`, isBuilding: true },       // 4: radar / upgrades
+    { typeName: `${prefix}Outpost`, isBuilding: true },       // 4: radar
     { typeName: `${prefix}SmWindtrap`, isBuilding: true },    // 5: second power
     { typeName: `${prefix}SmWindtrap`, isBuilding: true },    // 6: third power
     { typeName: `${prefix}Refinery`, isBuilding: true },      // 7: second refinery
-    { typeName: `${prefix}Hanger`, isBuilding: true },        // 8: aircraft
-    { typeName: `${prefix}SmWindtrap`, isBuilding: true },    // 9: fourth power
+    { typeName: `${prefix}SmWindtrap`, isBuilding: true },    // 8: fourth power
+    { typeName: `${prefix}Hanger`, isBuilding: true },        // 9: aircraft (tech 5)
+    { typeName: `${prefix}SmWindtrap`, isBuilding: true },    // 10: fifth power
+    { typeName: `${prefix}Starport`, isBuilding: true },      // 11: starport (tech 7)
   ];
 }
 
@@ -40,8 +45,9 @@ export const COMPOSITION_GOAL = {
 };
 
 /**
- * Default unit pools per house. Used by RuleEngine when no rules data is available.
- * These are the most common units you'd train in each category.
+ * Default unit pools per house — only includes units that are actually
+ * buildable in skirmish (not campaign-only/aiSpecial).
+ * Ordered from cheapest/most available to most expensive.
  */
 export function getDefaultUnitPool(prefix: HousePrefix): {
   infantry: string[];
@@ -51,23 +57,37 @@ export function getDefaultUnitPool(prefix: HousePrefix): {
   switch (prefix) {
     case 'AT':
       return {
-        infantry: ['ATLightInf', 'ATInfantry', 'ATKindjal', 'ATSniper'],
-        vehicles: ['ATMongoose', 'ATMirage', 'ATSonicTank'],
-        aircraft: ['ATOrnithopter'],
+        // ATScout (tech 1), ATInfantry (tech 1), ATSniper (tech 1), ATMilitia (tech 1)
+        // ATKindjal requires upgraded Barracks
+        infantry: ['ATScout', 'ATInfantry', 'ATSniper', 'ATMilitia'],
+        // ATTrike (tech 1) — ATMongoose needs tech 3
+        vehicles: ['ATTrike'],
+        // ATOrni needs Hanger (tech 5)
+        aircraft: ['ATOrni'],
       };
     case 'HK':
       return {
-        infantry: ['HKLightInf', 'HKInfantry', 'HKFlamer'],
-        vehicles: ['HKBuzzsaw', 'HKAssaultTank', 'HKMissile', 'HKDevastator'],
+        // HKScout, HKLightInf, HKTrooper, HKFlamer
+        infantry: ['HKScout', 'HKLightInf', 'HKTrooper', 'HKFlamer'],
+        // HKBuzzsaw (tech 1), HKAssault, HKFlame, HKInkVine
+        vehicles: ['HKBuzzsaw', 'HKAssault', 'HKFlame'],
+        // HKGunship needs Hanger
         aircraft: ['HKGunship'],
       };
     case 'OR':
       return {
-        infantry: ['ORLightInf', 'ORInfantry', 'ORChemTroop'],
-        vehicles: ['ORDust', 'ORLaser', 'ORKobra'],
+        // ORScout, ORChemical, ORAATrooper, ORMortar
+        infantry: ['ORScout', 'ORChemical', 'ORAATrooper', 'ORMortar'],
+        // ORDustScout, ORLaserTank, ORKobra
+        vehicles: ['ORDustScout', 'ORLaserTank'],
         aircraft: [],
       };
     default:
       return { infantry: [], vehicles: [], aircraft: [] };
   }
 }
+
+/**
+ * Harvester type name — shared across all houses (no prefix).
+ */
+export const HARVESTER_TYPE = 'Harvester';

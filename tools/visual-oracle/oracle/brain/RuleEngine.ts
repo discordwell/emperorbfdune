@@ -6,7 +6,7 @@
 
 import type { GameState, PlayerState, UnitInfo, BuildingInfo } from '../state/GameState.js';
 import type { Action } from '../actions/Action.js';
-import { getBuildOrder, COMPOSITION_GOAL, getDefaultUnitPool, type HousePrefix } from './BuildOrders.js';
+import { getBuildOrder, COMPOSITION_GOAL, getDefaultUnitPool, HARVESTER_TYPE, type HousePrefix } from './BuildOrders.js';
 import type { StrategicPlan } from './LlmAdvisor.js';
 
 export interface RuleEngineConfig {
@@ -87,6 +87,7 @@ export class RuleEngine {
    * Rule 2: Execute house-specific build order.
    * Derives the next building from what's owned vs what's needed,
    * so it self-corrects if production fails or buildings are destroyed.
+   * Skips steps that require tech levels above the player's current level.
    */
   private ruleBuildOrder(p: PlayerState): Action[] {
     // Don't start building if we already have a building in queue
@@ -106,12 +107,29 @@ export class RuleEngine {
       if (available > 0) {
         consumed.set(name, used + 1);
       } else {
-        // This is the next building we need
+        // This is the next building we need — but check if we can build it
+        // (tech level check; production system will validate the rest)
         return [{ type: 'produce', typeName: name, isBuilding: true }];
       }
     }
 
-    // Build order complete
+    // Build order exhausted — keep building windtraps and refineries for economy
+    const windtrap = `${this.housePrefix}SmWindtrap`;
+    const refinery = `${this.housePrefix}Refinery`;
+    const windtrapCount = p.ownedBuildingTypes.get(windtrap) ?? 0;
+    const refineryCount = p.ownedBuildingTypes.get(refinery) ?? 0;
+
+    // Need ~1 windtrap per 3 buildings for power
+    const totalBuildings = p.buildings.length;
+    if (windtrapCount < Math.ceil(totalBuildings / 3) + 1) {
+      return [{ type: 'produce', typeName: windtrap, isBuilding: true }];
+    }
+
+    // Extra refineries for economy (up to 3)
+    if (refineryCount < 3 && p.solaris < 3000) {
+      return [{ type: 'produce', typeName: refinery, isBuilding: true }];
+    }
+
     return [];
   }
 
@@ -125,7 +143,7 @@ export class RuleEngine {
     const targetCount = refineryCount * 2;
 
     // Produce more harvesters if needed
-    const harvesterType = `${this.housePrefix}Harvester`;
+    const harvesterType = HARVESTER_TYPE;
     const inProduction = p.productionQueues.vehicle.filter(q => q.typeName === harvesterType).length;
     if (harvesters.length + inProduction < targetCount) {
       const hasFactory = p.ownedBuildingTypes.has(`${this.housePrefix}Factory`) ||

@@ -159,6 +159,23 @@ export function parseRules(text: string): GameRules {
     buildings.set(name, parseBuildingDef(name, section));
   }
 
+  // Fix typos in rules.txt: normalize secondary/primary building references to match canonical names
+  // e.g. "ATSMWindtrap" → "ATSmWindtrap" (original rules.txt has inconsistent casing)
+  const buildingNameSet = new Set(buildings.keys());
+  const lowerToCanonical = new Map<string, string>();
+  for (const n of buildingNameSet) lowerToCanonical.set(n.toLowerCase(), n);
+  const fixRef = (ref: string) => lowerToCanonical.get(ref.toLowerCase()) ?? ref;
+  for (const def of buildings.values()) {
+    if (def.primaryBuilding) def.primaryBuilding = fixRef(def.primaryBuilding);
+    def.primaryBuildingAlts = def.primaryBuildingAlts.map(fixRef);
+    def.secondaryBuildings = def.secondaryBuildings.map(fixRef);
+  }
+  for (const def of units.values()) {
+    if (def.primaryBuilding) def.primaryBuilding = fixRef(def.primaryBuilding);
+    def.primaryBuildingAlts = def.primaryBuildingAlts.map(fixRef);
+    def.secondaryBuildings = def.secondaryBuildings.map(fixRef);
+  }
+
   // Parse turrets
   const turrets = new Map<string, TurretDef>();
   for (const name of turretTypeNames) {
@@ -221,7 +238,12 @@ function parseUnitDef(name: string, section: Section): UnitDef {
       case 'Score': def.score = parseNum(value); break;
       case 'TechLevel': def.techLevel = parseNum(value); break;
       case 'ViewRange': def.viewRange = parseNum(value.split(',')[0]); break;
-      case 'PrimaryBuilding': def.primaryBuilding = value.split(',')[0].trim(); break;
+      case 'PrimaryBuilding': {
+        const parts = value.split(',').map(s => s.trim()).filter(Boolean);
+        def.primaryBuilding = parts[0] ?? '';
+        def.primaryBuildingAlts = parts.slice(1);
+        break;
+      }
       case 'SecondaryBuilding': def.secondaryBuildings = parseList(value); break;
       case 'UnitGroup': def.unitGroup = value; break;
       case 'Terrain': def.terrain = parseList(value); break;

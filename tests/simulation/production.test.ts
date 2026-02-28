@@ -451,6 +451,278 @@ describe('ProductionSystem', () => {
     });
   });
 
+  describe('secondaryBuildings OR logic', () => {
+    it('allows building when player owns ANY secondary building alternative', () => {
+      // ATFactory has SecondaryBuilding=ATBarracks — player already owns ATBarracks
+      production.addPlayerBuilding(0, 'ATFactory');
+      expect(production.canBuild(0, 'ATFactory', true)).toBe(true);
+    });
+
+    it('blocks when player owns NONE of the secondary building alternatives', () => {
+      // Remove barracks entirely
+      production.removePlayerBuilding(0, 'ATBarracks');
+      expect(production.canBuild(0, 'ATFactory', true)).toBe(false);
+      const reason = production.getBuildBlockReason(0, 'ATFactory', true);
+      expect(reason?.reason).toBe('prereq');
+    });
+  });
+
+  describe('primaryBuildingAlts for units', () => {
+    // Use a separate rules text that has a unit with multi-faction PrimaryBuilding alternatives
+    const MULTI_FACTION_RULES = `
+[General]
+EasyBuildCost=50
+NormalBuildCost=100
+HardBuildCost=125
+EasyBuildTime=75
+NormalBuildTime=100
+HardBuildTime=125
+
+[HouseTypes]
+Atreides
+Harkonnen
+Ordos
+
+[TerrainTypes]
+Sand
+Rock
+
+[ArmourTypes]
+None
+Building
+
+[UnitTypes]
+Harvester
+
+[BuildingTypes]
+ATConYard
+ATFactory
+HKFactory
+ORFactory
+
+[Harvester]
+Cost=1000
+BuildTime=500
+Health=800
+TechLevel=2
+PrimaryBuilding=HKFactory,ATFactory,ORFactory
+
+[ATConYard]
+House=Atreides
+Cost=5000
+BuildTime=1000
+Health=3000
+TechLevel=1
+
+[ATFactory]
+House=Atreides
+Cost=600
+BuildTime=300
+Health=2000
+TechLevel=2
+PrimaryBuilding=ATConYard
+
+[HKFactory]
+House=Harkonnen
+Cost=600
+BuildTime=300
+Health=2000
+TechLevel=2
+PrimaryBuilding=ATConYard
+
+[ORFactory]
+House=Ordos
+Cost=600
+BuildTime=300
+Health=2000
+TechLevel=2
+PrimaryBuilding=ATConYard
+
+[TurretTypes]
+[BulletTypes]
+[WarheadTypes]
+`;
+
+    it('allows unit production with any alternative primaryBuilding', () => {
+      const altRules = parseRules(MULTI_FACTION_RULES);
+      const altHarvest = new MockHarvestSystem();
+      altHarvest.addSolaris(0, 10000);
+      const altProd = new ProductionSystem(altRules, altHarvest as any);
+      altProd.addPlayerBuilding(0, 'ATConYard');
+      altProd.addPlayerBuilding(0, 'ATFactory'); // Not HKFactory (the primary), but an alt
+
+      // Harvester has PrimaryBuilding=HKFactory,ATFactory,ORFactory
+      // Player owns ATFactory (an alt), should be buildable
+      expect(altProd.canBuild(0, 'Harvester', false)).toBe(true);
+    });
+
+    it('blocks unit when no alternative primaryBuilding is owned', () => {
+      const altRules = parseRules(MULTI_FACTION_RULES);
+      const altHarvest = new MockHarvestSystem();
+      altHarvest.addSolaris(0, 10000);
+      const altProd = new ProductionSystem(altRules, altHarvest as any);
+      altProd.addPlayerBuilding(0, 'ATConYard'); // Only ConYard, no factory
+
+      // Player doesn't own ANY of HKFactory, ATFactory, ORFactory
+      expect(altProd.canBuild(0, 'Harvester', false)).toBe(false);
+      const reason = altProd.getBuildBlockReason(0, 'Harvester', false);
+      expect(reason?.reason).toBe('prereq');
+      expect(reason?.detail).toBe('Factory');
+    });
+  });
+
+  describe('case-insensitive building reference normalization', () => {
+    const CASE_MISMATCH_RULES = `
+[General]
+EasyBuildCost=50
+NormalBuildCost=100
+HardBuildCost=125
+EasyBuildTime=75
+NormalBuildTime=100
+HardBuildTime=125
+
+[HouseTypes]
+Atreides
+
+[TerrainTypes]
+Sand
+Rock
+
+[ArmourTypes]
+None
+Building
+
+[UnitTypes]
+ATScout
+
+[BuildingTypes]
+ATConYard
+ATSmWindtrap
+ATBarracks
+
+[ATScout]
+House=Atreides
+Cost=50
+BuildTime=100
+Health=80
+Infantry=true
+TechLevel=1
+PrimaryBuilding=ATBarracks
+
+[ATConYard]
+House=Atreides
+Cost=5000
+BuildTime=1000
+Health=3000
+TechLevel=1
+
+[ATSmWindtrap]
+House=Atreides
+Cost=300
+BuildTime=200
+Health=1000
+TechLevel=1
+PrimaryBuilding=ATConYard
+
+[ATBarracks]
+House=Atreides
+Cost=300
+BuildTime=200
+Health=1500
+TechLevel=1
+PrimaryBuilding=ATConYard
+SecondaryBuilding=ATSMWindtrap
+
+[TurretTypes]
+[BulletTypes]
+[WarheadTypes]
+`;
+
+    it('normalizes mismatched case in SecondaryBuilding references', () => {
+      // ATBarracks has SecondaryBuilding=ATSMWindtrap but the building is named ATSmWindtrap
+      const caseRules = parseRules(CASE_MISMATCH_RULES);
+
+      // After normalization, the secondaryBuildings ref should match the canonical name
+      const barracksDef = caseRules.buildings.get('ATBarracks')!;
+      expect(barracksDef.secondaryBuildings).toContain('ATSmWindtrap');
+      expect(barracksDef.secondaryBuildings).not.toContain('ATSMWindtrap');
+    });
+
+    it('allows building when secondary ref is case-normalized', () => {
+      const caseRules = parseRules(CASE_MISMATCH_RULES);
+      const caseHarvest = new MockHarvestSystem();
+      caseHarvest.addSolaris(0, 10000);
+      const caseProd = new ProductionSystem(caseRules, caseHarvest as any);
+      caseProd.addPlayerBuilding(0, 'ATConYard');
+      caseProd.addPlayerBuilding(0, 'ATSmWindtrap');
+
+      // Should succeed because case-normalization maps ATSMWindtrap → ATSmWindtrap
+      expect(caseProd.canBuild(0, 'ATBarracks', true)).toBe(true);
+    });
+
+    it('normalizes unit primaryBuildingAlts case too', () => {
+      // Rules where a unit has a case-mismatched alternative in PrimaryBuilding
+      const UNIT_ALT_CASE_RULES = `
+[General]
+EasyBuildCost=50
+NormalBuildCost=100
+HardBuildCost=125
+EasyBuildTime=75
+NormalBuildTime=100
+HardBuildTime=125
+
+[HouseTypes]
+Atreides
+
+[TerrainTypes]
+Sand
+Rock
+
+[ArmourTypes]
+None
+Building
+
+[UnitTypes]
+Harvester
+
+[BuildingTypes]
+ATConYard
+ATFactory
+
+[Harvester]
+Cost=1000
+BuildTime=500
+Health=800
+TechLevel=2
+PrimaryBuilding=ATConYard,ATFACTORY
+
+[ATConYard]
+House=Atreides
+Cost=5000
+BuildTime=1000
+Health=3000
+TechLevel=1
+
+[ATFactory]
+House=Atreides
+Cost=600
+BuildTime=300
+Health=2000
+TechLevel=2
+PrimaryBuilding=ATConYard
+
+[TurretTypes]
+[BulletTypes]
+[WarheadTypes]
+`;
+      const rules = parseRules(UNIT_ALT_CASE_RULES);
+      const harvDef = rules.units.get('Harvester')!;
+      // ATFACTORY should be normalized to ATFactory
+      expect(harvDef.primaryBuildingAlts).toContain('ATFactory');
+      expect(harvDef.primaryBuildingAlts).not.toContain('ATFACTORY');
+    });
+  });
+
   describe('save/load', () => {
     it('round-trips production state', () => {
       production.setDifficulty(0, 'hard');
