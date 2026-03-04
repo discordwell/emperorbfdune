@@ -50,6 +50,7 @@ typedef struct {
     volatile LONG frameCount;  /* Frames elapsed in current phase */
     volatile LONG cursorX;     /* Estimated cursor X after reset */
     volatile LONG cursorY;     /* Estimated cursor Y after reset */
+    volatile LONG wakeRequested; /* Set to 1 by inputctl to request event signal */
 } InputSharedState;
 
 #endif /* DINPUT_IPC_H */

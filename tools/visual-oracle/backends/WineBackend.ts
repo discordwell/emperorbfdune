@@ -15,6 +15,10 @@ export type SessionOp =
   | { type: 'click'; gameX: number; gameY: number }
   | { type: 'verifiedclick'; gameX: number; gameY: number; waitMs?: number }
   | { type: 'key'; keys: string[] }
+  | { type: 'syskey'; macKeyCode: number }
+  | { type: 'wmkey'; vkCode: number }
+  | { type: 'wmclick'; gameX: number; gameY: number }
+  | { type: 'reactivate' }
   | { type: 'wait'; ms: number };
 
 /**
@@ -39,6 +43,7 @@ export class WineBackend implements OriginalGameController {
   private proc: ChildProcess | null = null;
   private windowId: number | null = null;
   private desktopName = 'Emperor';
+  private mountedVolumes: string[] = [];
 
   async boot(): Promise<void> {
     if (this.proc) {
@@ -77,6 +82,9 @@ export class WineBackend implements OriginalGameController {
     // Deploy DInput hook: copy Wine's real dinput.dll → dinput_real.dll,
     // then copy our proxy dinput.dll + inputctl.exe to the game directory.
     this.deployDInputHook();
+
+    // Mount CD ISOs so the game can read videos and satisfy SecuROM.
+    this.mountCDImages();
 
     const wineBinary = findWineBinary();
     const { width, height } = WINE_CONFIG.resolution;
@@ -302,6 +310,31 @@ export class WineBackend implements OriginalGameController {
           }
           break;
         }
+        case 'syskey':
+          // Send keyboard input via AppleScript (macOS key codes) — works during
+          // video playback and any non-DInput state. Bypasses DirectInput entirely.
+          console.log(`[Wine:session] SysKey macOS=${op.macKeyCode}`);
+          batchOpsStr.push(`syskey:${op.macKeyCode}`);
+          break;
+        case 'wmkey':
+          // Send keyboard input via PostMessage WM_KEYDOWN/WM_KEYUP.
+          // Bypasses DirectInput entirely. Works during Bink video playback
+          // when DInput polling is stopped. Uses Win32 VK_ codes.
+          console.log(`[Wine:session] WmKey VK=${op.vkCode}`);
+          batchOpsStr.push(`wmkey:${op.vkCode}`);
+          break;
+        case 'wmclick':
+          // Click via PostMessage WM_LBUTTONDOWN/WM_LBUTTONUP.
+          // Bypasses DirectInput entirely. Works during Bink video playback.
+          console.log(`[Wine:session] WmClick game (${op.gameX},${op.gameY})`);
+          batchOpsStr.push(`wmclick:${op.gameX};${op.gameY}`);
+          break;
+        case 'reactivate':
+          // Force a focus cycle (deactivate → reactivate) to make D3D/Metal
+          // re-present the current frame. Needed after exiting DDraw video mode.
+          console.log('[Wine:session] Reactivate (focus cycle)');
+          batchOpsStr.push('reactivate:0');
+          break;
         case 'verifiedclick': {
           // Click with screenshot-based verification + retry (up to 3 attempts)
           const waitMs = op.waitMs || 2000;
@@ -338,6 +371,7 @@ export class WineBackend implements OriginalGameController {
   async shutdown(): Promise<void> {
     console.log('[Wine] Shutting down...');
     await this.killWine();
+    this.unmountCDImages();
     this.proc = null;
     this.windowId = null;
     console.log('[Wine] Shut down');
@@ -391,6 +425,84 @@ export class WineBackend implements OriginalGameController {
     fs.copyFileSync(proxyDll, path.join(gameDir, 'dinput.dll'));
     fs.copyFileSync(inputctlExe, path.join(gameDir, 'inputctl.exe'));
     console.log('[Wine] Deployed DInput hook: dinput.dll + inputctl.exe → game directory');
+  }
+
+  /**
+   * Mount CD ISO images for video playback and SecuROM CD detection.
+   * Creates symlinks in Wine's dosdevices/ so the game sees them as D:, E:, etc.
+   * The game's movies directory is symlinked to CD1's INSTALL/DATA/MOVIES.
+   */
+  private mountCDImages(): void {
+    const isoMap: Array<{ iso: string; letter: string }> = [
+      { iso: 'EMPEROR1.iso', letter: 'd' },
+      { iso: 'EMPEROR2.iso', letter: 'e' },
+      { iso: 'EMPEROR3.iso', letter: 'f' },
+      { iso: 'EMPEROR4.iso', letter: 'g' },
+    ];
+
+    const dosdevices = path.join(WINE_CONFIG.prefix, 'dosdevices');
+
+    for (const { iso, letter } of isoMap) {
+      const isoPath = path.join(WINE_CONFIG.isosDir, iso);
+      if (!fs.existsSync(isoPath)) continue;
+
+      // Check if already mounted
+      const volumeName = iso.replace('.iso', '').toUpperCase();
+      const volumePath = `/Volumes/${volumeName}`;
+      if (!fs.existsSync(volumePath)) {
+        try {
+          execFileSync('hdiutil', ['attach', isoPath, '-nobrowse', '-readonly'], {
+            timeout: 30000,
+          });
+          this.mountedVolumes.push(volumePath);
+          console.log(`[Wine] Mounted ${iso} at ${volumePath}`);
+        } catch (err: any) {
+          console.warn(`[Wine] Warning: failed to mount ${iso}: ${err.message}`);
+          continue;
+        }
+      }
+
+      // Symlink drive letter in dosdevices
+      const driveLink = path.join(dosdevices, `${letter}:`);
+      try {
+        const current = fs.readlinkSync(driveLink);
+        if (current === volumePath) continue; // Already correct
+      } catch { /* symlink doesn't exist or isn't a symlink */ }
+
+      try {
+        fs.rmSync(driveLink, { force: true });
+        fs.symlinkSync(volumePath, driveLink);
+      } catch (err: any) {
+        console.warn(`[Wine] Warning: failed to create ${letter}: symlink: ${err.message}`);
+      }
+    }
+
+    // Symlink movies directory to CD1's INSTALL/DATA/MOVIES for video playback
+    const moviesDir = path.join(WINE_CONFIG.gameDir, 'DATA', 'movies');
+    const cd1Movies = '/Volumes/EMPEROR1/INSTALL/DATA/MOVIES';
+    if (fs.existsSync(cd1Movies)) {
+      try {
+        const stat = fs.lstatSync(moviesDir);
+        if (stat.isSymbolicLink()) {
+          const target = fs.readlinkSync(moviesDir);
+          if (target === cd1Movies) return; // Already correct
+        }
+        // Remove existing dir/symlink
+        fs.rmSync(moviesDir, { recursive: true, force: true });
+      } catch { /* doesn't exist */ }
+      fs.symlinkSync(cd1Movies, moviesDir);
+      console.log('[Wine] Linked movies → CD1 ISO');
+    }
+  }
+
+  private unmountCDImages(): void {
+    for (const vol of this.mountedVolumes) {
+      try {
+        execFileSync('hdiutil', ['detach', vol, '-force'], { timeout: 10000 });
+        console.log(`[Wine] Unmounted ${vol}`);
+      } catch { /* volume may already be unmounted */ }
+    }
+    this.mountedVolumes = [];
   }
 
   private async focusWindow(): Promise<void> {
@@ -541,7 +653,11 @@ function batchOps(
   if (opts.activate !== false) args.push('--activate');
   if (opts.restore !== false) args.push('--restore');
 
-  // Estimate timeout: 15s base + sum of waits + 5s per capture + warmup + verifiedclick budget
+  // Estimate timeout: base + per-op budgets.
+  // Wine activation takes ~15s (5 retries + D3D wait).
+  // Each capture may need 3 retries with display wake (~30s worst case).
+  // Each wineclick/winekey runs inputctl.exe (3s default timeout + Wine spawn overhead).
+  // Each syskey runs osascript (~2s).
   const captureCount = ops.filter(o => o.startsWith('capture:')).length;
   const waitSum = ops
     .filter(o => o.startsWith('wait:'))
@@ -549,15 +665,28 @@ function batchOps(
   const warmupBudget = ops
     .filter(o => o.startsWith('warmup:'))
     .reduce((sum, o) => sum + (parseInt(o.split(':')[1] || '60', 10) + 10) * 1000, 0);
-  // verifiedclick: up to 3 retries, each with waitMs + captures + click delays (~5s overhead)
   const verifiedClickBudget = ops
     .filter(o => o.startsWith('verifiedclick:'))
     .reduce((sum, o) => {
       const parts = o.split(':')[1]?.split(';') || [];
       const waitMs = parseInt(parts[2] || '2000', 10);
-      return sum + (waitMs + 5000) * 3; // 3 attempts
+      return sum + (waitMs + 5000) * 3;
     }, 0);
-  const timeout = 15_000 + captureCount * 5000 + waitSum + warmupBudget + verifiedClickBudget;
+  // inputctl ops: 10s each (3s default timeout + Wine spawn overhead + retries)
+  const inputOps = ops.filter(o => o.startsWith('wineclick:') || o.startsWith('winekey:')).length;
+  const inputBudget = inputOps * 10_000;
+  // syskey ops: 3s each (osascript spawn + execution)
+  const syskeyOps = ops.filter(o => o.startsWith('syskey:')).length;
+  const syskeyBudget = syskeyOps * 3000;
+  // wmkey/wmclick ops: 10s each (Wine spawn + PostMessage)
+  const wmOps = ops.filter(o => o.startsWith('wmkey:') || o.startsWith('wmclick:')).length;
+  const wmBudget = wmOps * 10_000;
+  // reactivate ops: 5s each (focus away + re-activate + settle)
+  const reactivateOps = ops.filter(o => o.startsWith('reactivate:')).length;
+  const reactivateBudget = reactivateOps * 10_000;
+  // Capture retries: each capture may need 3 retries with display wake (~30s each)
+  const captureRetryBudget = captureCount * 60_000;
+  const timeout = 30_000 + captureRetryBudget + waitSum + warmupBudget + verifiedClickBudget + inputBudget + syskeyBudget + wmBudget + reactivateBudget;
 
   const result = execFileSync(CAPTURE_TOOL, args, { timeout }).toString().trim();
   if (result) {

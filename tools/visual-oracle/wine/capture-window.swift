@@ -72,6 +72,34 @@ func parseStringArg(_ name: String) -> String? {
     return nil
 }
 
+/// Send a keyboard event via AppleScript System Events — the ONLY approach that
+/// works during all Wine states including Bink video playback.
+/// CGEvent (postToPid + cghidEventTap) freezes D3D surface — DON'T USE.
+/// AppleScript sends through: System Events → IOKit HID → macdrv → DirectInput.
+/// Uses macOS key codes (not DIK codes).
+func sendSystemKey(macKeyCode: Int) {
+    let task = Process()
+    task.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+    task.arguments = ["-e", """
+        tell application "System Events"
+            key code \(macKeyCode)
+        end tell
+    """]
+    task.standardOutput = FileHandle.nullDevice
+    task.standardError = FileHandle.nullDevice
+    do {
+        try task.run()
+        task.waitUntilExit()
+        if task.terminationStatus == 0 {
+            print("syskey: macOS keyCode \(macKeyCode) sent via AppleScript")
+        } else {
+            fputs("Warning: AppleScript key code \(macKeyCode) exited with status \(task.terminationStatus)\n", stderr)
+        }
+    } catch {
+        fputs("Warning: AppleScript key send failed: \(error)\n", stderr)
+    }
+}
+
 /// Send an input command via Wine's inputctl.exe (DInput hook shared memory IPC).
 /// Injects synthetic DirectInput state directly into GAME.EXE's input polling —
 /// the only approach that works with DirectInput 7 EXCLUSIVE mode.
@@ -81,23 +109,31 @@ func parseStringArg(_ name: String) -> String? {
 func sendInputCtl(command: String, args cmdArgs: [String], wineBin: String, winePrefix: String, inputctlExe: String) {
     let task = Process()
     task.executableURL = URL(fileURLWithPath: wineBin)
-    // Launch inside the Emperor desktop (same desktop = same WINEPREFIX session)
-    task.arguments = ["explorer", "/desktop=Emperor,1024x768", inputctlExe, command] + cmdArgs
+    // Run inputctl.exe directly (no explorer wrapper needed — it's a console app
+    // that only uses named shared memory for IPC with the DInput hook).
+    // The explorer wrapper swallowed stdout and exit codes, making debugging impossible.
+    task.arguments = [inputctlExe, command] + cmdArgs
     task.environment = ProcessInfo.processInfo.environment.merging(
-        ["WINEPREFIX": winePrefix], uniquingKeysWith: { _, new in new }
+        ["WINEPREFIX": winePrefix,
+         // Suppress Wine debug noise from the inputctl process
+         "WINEDEBUG": "-all"],
+        uniquingKeysWith: { _, new in new }
     )
-    task.standardError = FileHandle.nullDevice
-    let pipe = Pipe()
-    task.standardOutput = pipe
+    let outPipe = Pipe()
+    let errPipe = Pipe()
+    task.standardOutput = outPipe
+    task.standardError = errPipe
 
     do {
         try task.run()
         task.waitUntilExit()
-        let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if task.terminationStatus == 0 {
-            print("inputctl \(command) \(cmdArgs.joined(separator: " ")) — OK (\(output))")
+        let stdoutStr = String(data: outPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let stderrStr = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let exitCode = task.terminationStatus
+        if exitCode == 0 {
+            print("inputctl \(command) \(cmdArgs.joined(separator: " ")) — OK (\(stdoutStr))")
         } else {
-            fputs("Warning: inputctl \(command) exited with status \(task.terminationStatus): \(output)\n", stderr)
+            fputs("Warning: inputctl \(command) exit=\(exitCode) stdout=[\(stdoutStr)] stderr=[\(stderrStr)]\n", stderr)
         }
     } catch {
         fputs("Warning: inputctl failed: \(error)\n", stderr)
@@ -170,8 +206,49 @@ func captureFrame(display: SCDisplay, wineApp: SCRunningApplication,
     return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
 }
 
+/// Ensure the display is awake. ScreenCaptureKit returns 0 displays when the
+/// display is asleep, making capture impossible. This uses caffeinate + IOKit
+/// to wake the display and waits for it to become available.
+func ensureDisplayAwake() async throws {
+    // First check if already awake
+    var displayIDs = [CGDirectDisplayID](repeating: 0, count: 10)
+    var displayCount: UInt32 = 0
+    CGGetActiveDisplayList(10, &displayIDs, &displayCount)
+    if displayCount > 0 { return }
+
+    fputs("Display is asleep — waking...\n", stderr)
+
+    // Multiple wake methods for reliability
+    // 1. caffeinate -u (user activity assertion)
+    let wake1 = Process()
+    wake1.executableURL = URL(fileURLWithPath: "/usr/bin/caffeinate")
+    wake1.arguments = ["-u", "-t", "10"]
+    try? wake1.run()
+
+    // 2. AppleScript key event (triggers IOKit HID wakeup)
+    let wake2 = Process()
+    wake2.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+    wake2.arguments = ["-e", "tell application \"System Events\" to key code 123"]
+    try? wake2.run()
+    wake2.waitUntilExit()
+
+    // Wait up to 5s for display to become available
+    for attempt in 1...10 {
+        try await Task.sleep(nanoseconds: 500_000_000)
+        CGGetActiveDisplayList(10, &displayIDs, &displayCount)
+        if displayCount > 0 {
+            fputs("Display woke after \(attempt * 500)ms\n", stderr)
+            return
+        }
+    }
+    fputs("WARNING: Display still asleep after 5s wake attempts\n", stderr)
+}
+
 @MainActor
 func run() async throws {
+    // Ensure display is awake before any ScreenCaptureKit operations
+    try await ensureDisplayAwake()
+
     let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
 
     // --find-wine: list all wine windows
@@ -215,9 +292,25 @@ func run() async throws {
             exit(1)
         }
 
-        guard let display = content.displays.first else {
-            fputs("Error: no display found\n", stderr)
-            exit(1)
+        // Display may be asleep — try to wake it
+        var display: SCDisplay
+        if let d = content.displays.first {
+            display = d
+        } else {
+            fputs("No display found — attempting wake...\n", stderr)
+            // Wake display via caffeinate assertion
+            let wake = Process()
+            wake.executableURL = URL(fileURLWithPath: "/usr/bin/caffeinate")
+            wake.arguments = ["-u", "-t", "5"]
+            try? wake.run()
+            try await Task.sleep(nanoseconds: 2_000_000_000)
+            // Re-query
+            let retryContent = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+            guard let d = retryContent.displays.first else {
+                fputs("Error: no display found even after wake attempt\n", stderr)
+                exit(1)
+            }
+            display = d
         }
 
         // Parse Wine config for wineclick/winekey ops
@@ -273,12 +366,40 @@ func run() async throws {
             switch opType {
             case "capture":
                 captureCount += 1
-                let image = try await captureFrame(
-                    display: freshDisplay, wineApp: wineApp,
-                    window: freshWindow, applications: freshApps
-                )
-                print("Captured \(captureCount)/\(totalCaptures): \(image.width)x\(image.height)")
-                try savePNG(image, to: opArg)
+                // Retry captures up to 3 times — ScreenCaptureKit can transiently
+                // fail with -3811 after display state changes or process focus shifts
+                // (e.g., osascript subprocess for syskey steals focus briefly).
+                var captureImage: CGImage? = nil
+                for captureAttempt in 1...3 {
+                    do {
+                        // Re-query display state if this is a retry
+                        if captureAttempt > 1 {
+                            try await ensureDisplayAwake()
+                            let (w, d, a) = try await refreshState()
+                            freshWindow = w
+                            freshDisplay = d
+                            freshApps = a
+                            // Re-activate Wine
+                            _ = try await activateWine(wineApp: wineApp)
+                        }
+                        captureImage = try await captureFrame(
+                            display: freshDisplay, wineApp: wineApp,
+                            window: freshWindow, applications: freshApps
+                        )
+                        break
+                    } catch {
+                        fputs("Capture attempt \(captureAttempt)/3 failed: \(error)\n", stderr)
+                        if captureAttempt < 3 {
+                            try await Task.sleep(nanoseconds: 2_000_000_000)
+                        } else {
+                            throw error
+                        }
+                    }
+                }
+                if let image = captureImage {
+                    print("Captured \(captureCount)/\(totalCaptures): \(image.width)x\(image.height)")
+                    try savePNG(image, to: opArg)
+                }
 
             case "winekey":
                 // Send keyboard input via DInput hook's shared memory IPC.
@@ -298,6 +419,81 @@ func run() async throws {
                 } else {
                     fputs("Warning: invalid winekey code '\(opArg)', expected integer\n", stderr)
                 }
+
+            case "syskey":
+                // Send a keyboard event via CGEvent — works during video playback
+                // and any non-DInput state. Uses macOS key codes (not DIK codes).
+                // Format: syskey:<macKeyCode> (e.g., syskey:53 for Escape)
+                if let macKeyCode = Int(opArg) {
+                    sendSystemKey(macKeyCode: macKeyCode)
+                    // Brief settle time for the event to be processed
+                    try await Task.sleep(nanoseconds: 200_000_000) // 200ms
+                } else {
+                    fputs("Warning: invalid syskey code '\(opArg)', expected integer\n", stderr)
+                }
+
+            case "wmkey":
+                // Send a keyboard event via PostMessage WM_KEYDOWN/WM_KEYUP.
+                // This bypasses DirectInput entirely and works during Bink video
+                // playback when DInput polling is stopped.
+                // Uses Win32 VK_ codes: VK_ESCAPE=27, VK_RETURN=13, VK_SPACE=32
+                // Format: wmkey:<vkCode> (e.g., wmkey:27 for Escape)
+                if let vkCode = Int(opArg) {
+                    guard !inputctlExe.isEmpty else {
+                        fputs("Warning: wmkey requires --inputctl-exe\n", stderr)
+                        break
+                    }
+                    print("wmkey: VK=\(vkCode) via PostMessage")
+                    sendInputCtl(command: "wmkey", args: ["\(vkCode)"],
+                                 wineBin: wineBin, winePrefix: winePrefix, inputctlExe: inputctlExe)
+                    try await Task.sleep(nanoseconds: 200_000_000) // 200ms
+                } else {
+                    fputs("Warning: invalid wmkey code '\(opArg)', expected integer\n", stderr)
+                }
+
+            case "wmclick":
+                // Click via PostMessage WM_LBUTTONDOWN/WM_LBUTTONUP.
+                // Bypasses DirectInput — works during Bink video playback.
+                // Uses game-space coordinates.
+                // Format: wmclick:gameX;gameY
+                let wmcParts = opArg.split(separator: ";")
+                if wmcParts.count == 2, let gx = Int(wmcParts[0]), let gy = Int(wmcParts[1]) {
+                    guard !inputctlExe.isEmpty else {
+                        fputs("Warning: wmclick requires --inputctl-exe\n", stderr)
+                        break
+                    }
+                    print("wmclick: game (\(gx),\(gy)) via PostMessage")
+                    sendInputCtl(command: "wmclick", args: ["\(gx)", "\(gy)"],
+                                 wineBin: wineBin, winePrefix: winePrefix, inputctlExe: inputctlExe)
+                    try await Task.sleep(nanoseconds: 300_000_000) // 300ms
+                } else {
+                    fputs("Warning: invalid wmclick coords '\(opArg)', expected gameX;gameY\n", stderr)
+                }
+
+            case "reactivate":
+                // Force a focus cycle: deactivate Wine → brief pause → reactivate.
+                // This forces the D3D/Metal compositor to re-present the current frame,
+                // which is necessary after exiting Bink video playback (DDraw mode)
+                // back to D3D rendering within a single session.
+                print("Reactivating Wine (focus cycle)...")
+                // Focus Terminal briefly to trigger Wine losing foreground status
+                if let terminalApp = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Terminal").first {
+                    terminalApp.activate(options: [])
+                } else if let finderApp = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.finder").first {
+                    finderApp.activate(options: [])
+                }
+                // Wait long enough for macOS to register the focus change and Wine
+                // to process the deactivation (D3D display mode may revert to desktop)
+                try await Task.sleep(nanoseconds: 1_500_000_000) // 1.5s away
+                // Re-activate Wine — this triggers D3D to re-present
+                _ = try await activateWine(wineApp: wineApp)
+                // Re-query state (display mode may have changed during deactivation)
+                let (reactWindow, reactDisplay, reactApps) = try await refreshState()
+                freshWindow = reactWindow
+                freshDisplay = reactDisplay
+                freshApps = reactApps
+                // Wait for D3D to fully settle after re-activation
+                try await Task.sleep(nanoseconds: 3_000_000_000) // 3s settle
 
             case "wineclick":
                 // Click via DInput hook's shared memory IPC.

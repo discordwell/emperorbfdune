@@ -36,8 +36,11 @@ playwright-report/
 test-results/
 screenshots/
 
-# Visual Oracle VM disk images
+# Visual Oracle VM disk images, ISOs, and download metadata
 *.qcow2
+*.iso
+*.aria2
+tools/visual-oracle/vm/dgvoodoo2/
 
 # Visual Oracle Wine prefix (500MB+), compiled tools, and Windows binaries
 tools/visual-oracle/wine/prefix/
