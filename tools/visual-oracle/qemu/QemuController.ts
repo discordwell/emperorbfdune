@@ -174,6 +174,64 @@ export class QemuController {
   }
 
   /**
+   * Move the mouse to absolute screen coordinates via usb-tablet device.
+   * Coordinates are in VM display pixels (e.g. 0-1023 for 1024px wide).
+   * QMP input-send-event uses 0-32767 range for absolute positioning.
+   */
+  async mouseMove(x: number, y: number): Promise<void> {
+    const res = QEMU_CONFIG.resolution;
+    const absX = Math.round((x / res.width) * 32767);
+    const absY = Math.round((y / res.height) * 32767);
+    await this.qmpCommand('input-send-event', {
+      events: [
+        { type: 'abs', data: { axis: 'x', value: absX } },
+        { type: 'abs', data: { axis: 'y', value: absY } },
+      ],
+    });
+  }
+
+  /**
+   * Click at absolute screen coordinates.
+   * Moves the mouse, presses button, waits briefly, releases.
+   * @param x - X position in VM display pixels
+   * @param y - Y position in VM display pixels
+   * @param button - 'left' | 'right' | 'middle'. Default: 'left'
+   */
+  async mouseClick(x: number, y: number, button: 'left' | 'right' | 'middle' = 'left'): Promise<void> {
+    const res = QEMU_CONFIG.resolution;
+    const absX = Math.round((x / res.width) * 32767);
+    const absY = Math.round((y / res.height) * 32767);
+
+    // Move + press in one event batch
+    await this.qmpCommand('input-send-event', {
+      events: [
+        { type: 'abs', data: { axis: 'x', value: absX } },
+        { type: 'abs', data: { axis: 'y', value: absY } },
+        { type: 'btn', data: { button, down: true } },
+      ],
+    });
+
+    await sleep(80);
+
+    // Release
+    await this.qmpCommand('input-send-event', {
+      events: [
+        { type: 'btn', data: { button, down: false } },
+      ],
+    });
+  }
+
+  /**
+   * Load a VM snapshot (created with `savevm` in QEMU monitor).
+   * Uses human-monitor-command since loadvm is an HMP command, not native QMP.
+   */
+  async loadSnapshot(name: string): Promise<void> {
+    console.log(`[QEMU] Loading snapshot "${name}"...`);
+    await this.qmpCommand('human-monitor-command', { 'command-line': `loadvm ${name}` });
+    console.log(`[QEMU] Snapshot "${name}" loaded`);
+  }
+
+  /**
    * Capture the guest framebuffer as a PPM file, then convert to PNG.
    * Returns the PNG buffer.
    */
@@ -190,7 +248,7 @@ export class QemuController {
   }
 
   /**
-   * Execute a sequence of input steps (keys + waits) from a scenario definition.
+   * Execute a sequence of input steps (keys + waits + clicks) from a scenario definition.
    */
   async executeInputSequence(steps: InputStep[]): Promise<void> {
     for (const step of steps) {
@@ -201,6 +259,10 @@ export class QemuController {
         console.log(`[QEMU] Sending keys: ${step.keys.join('+')}${step.comment ? ` (${step.comment})` : ''}`);
         await this.sendKey(step.keys);
         await sleep(200); // small delay between keypresses
+      } else if (step.action === 'click' && step.x !== undefined && step.y !== undefined) {
+        console.log(`[QEMU] Clicking (${step.x}, ${step.y})${step.comment ? ` (${step.comment})` : ''}`);
+        await this.mouseClick(step.x, step.y);
+        await sleep(200);
       }
     }
   }

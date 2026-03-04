@@ -16,69 +16,12 @@ import type { Action } from '../actions/Action.js';
 import { VisionExtractor, type VisionExtractorConfig } from '../state/VisionExtractor.js';
 import { WineBackend, type SessionOp } from '../../backends/WineBackend.js';
 import type { HousePrefix } from '../brain/BuildOrders.js';
+import { SIDEBAR, BUILDING_ORDER, INFANTRY_ORDER, VEHICLE_ORDER } from './SidebarLayout.js';
 
 export interface WineOracleConfig {
   housePrefix: HousePrefix;
   apiKey?: string;
 }
-
-/**
- * Sidebar layout coordinates at 800x600 resolution.
- * The sidebar occupies x=600-800, starts at y=32 (below resource bar).
- */
-const SIDEBAR = {
-  // Tab buttons
-  tabs: {
-    buildings: { x: 625, y: 72 },
-    units: { x: 675, y: 72 },
-    infantry: { x: 725, y: 72 },
-    starport: { x: 775, y: 72 },
-  },
-  // Grid items: 2 columns, ~50px row height starting at y=124
-  gridItem: (index: number) => {
-    const row = Math.floor(index / 2);
-    const col = index % 2;
-    return {
-      x: col === 0 ? 651 : 749,
-      y: 124 + row * 50,
-    };
-  },
-} as const;
-
-/**
- * Sidebar production item ordering per tab.
- * These map building/unit type names to their grid position index in the sidebar.
- * Ordering matches the original game's sidebar layout (sorted by tech level, then role).
- */
-const BUILDING_ORDER: Record<HousePrefix, string[]> = {
-  AT: [
-    'ATSmWindtrap', 'ATWall', 'ATRefinery', 'ATBarracks', 'ATFactory',
-    'ATOutpost', 'ATRocketTurret', 'ATPillbox', 'ATHanger', 'ATHelipad',
-    'ATStarport', 'ATPalace',
-  ],
-  HK: [
-    'HKSmWindtrap', 'HKWall', 'HKRefinery', 'HKBarracks', 'HKFactory',
-    'HKOutpost', 'HKFlameTurret', 'HKGunTurret', 'HKHanger', 'HKHelipad',
-    'HKStarport', 'HKPalace',
-  ],
-  OR: [
-    'ORSmWindtrap', 'ORWall', 'ORRefinery', 'ORBarracks', 'ORFactory',
-    'OROutpost', 'ORGasTurret', 'ORPopUpTurret', 'ORHanger',
-    'ORStarport', 'ORPalace',
-  ],
-};
-
-const INFANTRY_ORDER: Record<HousePrefix, string[]> = {
-  AT: ['ATScout', 'ATInfantry', 'ATSniper', 'ATMilitia', 'ATKindjal', 'ATEngineer'],
-  HK: ['HKScout', 'HKLightInf', 'HKTrooper', 'HKFlamer', 'HKEngineer'],
-  OR: ['ORScout', 'ORChemical', 'ORAATrooper', 'ORMortar', 'ORSaboteur', 'OREngineer'],
-};
-
-const VEHICLE_ORDER: Record<HousePrefix, string[]> = {
-  AT: ['ATTrike', 'Harvester', 'ATMongoose', 'ATOrni', 'ATADVCarryall'],
-  HK: ['HKBuzzsaw', 'Harvester', 'HKAssault', 'HKFlame', 'HKMissile', 'HKDevastator', 'HKGunship'],
-  OR: ['ORDustScout', 'Harvester', 'ORLaserTank', 'ORKobra', 'ORDeviator', 'OREITS'],
-};
 
 export class WineOracleAdapter implements GameAdapter {
   readonly name = 'wine';
@@ -230,7 +173,7 @@ export class WineOracleAdapter implements GameAdapter {
     // Click the item. Note: items not available (grayed out) will be silently ignored.
     // Items below the visible area would need scrolling — for now we handle up to ~10 items.
     const itemCoord = SIDEBAR.gridItem(itemIndex);
-    if (itemCoord.y > 550) {
+    if (itemCoord.y > SIDEBAR.maxVisibleY) {
       // Below visible sidebar area — skip
       console.log(`[WineAdapter] Item ${typeName} at index ${itemIndex} would be off-screen, skipping`);
       return [];

@@ -64,8 +64,12 @@ async function main() {
     // Lazy import to avoid requiring Wine dependencies when using remake
     const { WineOracleAdapter } = await import('./adapters/WineAdapter.js');
     adapter = new WineOracleAdapter({ housePrefix: house.prefix });
+  } else if (backend === 'qemu') {
+    // Lazy import to avoid requiring QEMU/pngjs dependencies when using remake
+    const { QemuOracleAdapter } = await import('./adapters/QemuAdapter.js');
+    adapter = new QemuOracleAdapter({ housePrefix: house.prefix });
   } else {
-    console.error(`Unknown backend: ${backend}. Use 'remake' or 'wine'.`);
+    console.error(`Unknown backend: ${backend}. Use 'remake', 'wine', or 'qemu'.`);
     process.exit(1);
   }
 
