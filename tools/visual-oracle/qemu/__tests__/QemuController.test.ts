@@ -138,8 +138,8 @@ describe('QemuController', () => {
       expect(moveCmd).toBeDefined();
       expect(moveCmd!.arguments).toEqual({
         events: [
-          { type: 'abs', data: { axis: 'x', value: Math.round((512 / 1024) * 32767) } },
-          { type: 'abs', data: { axis: 'y', value: Math.round((384 / 768) * 32767) } },
+          { type: 'abs', data: { axis: 'x', value: Math.round((512 / 800) * 32767) } },
+          { type: 'abs', data: { axis: 'y', value: Math.round((384 / 600) * 32767) } },
         ],
       });
     });
@@ -157,7 +157,7 @@ describe('QemuController', () => {
     it('maps max coordinates to 32767', async () => {
       await initController();
 
-      await controller.mouseMove(1024, 768);
+      await controller.mouseMove(800, 600);
       const cmd = sentCommands.find((c) => c.execute === 'input-send-event');
       const events = (cmd!.arguments as any).events;
       expect(events[0].data.value).toBe(32767);
@@ -166,35 +166,42 @@ describe('QemuController', () => {
   });
 
   describe('mouseClick', () => {
-    it('sends move + button down, then button up events', async () => {
+    it('sends tablet move then HMP mouse_button press and release', async () => {
       await initController();
 
       await controller.mouseClick(100, 200);
 
-      const inputCmds = sentCommands.filter((c) => c.execute === 'input-send-event');
-      expect(inputCmds.length).toBe(2);
+      // Should send: input-send-event (move), then two human-monitor-commands (press + release)
+      const moveCmd = sentCommands.find((c) => c.execute === 'input-send-event');
+      expect(moveCmd).toBeDefined();
+      const moveEvents = (moveCmd!.arguments as any).events;
+      expect(moveEvents).toHaveLength(2);
+      expect(moveEvents[0]).toEqual({ type: 'abs', data: { axis: 'x', value: Math.round((100 / 800) * 32767) } });
+      expect(moveEvents[1]).toEqual({ type: 'abs', data: { axis: 'y', value: Math.round((200 / 600) * 32767) } });
 
-      // First: move + press
-      const pressEvents = (inputCmds[0].arguments as any).events;
-      expect(pressEvents).toHaveLength(3);
-      expect(pressEvents[0]).toEqual({ type: 'abs', data: { axis: 'x', value: Math.round((100 / 1024) * 32767) } });
-      expect(pressEvents[1]).toEqual({ type: 'abs', data: { axis: 'y', value: Math.round((200 / 768) * 32767) } });
-      expect(pressEvents[2]).toEqual({ type: 'btn', data: { button: 'left', down: true } });
-
-      // Second: release
-      const releaseEvents = (inputCmds[1].arguments as any).events;
-      expect(releaseEvents).toHaveLength(1);
-      expect(releaseEvents[0]).toEqual({ type: 'btn', data: { button: 'left', down: false } });
+      const hmpCmds = sentCommands.filter((c) => c.execute === 'human-monitor-command');
+      expect(hmpCmds.length).toBe(2);
+      expect(hmpCmds[0].arguments).toEqual({ 'command-line': 'mouse_button 1' });
+      expect(hmpCmds[1].arguments).toEqual({ 'command-line': 'mouse_button 0' });
     });
 
-    it('supports right-click', async () => {
+    it('supports right-click with correct bitmask', async () => {
       await initController();
 
       await controller.mouseClick(400, 300, 'right');
 
-      const inputCmds = sentCommands.filter((c) => c.execute === 'input-send-event');
-      const pressEvents = (inputCmds[0].arguments as any).events;
-      expect(pressEvents[2]).toEqual({ type: 'btn', data: { button: 'right', down: true } });
+      const hmpCmds = sentCommands.filter((c) => c.execute === 'human-monitor-command');
+      expect(hmpCmds[0].arguments).toEqual({ 'command-line': 'mouse_button 4' });
+      expect(hmpCmds[1].arguments).toEqual({ 'command-line': 'mouse_button 0' });
+    });
+
+    it('supports middle-click with correct bitmask', async () => {
+      await initController();
+
+      await controller.mouseClick(400, 300, 'middle');
+
+      const hmpCmds = sentCommands.filter((c) => c.execute === 'human-monitor-command');
+      expect(hmpCmds[0].arguments).toEqual({ 'command-line': 'mouse_button 2' });
     });
   });
 
@@ -220,9 +227,11 @@ describe('QemuController', () => {
         { action: 'click', x: 512, y: 400, comment: 'click Single Player' },
       ]);
 
+      // mouseClick sends: 1 input-send-event (move) + 2 human-monitor-commands (press + release)
       const inputCmds = sentCommands.filter((c) => c.execute === 'input-send-event');
-      // mouseClick sends 2 input-send-event calls (press + release)
-      expect(inputCmds.length).toBe(2);
+      expect(inputCmds.length).toBe(1);
+      const hmpCmds = sentCommands.filter((c) => c.execute === 'human-monitor-command');
+      expect(hmpCmds.length).toBe(2);
     });
 
     it('handles mixed key, wait, and click steps', async () => {
@@ -237,8 +246,11 @@ describe('QemuController', () => {
       const keyCmd = sentCommands.find((c) => c.execute === 'send-key');
       expect(keyCmd).toBeDefined();
 
+      // Click produces 1 move + 2 HMP commands
       const inputCmds = sentCommands.filter((c) => c.execute === 'input-send-event');
-      expect(inputCmds.length).toBe(2); // press + release from click
+      expect(inputCmds.length).toBe(1);
+      const hmpCmds = sentCommands.filter((c) => c.execute === 'human-monitor-command');
+      expect(hmpCmds.length).toBe(2);
     });
   });
 
@@ -249,11 +261,11 @@ describe('QemuController', () => {
       // Click at (400, 300) with 800x600 framebuffer
       await controller.mouseClick(400, 300, 'left', { width: 800, height: 600 });
 
-      const inputCmds = sentCommands.filter((c) => c.execute === 'input-send-event');
-      const pressEvents = (inputCmds[0].arguments as any).events;
+      const moveCmd = sentCommands.find((c) => c.execute === 'input-send-event');
+      const moveEvents = (moveCmd!.arguments as any).events;
       // 400/800 * 32767 = 16383 (center of screen)
-      expect(pressEvents[0]).toEqual({ type: 'abs', data: { axis: 'x', value: Math.round((400 / 800) * 32767) } });
-      expect(pressEvents[1]).toEqual({ type: 'abs', data: { axis: 'y', value: Math.round((300 / 600) * 32767) } });
+      expect(moveEvents[0]).toEqual({ type: 'abs', data: { axis: 'x', value: Math.round((400 / 800) * 32767) } });
+      expect(moveEvents[1]).toEqual({ type: 'abs', data: { axis: 'y', value: Math.round((300 / 600) * 32767) } });
     });
 
     it('maps sidebar coordinates correctly at 800x600', async () => {
@@ -262,12 +274,12 @@ describe('QemuController', () => {
       // Buildings tab button at game coords (625, 72)
       await controller.mouseClick(625, 72, 'left', { width: 800, height: 600 });
 
-      const inputCmds = sentCommands.filter((c) => c.execute === 'input-send-event');
-      const pressEvents = (inputCmds[0].arguments as any).events;
+      const moveCmd = sentCommands.find((c) => c.execute === 'input-send-event');
+      const moveEvents = (moveCmd!.arguments as any).events;
       // 625/800 * 32767 = 25599
-      expect(pressEvents[0].data.value).toBe(Math.round((625 / 800) * 32767));
+      expect(moveEvents[0].data.value).toBe(Math.round((625 / 800) * 32767));
       // 72/600 * 32767 = 3932
-      expect(pressEvents[1].data.value).toBe(Math.round((72 / 600) * 32767));
+      expect(moveEvents[1].data.value).toBe(Math.round((72 / 600) * 32767));
     });
   });
 

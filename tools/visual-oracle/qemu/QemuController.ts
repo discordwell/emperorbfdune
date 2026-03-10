@@ -34,19 +34,32 @@ export class QemuController {
       fs.unlinkSync(QEMU_CONFIG.qmpSocket);
     }
 
+    // Build port-forwarding string for user-mode networking
+    const hostfwds = (QEMU_CONFIG.portForwards ?? [])
+      .map((pf) => `hostfwd=tcp::${pf.host}-:${pf.guest}`)
+      .join(',');
+    const netdevArg = hostfwds
+      ? `user,id=net0,${hostfwds}`
+      : 'user,id=net0';
+
     const args = [
       '-hda', QEMU_CONFIG.diskImage,
       '-m', QEMU_CONFIG.memory,
       '-vga', QEMU_CONFIG.display,
-      '-display', 'none',  // headless — we use screendump
+      // VNC display backend — required for QMP input events to reach the guest.
+      // -display none breaks input: QMP send-key / input-send-event / mouse_button
+      // all fail to reach DirectInput inside the VM without a display backend.
+      '-vnc', QEMU_CONFIG.vncDisplay ?? ':0',
       '-qmp', `unix:${QEMU_CONFIG.qmpSocket},server,nowait`,
       '-accel', 'tcg',     // software emulation (ARM Mac)
       '-cpu', QEMU_CONFIG.cpu ?? 'Conroe',
       '-smp', '1',
       '-usb',
       '-device', 'usb-tablet', // absolute mouse positioning
-      '-audiodev', 'none,id=snd0',
-      '-device', 'AC97,audiodev=snd0', // DirectSound support (null output)
+      '-device', QEMU_CONFIG.audio ?? 'intel-hda',
+      ...(QEMU_CONFIG.audio === 'intel-hda' ? ['-device', 'hda-duplex'] : []),
+      '-netdev', netdevArg,
+      '-device', 'e1000,netdev=net0',
     ];
 
     if (QEMU_CONFIG.cdrom) {
@@ -233,7 +246,14 @@ export class QemuController {
 
   /**
    * Click at absolute screen coordinates.
-   * Moves the mouse, presses button, waits briefly, releases.
+   *
+   * Uses a two-device approach proven to work with DirectInput games:
+   * 1. Position cursor via usb-tablet (input-send-event abs) — generates WM_MOUSEMOVE
+   * 2. Click via HMP mouse_button command — generates WM_LBUTTONDOWN/UP
+   *
+   * input-send-event btn does NOT generate WM_LBUTTONDOWN that DirectInput
+   * NONEXCLUSIVE mode reads, so we must use the HMP mouse_button path instead.
+   *
    * @param x - X position in framebuffer pixels
    * @param y - Y position in framebuffer pixels
    * @param button - 'left' | 'right' | 'middle'. Default: 'left'
@@ -245,26 +265,20 @@ export class QemuController {
     button: 'left' | 'right' | 'middle' = 'left',
     fbSize?: { width: number; height: number },
   ): Promise<void> {
-    const res = fbSize ?? QEMU_CONFIG.resolution;
-    const absX = Math.round((x / res.width) * 32767);
-    const absY = Math.round((y / res.height) * 32767);
+    // 1. Move cursor to target position via usb-tablet absolute positioning
+    await this.mouseMove(x, y, fbSize);
+    await sleep(50);
 
-    // Move + press in one event batch
-    await this.qmpCommand('input-send-event', {
-      events: [
-        { type: 'abs', data: { axis: 'x', value: absX } },
-        { type: 'abs', data: { axis: 'y', value: absY } },
-        { type: 'btn', data: { button, down: true } },
-      ],
+    // 2. Click via HMP mouse_button (PS/2 path that generates WM_LBUTTONDOWN)
+    // mouse_button takes a bitmask: bit 0 = left, bit 1 = middle, bit 2 = right
+    const btnMask = button === 'left' ? 1 : button === 'middle' ? 2 : 4;
+    await this.qmpCommand('human-monitor-command', {
+      'command-line': `mouse_button ${btnMask}`,
     });
-
-    await sleep(80);
-
-    // Release
-    await this.qmpCommand('input-send-event', {
-      events: [
-        { type: 'btn', data: { button, down: false } },
-      ],
+    await sleep(100);
+    // Release all buttons
+    await this.qmpCommand('human-monitor-command', {
+      'command-line': 'mouse_button 0',
     });
   }
 
