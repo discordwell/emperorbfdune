@@ -22,13 +22,28 @@
 #define EVENT_GUID   "D6E7FC97-64F9-4d28-B52C-754EDF721C6F"
 #define MSG_BEEF     0xBEEFu
 #define PAYLOAD      "UIDATA,3DDATA,MAPS"
-#define GAME_DIR     "C:\\Westwood\\Emperor"
-#define GAME_EXE     "C:\\Westwood\\Emperor\\GAME.EXE"
 #define WAIT_TIMEOUT_MS 300000
 
 int main(int argc, char* argv[]) {
+    /* Auto-detect game directory from launcher's own location */
+    char gameDir[MAX_PATH];
+    GetModuleFileNameA(NULL, gameDir, MAX_PATH);
+    /* Strip the filename to get directory */
+    char* lastSlash = gameDir;
+    for (char* p = gameDir; *p; p++) {
+        if (*p == '\\' || *p == '/') lastSlash = p;
+    }
+    *lastSlash = '\0';
+
+    char gameExe[MAX_PATH];
+    lstrcpyA(gameExe, gameDir);
+    lstrcatA(gameExe, "\\GAME.EXE");
+
+    printf("Game dir: %s\n", gameDir);
+    printf("Game exe: %s\n", gameExe);
+
     /* Set working directory to the game directory */
-    SetCurrentDirectoryA(GAME_DIR);
+    SetCurrentDirectoryA(gameDir);
 
     /* Step 1: Create mutex so GAME.EXE detects the launcher is running */
     HANDLE hMutex = CreateMutexA(NULL, FALSE, MUTEX_GUID);
@@ -71,8 +86,9 @@ int main(int argc, char* argv[]) {
     si.cb = sizeof(si);
     ZeroMemory(&pi, sizeof(pi));
 
-    char cmdLine[] = GAME_EXE;
-    if (!CreateProcessA(NULL, cmdLine, NULL, NULL, TRUE, 0, NULL, GAME_DIR, &si, &pi)) {
+    char cmdLine[MAX_PATH];
+    lstrcpyA(cmdLine, gameExe);
+    if (!CreateProcessA(NULL, cmdLine, NULL, NULL, TRUE, 0, NULL, gameDir, &si, &pi)) {
         printf("ERROR: CreateProcess failed (%lu)\n", GetLastError());
         CloseHandle(hMapping);
         CloseHandle(hMutex);

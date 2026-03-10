@@ -31,6 +31,9 @@ async function main() {
       'interval-ms': { type: 'string', default: '2000' },
       url: { type: 'string', default: 'http://localhost:8080' },
       'skip-nav': { type: 'boolean', default: false },
+      // QEMU-specific options
+      'connect-existing': { type: 'boolean', default: false },
+      snapshot: { type: 'string' },
     },
     strict: true,
   });
@@ -67,7 +70,12 @@ async function main() {
   } else if (backend === 'qemu') {
     // Lazy import to avoid requiring QEMU/pngjs dependencies when using remake
     const { QemuOracleAdapter } = await import('./adapters/QemuAdapter.js');
-    adapter = new QemuOracleAdapter({ housePrefix: house.prefix });
+    adapter = new QemuOracleAdapter({
+      housePrefix: house.prefix,
+      connectExisting: values['connect-existing'],
+      snapshotName: values.snapshot,
+      skipNavigation: values['skip-nav'],
+    });
   } else {
     console.error(`Unknown backend: ${backend}. Use 'remake', 'wine', or 'qemu'.`);
     process.exit(1);

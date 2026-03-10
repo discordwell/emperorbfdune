@@ -7,7 +7,7 @@ export interface InputStep {
   action: 'key' | 'wait' | 'click';
   keys?: string[];
   ms?: number;
-  /** Game-space coordinates for click actions (1024x768 resolution). */
+  /** Game-space coordinates for click actions (at current framebuffer resolution). */
   x?: number;
   y?: number;
   comment?: string;

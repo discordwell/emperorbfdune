@@ -41,10 +41,12 @@ export class QemuController {
       '-display', 'none',  // headless — we use screendump
       '-qmp', `unix:${QEMU_CONFIG.qmpSocket},server,nowait`,
       '-accel', 'tcg',     // software emulation (ARM Mac)
-      '-cpu', 'pentium3',  // era-appropriate CPU
+      '-cpu', QEMU_CONFIG.cpu ?? 'Conroe',
       '-smp', '1',
       '-usb',
       '-device', 'usb-tablet', // absolute mouse positioning
+      '-audiodev', 'none,id=snd0',
+      '-device', 'AC97,audiodev=snd0', // DirectSound support (null output)
     ];
 
     if (QEMU_CONFIG.cdrom) {
@@ -174,12 +176,51 @@ export class QemuController {
   }
 
   /**
-   * Move the mouse to absolute screen coordinates via usb-tablet device.
-   * Coordinates are in VM display pixels (e.g. 0-1023 for 1024px wide).
-   * QMP input-send-event uses 0-32767 range for absolute positioning.
+   * Connect to an already-running QEMU VM via its QMP socket.
+   * Skips booting — just establishes the QMP connection.
    */
-  async mouseMove(x: number, y: number): Promise<void> {
-    const res = QEMU_CONFIG.resolution;
+  async connectToExisting(): Promise<void> {
+    if (!fs.existsSync(QEMU_CONFIG.qmpSocket)) {
+      throw new Error(
+        `QMP socket not found: ${QEMU_CONFIG.qmpSocket}\n` +
+        'Is the QEMU VM already running?'
+      );
+    }
+    await this.connectQmp();
+  }
+
+  /**
+   * Detect the current guest framebuffer size from a screendump.
+   * Returns {width, height} read from the PPM header.
+   */
+  async getFramebufferSize(): Promise<{ width: number; height: number }> {
+    const tmpPath = '/tmp/ebfd-fb-probe.ppm';
+    await this.qmpCommand('screendump', { filename: tmpPath });
+    await sleep(300);
+    const buf = fs.readFileSync(tmpPath);
+    fs.unlinkSync(tmpPath);
+    // Parse PPM header: "P6\n<width> <height>\n<maxval>\n..."
+    let offset = 0;
+    let line = readLine(buf, offset);
+    offset += line.length + 1;
+    // Skip comments
+    let dimLine = readLine(buf, offset);
+    while (dimLine.startsWith('#')) {
+      offset += dimLine.length + 1;
+      dimLine = readLine(buf, offset);
+    }
+    const [width, height] = dimLine.trim().split(/\s+/).map(Number);
+    return { width, height };
+  }
+
+  /**
+   * Move the mouse to absolute screen coordinates via usb-tablet device.
+   * Coordinates are in VM display pixels (e.g. 0-799 for 800px wide).
+   * QMP input-send-event uses 0-32767 range for absolute positioning.
+   * @param fbSize - Actual framebuffer dimensions. If omitted, uses QEMU_CONFIG.resolution.
+   */
+  async mouseMove(x: number, y: number, fbSize?: { width: number; height: number }): Promise<void> {
+    const res = fbSize ?? QEMU_CONFIG.resolution;
     const absX = Math.round((x / res.width) * 32767);
     const absY = Math.round((y / res.height) * 32767);
     await this.qmpCommand('input-send-event', {
@@ -193,12 +234,18 @@ export class QemuController {
   /**
    * Click at absolute screen coordinates.
    * Moves the mouse, presses button, waits briefly, releases.
-   * @param x - X position in VM display pixels
-   * @param y - Y position in VM display pixels
+   * @param x - X position in framebuffer pixels
+   * @param y - Y position in framebuffer pixels
    * @param button - 'left' | 'right' | 'middle'. Default: 'left'
+   * @param fbSize - Actual framebuffer dimensions. If omitted, uses QEMU_CONFIG.resolution.
    */
-  async mouseClick(x: number, y: number, button: 'left' | 'right' | 'middle' = 'left'): Promise<void> {
-    const res = QEMU_CONFIG.resolution;
+  async mouseClick(
+    x: number,
+    y: number,
+    button: 'left' | 'right' | 'middle' = 'left',
+    fbSize?: { width: number; height: number },
+  ): Promise<void> {
+    const res = fbSize ?? QEMU_CONFIG.resolution;
     const absX = Math.round((x / res.width) * 32767);
     const absY = Math.round((y / res.height) * 32767);
 
@@ -229,6 +276,41 @@ export class QemuController {
     console.log(`[QEMU] Loading snapshot "${name}"...`);
     await this.qmpCommand('human-monitor-command', { 'command-line': `loadvm ${name}` });
     console.log(`[QEMU] Snapshot "${name}" loaded`);
+  }
+
+  /**
+   * Save a VM snapshot for instant restore later.
+   * Uses human-monitor-command since savevm is an HMP command.
+   */
+  async saveSnapshot(name: string): Promise<void> {
+    console.log(`[QEMU] Saving snapshot "${name}"...`);
+    await this.qmpCommand('human-monitor-command', { 'command-line': `savevm ${name}` });
+    // savevm can take several seconds for large RAM
+    await sleep(3000);
+    console.log(`[QEMU] Snapshot "${name}" saved`);
+  }
+
+  /**
+   * Change the CD/DVD disc in the VM's IDE CD-ROM drive.
+   * @param isoPath - Absolute path to the ISO file on the host
+   */
+  async changeCD(isoPath: string): Promise<void> {
+    console.log(`[QEMU] Changing CD to: ${isoPath}`);
+    await this.qmpCommand('human-monitor-command', {
+      'command-line': `change ide1-cd0 ${isoPath}`,
+    });
+    console.log('[QEMU] CD changed');
+  }
+
+  /**
+   * Eject the CD/DVD from the VM's IDE CD-ROM drive.
+   */
+  async ejectCD(): Promise<void> {
+    console.log('[QEMU] Ejecting CD...');
+    await this.qmpCommand('human-monitor-command', {
+      'command-line': 'eject ide1-cd0',
+    });
+    console.log('[QEMU] CD ejected');
   }
 
   /**
@@ -332,6 +414,16 @@ export class QemuController {
     await this.qmpCommand('system_reset');
     // Wait for the guest to reboot and become responsive
     await this.waitForDesktop();
+  }
+
+  /**
+   * Close the QMP socket without shutting down the VM.
+   * Use when disconnecting from a VM you didn't boot.
+   */
+  disconnectQmp(): void {
+    this.qmpSocket?.destroy();
+    this.qmpSocket = null;
+    this.qmpReady = false;
   }
 
   async shutdown(): Promise<void> {

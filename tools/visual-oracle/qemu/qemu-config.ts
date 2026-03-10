@@ -6,10 +6,11 @@ const ROOT = path.resolve(__dirname, '..', '..', '..');
 
 export const QEMU_CONFIG = {
   binary: 'qemu-system-i386',
-  diskImage: path.join(ROOT, 'tools/visual-oracle/vm/emperor-win10.qcow2'),
+  diskImage: path.join(ROOT, 'tools/visual-oracle/vm/emperor-win7.qcow2'),
   memory: '4G',
   display: 'std',
-  qmpSocket: '/tmp/ebfd-visual-oracle-qmp.sock',
+  cpu: 'Conroe',  // Win7 needs SSE2 (Pentium3 lacks it); uses WineD3D + Mesa llvmpipe for DDraw
+  qmpSocket: '/tmp/ebfd-win7-qmp.sock',
   /** VM display resolution (what Windows desktop is set to). */
   resolution: { width: 1024, height: 768 },
   /** Emperor game resolution (the game runs at 800x600). */

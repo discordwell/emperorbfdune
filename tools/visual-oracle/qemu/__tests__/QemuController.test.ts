@@ -242,6 +242,62 @@ describe('QemuController', () => {
     });
   });
 
+  describe('mouseClick with explicit framebuffer size', () => {
+    it('uses provided fbSize instead of QEMU_CONFIG.resolution', async () => {
+      await initController();
+
+      // Click at (400, 300) with 800x600 framebuffer
+      await controller.mouseClick(400, 300, 'left', { width: 800, height: 600 });
+
+      const inputCmds = sentCommands.filter((c) => c.execute === 'input-send-event');
+      const pressEvents = (inputCmds[0].arguments as any).events;
+      // 400/800 * 32767 = 16383 (center of screen)
+      expect(pressEvents[0]).toEqual({ type: 'abs', data: { axis: 'x', value: Math.round((400 / 800) * 32767) } });
+      expect(pressEvents[1]).toEqual({ type: 'abs', data: { axis: 'y', value: Math.round((300 / 600) * 32767) } });
+    });
+
+    it('maps sidebar coordinates correctly at 800x600', async () => {
+      await initController();
+
+      // Buildings tab button at game coords (625, 72)
+      await controller.mouseClick(625, 72, 'left', { width: 800, height: 600 });
+
+      const inputCmds = sentCommands.filter((c) => c.execute === 'input-send-event');
+      const pressEvents = (inputCmds[0].arguments as any).events;
+      // 625/800 * 32767 = 25599
+      expect(pressEvents[0].data.value).toBe(Math.round((625 / 800) * 32767));
+      // 72/600 * 32767 = 3932
+      expect(pressEvents[1].data.value).toBe(Math.round((72 / 600) * 32767));
+    });
+  });
+
+  describe('mouseMove with explicit framebuffer size', () => {
+    it('uses provided fbSize', async () => {
+      await initController();
+
+      await controller.mouseMove(200, 150, { width: 800, height: 600 });
+
+      const cmd = sentCommands.find((c) => c.execute === 'input-send-event');
+      const events = (cmd!.arguments as any).events;
+      expect(events[0].data.value).toBe(Math.round((200 / 800) * 32767));
+      expect(events[1].data.value).toBe(Math.round((150 / 600) * 32767));
+    });
+  });
+
+  describe('connectToExisting', () => {
+    it('connects to QMP socket without booting', async () => {
+      const connectPromise = controller.connectToExisting();
+      await new Promise((r) => setTimeout(r, 20));
+      simulateQmpReady();
+      await connectPromise;
+
+      // Should be able to send commands now
+      await controller.sendKey(['ret']);
+      const keyCmd = sentCommands.find((c) => c.execute === 'send-key');
+      expect(keyCmd).toBeDefined();
+    });
+  });
+
   describe('sendKey', () => {
     it('sends qcode key events', async () => {
       await initController();

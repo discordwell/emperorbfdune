@@ -34,13 +34,25 @@ export class OracleLoop {
     this.running = true;
     this.iteration = 0;
 
-    // Initial state observation to reconstruct build phase
-    const initialState = await this.adapter.observe();
-    this.engine.reconstructFromState(initialState);
-    console.log(`[OracleLoop] Initial state: tick=${initialState.tick}, units=${initialState.player.units.length}, buildings=${initialState.player.buildings.length}`);
+    // Initial state observation with retry — don't let one API blip kill startup
+    let initialState: GameState | null = null;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        initialState = await this.adapter.observe();
+        break;
+      } catch (e) {
+        const delay = Math.min(2000 * Math.pow(2, attempt), 30000);
+        console.warn(`[OracleLoop] Initial observe failed (attempt ${attempt + 1}/5), retrying in ${delay}ms:`, e);
+        if (attempt === 4) throw e;
+        await sleep(delay);
+      }
+    }
+    this.engine.reconstructFromState(initialState!);
+    console.log(`[OracleLoop] Initial state: tick=${initialState!.tick}, units=${initialState!.player.units.length}, buildings=${initialState!.player.buildings.length}`);
 
     const intervalMs = this.config.intervalMs ?? 2000;
     const maxIterations = this.config.maxIterations ?? 0;
+    let consecutiveErrors = 0;
 
     while (this.running) {
       if (maxIterations > 0 && this.iteration >= maxIterations) {
@@ -50,9 +62,18 @@ export class OracleLoop {
 
       try {
         await this.tick();
+        consecutiveErrors = 0;
       } catch (e) {
-        console.error(`[OracleLoop] Error in iteration ${this.iteration}:`, e);
-        // Continue running — transient errors shouldn't kill the loop
+        consecutiveErrors++;
+        console.error(`[OracleLoop] Error in iteration ${this.iteration} (${consecutiveErrors} consecutive):`, e);
+        if (consecutiveErrors >= 10) {
+          console.error('[OracleLoop] 10 consecutive errors — stopping to avoid runaway API costs');
+          break;
+        }
+        // Exponential backoff on consecutive errors
+        const backoff = Math.min(intervalMs * Math.pow(2, consecutiveErrors - 1), 60000);
+        console.warn(`[OracleLoop] Backing off ${Math.round(backoff)}ms before next attempt`);
+        await sleep(backoff);
       }
 
       this.iteration++;

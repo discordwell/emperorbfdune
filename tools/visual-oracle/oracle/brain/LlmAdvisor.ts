@@ -6,6 +6,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import type { GameState } from '../state/GameState.js';
+import { retryWithBackoff } from '../utils/retry.js';
 
 export type StrategicObjective = 'expand' | 'defend' | 'attack' | 'tech_up' | 'harass';
 
@@ -85,11 +86,21 @@ Reply with ONLY valid JSON:
 }`,
     });
 
-    const response = await this.client.messages.create({
-      model: this.model,
-      max_tokens: 512,
-      messages: [{ role: 'user', content }],
-    });
+    let response;
+    try {
+      response = await retryWithBackoff(
+        () => this.client.messages.create({
+          model: this.model,
+          max_tokens: 512,
+          messages: [{ role: 'user', content }],
+        }),
+        3,
+        '[LlmAdvisor]',
+      );
+    } catch (e) {
+      console.warn('[LlmAdvisor] API call failed after retries:', e);
+      return this.defaultPlan();
+    }
 
     return this.parseResponse(response);
   }
@@ -168,3 +179,4 @@ Reply with ONLY valid JSON:
     };
   }
 }
+

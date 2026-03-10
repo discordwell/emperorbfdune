@@ -6,6 +6,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { GameState, PlayerState, UnitInfo, BuildingInfo, GameEvent } from './GameState.js';
 import type { HousePrefix } from '../brain/BuildOrders.js';
+import { retryWithBackoff } from '../utils/retry.js';
 
 export interface VisionExtractorConfig {
   apiKey?: string;
@@ -30,23 +31,26 @@ export class VisionExtractor {
    * Returns a partial GameState with lower confidence values.
    */
   async extract(screenshot: Buffer, tick: number): Promise<GameState> {
-    const response = await this.client.messages.create({
-      model: this.model,
-      max_tokens: 1024,
-      messages: [{
-        role: 'user',
-        content: [
-          {
-            type: 'image',
-            source: {
-              type: 'base64',
-              media_type: 'image/png',
-              data: screenshot.toString('base64'),
-            },
-          },
-          {
-            type: 'text',
-            text: `You are analyzing a screenshot from Emperor: Battle for Dune (2001 RTS game).
+    let response;
+    try {
+      response = await retryWithBackoff(
+        () => this.client.messages.create({
+          model: this.model,
+          max_tokens: 1024,
+          messages: [{
+            role: 'user',
+            content: [
+              {
+                type: 'image',
+                source: {
+                  type: 'base64',
+                  media_type: 'image/png',
+                  data: screenshot.toString('base64'),
+                },
+              },
+              {
+                type: 'text',
+                text: `You are analyzing a screenshot from Emperor: Battle for Dune (2001 RTS game).
 The player controls the ${this.housePrefix === 'AT' ? 'Atreides' : this.housePrefix === 'HK' ? 'Harkonnen' : 'Ordos'} faction.
 
 Analyze the screenshot and estimate the game state. Look at:
@@ -70,10 +74,17 @@ Reply with ONLY valid JSON:
   "mapPhase": "early" | "mid" | "late",
   "confidence": <0.3-0.8>
 }`,
-          },
-        ],
-      }],
-    });
+              },
+            ],
+          }],
+        }),
+        3,
+        '[VisionExtractor]',
+      );
+    } catch (e) {
+      console.warn(`[VisionExtractor] API call failed after retries:`, e);
+      return this.lastEstimate ?? this.emptyState(tick);
+    }
 
     const text = response.content[0].type === 'text' ? response.content[0].text : '';
     const jsonMatch = text.match(/\{[\s\S]*\}/);
@@ -184,6 +195,11 @@ Reply with ONLY valid JSON:
     return { tick, player, enemies, confidence, events };
   }
 
+  /** Return last known state (or empty) without making an API call. */
+  getFallbackState(tick: number): GameState {
+    return this.lastEstimate ?? this.emptyState(tick);
+  }
+
   private emptyState(tick: number): GameState {
     return {
       tick,
@@ -203,3 +219,4 @@ Reply with ONLY valid JSON:
     };
   }
 }
+
