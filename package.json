@@ -37,7 +37,10 @@
     "oracle:reference:runtime:strict": "TOK_REFERENCE_REQUIRE=1 TOK_REFERENCE_FULL=1 vitest run tests/campaign/tok/TokReferenceRuntimeOracle.test.ts",
     "visual-oracle": "tsx tools/visual-oracle/cli.ts",
     "visual-oracle:remake-only": "tsx tools/visual-oracle/cli.ts --skip-original",
-    "visual-oracle:capture": "tsx tools/visual-oracle/cli.ts --capture-only"
+    "visual-oracle:capture": "tsx tools/visual-oracle/cli.ts --capture-only",
+    "parity:source": "tsx scripts/report-source-parity.ts",
+    "parity:source:strict": "tsx scripts/report-source-parity.ts --strict",
+    "parity:tests": "vitest run tests/parity/"
   },
   "dependencies": {
     "bitecs": "^0.3.40",
