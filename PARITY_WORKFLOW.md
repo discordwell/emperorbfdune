@@ -31,7 +31,7 @@ Compares every field across all categories and outputs reports to `test-results/
 
 **Command:** `npm run parity:tests`
 
-~150+ tests in `tests/parity/` organized by system:
+345 tests in `tests/parity/` organized by system:
 
 | File | Codes | What it verifies |
 |------|-------|-----------------|

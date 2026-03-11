@@ -116,8 +116,7 @@ describe('WarheadTableParity — warhead x armor matrix', () => {
       }
     });
 
-    it('default warhead has 100% vs all types', () => {
-      // Verify Invulnerable armor gets 0% from most warheads
+    it('Invulnerable armor receives 0% from at least one warhead', () => {
       let hasInvulnerableZero = false;
       for (const [, wh] of rules.warheads) {
         if (wh.vs['Invulnerable'] === 0) {

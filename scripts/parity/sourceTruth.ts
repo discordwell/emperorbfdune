@@ -3,7 +3,7 @@
  * Reports match/mismatch/derived/default_applied for every field.
  */
 
-import { parseRawIni, rawNum, rawStr, rawBool, rawList, type RawIniData, type RawSection } from './rawIniParser';
+import { parseRawIni, rawNum, type RawIniData, type RawSection } from './rawIniParser';
 import { parseRules, type GameRules, type CrateDef } from '../../src/config/RulesParser';
 import { type UnitDef } from '../../src/config/UnitDefs';
 import { type BuildingDef } from '../../src/config/BuildingDefs';
@@ -35,7 +35,7 @@ export interface ParityReport {
 
 // Known intentional divergences between raw INI and parsed values
 const INTENTIONAL_DIVERGENCES: Record<string, string> = {
-  'General.DeviateDuration': 'Duplicate key in rules.txt (lines ~32 and ~87). Last-wins = 500, first = 400. Parser correctly uses last value.',
+  'General.DEVIATE_DURATION': 'Duplicate key in rules.txt (lines ~32 and ~87). Last-wins = 500, first = 400. Parser correctly uses last value.',
 };
 
 function compare(

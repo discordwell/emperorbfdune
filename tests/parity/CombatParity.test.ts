@@ -24,14 +24,13 @@ describe('CombatParity — damage pipeline formulas', () => {
       }
     });
 
-    it('known bullets have expected damage values', () => {
-      // Spot-check a few well-known weapons
-      const checks: [string, number][] = [];
+    it('bullet count is reasonable and all parsed as numbers', () => {
+      let count = 0;
       for (const [name, def] of rules.bullets) {
-        checks.push([name, def.damage]);
+        expect(typeof def.damage, `${name}.damage`).toBe('number');
+        count++;
       }
-      // Just verify they're all parsed as numbers
-      expect(checks.length).toBeGreaterThan(10);
+      expect(count).toBeGreaterThan(10);
     });
   });
 
@@ -143,10 +142,10 @@ describe('CombatParity — damage pipeline formulas', () => {
       expect(MIN + 0.0 * (1 - MIN)).toBeCloseTo(0.5, 6);
     });
 
-    it('Harkonnen are exempt from damage degradation', () => {
+    it('Harkonnen faction units exist (exempt from degradation per CombatSystem:852)', () => {
       // Harkonnen maintain full damage regardless of HP — verified in CombatSystem.ts:852
-      // This is a code-level check, not rules.txt, but documents the behavior
-      expect(true).toBe(true); // Structural assertion: HK faction check exists
+      const hkUnits = [...rules.units.values()].filter(u => u.house === 'Harkonnen');
+      expect(hkUnits.length, 'HK units should exist for exemption to apply').toBeGreaterThan(0);
     });
 
     it('DAMAGE_DEGRADATION_MIN is 0.5 (50% floor)', () => {
