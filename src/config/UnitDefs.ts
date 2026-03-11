@@ -18,9 +18,13 @@ export interface UnitDef {
   turnRate: number;
   size: number;
   armour: string;
+  armourTerrainBonus: number; // Damage reduction % when on specific terrain (e.g. 50 on InfRock)
+  armourTerrainType: string; // Terrain type for armour bonus
   score: number;
   techLevel: number;
   viewRange: number;
+  viewRangeExtended: number; // Extended view range on specific terrain (e.g. InfRock)
+  viewRangeExtendedTerrain: string; // Terrain type for extended view range
   primaryBuilding: string;
   primaryBuildingAlts: string[];
   secondaryBuildings: string[];
@@ -135,9 +139,13 @@ export function createDefaultUnitDef(name: string): UnitDef {
     turnRate: 0.1,
     size: 1,
     armour: 'None',
+    armourTerrainBonus: 0,
+    armourTerrainType: '',
     score: 1,
     techLevel: 0,
     viewRange: 5,
+    viewRangeExtended: 0,
+    viewRangeExtendedTerrain: '',
     primaryBuilding: '',
     primaryBuildingAlts: [],
     secondaryBuildings: [],

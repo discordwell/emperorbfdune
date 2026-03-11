@@ -47,10 +47,8 @@ describe('WeaponParity — weapon chain integrity', () => {
     expect(missing, `Buildings with invalid turretAttach: ${missing.join(', ')}`).toEqual([]);
   });
 
-  it('every turret bullet points to a valid bullet def (case-insensitive)', () => {
-    // Rules.txt has case mismatches between BulletTypes list and section headers
-    // (e.g. "Howitzer_B" in list but "[HOWITZER_B]" as section). Parser is case-sensitive,
-    // so some bullets fail to parse. We check case-insensitively here.
+  it('every turret bullet points to a valid bullet def', () => {
+    // Parser now handles case-insensitive section lookup (Cal50_B → [cal50_B], etc.)
     const missing: string[] = [];
     for (const [name, def] of rules.turrets) {
       if (!def.bullet) continue;
@@ -58,14 +56,7 @@ describe('WeaponParity — weapon chain integrity', () => {
         missing.push(`${name} → ${def.bullet}`);
       }
     }
-    // Known parser limitation: 12 bullets have case-mismatched sections in Rules.txt.
-    // Filter these out — they're a data issue, not a logic bug.
-    const unexpectedMissing = missing.filter(m => {
-      const bullet = m.split(' → ')[1];
-      const knownCaseMismatches = ['Mortar_B', 'Howitzer_B', 'KobraHowitzer_B', 'cal50_B', 'cal50_b'];
-      return !knownCaseMismatches.some(k => k.toLowerCase() === bullet.toLowerCase());
-    });
-    expect(unexpectedMissing, `Turrets with invalid bullet: ${unexpectedMissing.join(', ')}`).toEqual([]);
+    expect(missing, `Turrets with invalid bullet: ${missing.join(', ')}`).toEqual([]);
   });
 
   it('every bullet warhead points to a valid warhead def', () => {

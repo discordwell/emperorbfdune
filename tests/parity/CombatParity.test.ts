@@ -317,4 +317,76 @@ describe('CombatParity — damage pipeline formulas', () => {
       }
     });
   });
+
+  // --- CB-REG: Regression tests for case-mismatched bullet parsing ---
+  describe('CB-REG: Case-mismatched bullet regression', () => {
+    it('Cal50_B (sniper) has damage=600, not default 100', () => {
+      const bullet = rules.bullets.get('Cal50_B');
+      expect(bullet, 'Cal50_B must be parsed').toBeDefined();
+      expect(bullet!.damage, 'sniper damage must be 600 (from [cal50_B] section)').toBe(600);
+      expect(bullet!.warhead).toBe('50.cal_W');
+    });
+
+    it('Mortar_B has damage=375, not default 100', () => {
+      const bullet = rules.bullets.get('Mortar_B');
+      expect(bullet, 'Mortar_B must be parsed').toBeDefined();
+      expect(bullet!.damage, 'mortar damage must be 375 (from [MORTAR_B] section)').toBe(375);
+      expect(bullet!.blastRadius).toBe(64);
+    });
+
+    it('KobraHowitzer_B has damage=600, not default 100', () => {
+      const bullet = rules.bullets.get('KobraHowitzer_B');
+      expect(bullet, 'KobraHowitzer_B must be parsed').toBeDefined();
+      expect(bullet!.damage, 'kobra howitzer damage must be 600 (from [KOBRAHOWITZER_B] section)').toBe(600);
+      expect(bullet!.blastRadius).toBe(96);
+    });
+
+    it('Howitzer_B has damage=300, not default 100', () => {
+      const bullet = rules.bullets.get('Howitzer_B');
+      expect(bullet, 'Howitzer_B must be parsed').toBeDefined();
+      expect(bullet!.damage, 'howitzer damage must be 300 (from [HOWITZER_B] section)').toBe(300);
+    });
+  });
+
+  // --- CB-VR: ViewRange extended terrain parsing ---
+  describe('CB-VR: ViewRange extended terrain values', () => {
+    it('units with 3-value ViewRange have terrain and extended range', () => {
+      let found = 0;
+      for (const [name, def] of rules.units) {
+        if (def.viewRangeExtended > 0 && def.viewRangeExtendedTerrain) {
+          found++;
+          expect(def.viewRangeExtendedTerrain, `${name} extended terrain`).toBe('InfRock');
+          expect(def.viewRangeExtended, `${name} extended range`).toBeGreaterThan(def.viewRange);
+        }
+      }
+      expect(found, 'should have units with terrain-based extended view range').toBeGreaterThan(10);
+    });
+
+    it('units with 2-value ViewRange have extended range without terrain', () => {
+      // Format: "ViewRange = 4, 8" — extended range without terrain type (mostly aircraft)
+      let found = 0;
+      for (const [, def] of rules.units) {
+        if (def.viewRangeExtended > 0 && !def.viewRangeExtendedTerrain) {
+          found++;
+          expect(def.viewRangeExtended).toBeGreaterThan(def.viewRange);
+        }
+      }
+      expect(found, 'should have units with 2-value extended view range').toBeGreaterThan(5);
+    });
+  });
+
+  // --- CB-AT: Armour terrain bonus parsing ---
+  describe('CB-AT: Armour terrain bonus values', () => {
+    it('infantry with Armour=None,50,InfRock have armourTerrainBonus=50', () => {
+      let found = 0;
+      for (const [name, def] of rules.units) {
+        if (def.armourTerrainBonus > 0) {
+          found++;
+          expect(def.armourTerrainType, `${name} armour terrain`).toBe('InfRock');
+          expect(def.armourTerrainBonus, `${name} armour bonus`).toBe(50);
+        }
+      }
+      expect(found, 'should have units with armour terrain bonus').toBeGreaterThan(10);
+    });
+  });
 });

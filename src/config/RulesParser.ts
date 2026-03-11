@@ -131,6 +131,17 @@ export function parseRules(text: string): GameRules {
   const bulletTypeNames = getListValues(sectionMap.get('BulletTypes') ?? { name: '', entries: [] });
   const warheadTypeNames = getListValues(sectionMap.get('WarheadTypes') ?? { name: '', entries: [] });
 
+  // Case-insensitive section lookup — rules.txt has mismatched cases between
+  // type declarations (e.g. "Cal50_B" in [BulletTypes]) and section headers
+  // (e.g. "[cal50_B]"). Build a lowercase fallback map.
+  const lowerSectionMap = new Map<string, Section>();
+  for (const [k, v] of sectionMap) {
+    const lower = k.toLowerCase();
+    if (!lowerSectionMap.has(lower)) lowerSectionMap.set(lower, v);
+  }
+  const getSection = (name: string): Section | undefined =>
+    sectionMap.get(name) ?? lowerSectionMap.get(name.toLowerCase());
+
   // Global stealth timing defaults from [General] section
   const globalStealthDelay = parseNum(general['StealthDelay'] ?? '0');
   const globalStealthDelayAfterFiring = parseNum(general['StealthDelayAfterFiring'] ?? '0');
@@ -138,7 +149,7 @@ export function parseRules(text: string): GameRules {
   // Parse units
   const units = new Map<string, UnitDef>();
   for (const name of unitTypeNames) {
-    const section = sectionMap.get(name);
+    const section = getSection(name);
     if (!section) continue;
     const def = parseUnitDef(name, section);
     // Auto-detect deviator by name
@@ -154,7 +165,7 @@ export function parseRules(text: string): GameRules {
   // Parse buildings
   const buildings = new Map<string, BuildingDef>();
   for (const name of buildingTypeNames) {
-    const section = sectionMap.get(name);
+    const section = getSection(name);
     if (!section) continue;
     buildings.set(name, parseBuildingDef(name, section));
   }
@@ -179,7 +190,7 @@ export function parseRules(text: string): GameRules {
   // Parse turrets
   const turrets = new Map<string, TurretDef>();
   for (const name of turretTypeNames) {
-    const section = sectionMap.get(name);
+    const section = getSection(name);
     if (!section) continue;
     turrets.set(name, parseTurretDef(name, section));
   }
@@ -187,7 +198,7 @@ export function parseRules(text: string): GameRules {
   // Parse bullets
   const bullets = new Map<string, BulletDef>();
   for (const name of bulletTypeNames) {
-    const section = sectionMap.get(name);
+    const section = getSection(name);
     if (!section) continue;
     bullets.set(name, parseBulletDef(name, section));
   }
@@ -195,7 +206,7 @@ export function parseRules(text: string): GameRules {
   // Parse warheads
   const warheads = new Map<string, WarheadDef>();
   for (const name of warheadTypeNames) {
-    const section = sectionMap.get(name);
+    const section = getSection(name);
     if (!section) continue;
     warheads.set(name, parseWarheadDef(name, section));
   }
@@ -204,7 +215,7 @@ export function parseRules(text: string): GameRules {
   const crateTypeNames = getListValues(sectionMap.get('CrateTypes') ?? { name: '', entries: [] });
   const crates = new Map<string, CrateDef>();
   for (const name of crateTypeNames) {
-    const section = sectionMap.get(name);
+    const section = getSection(name);
     if (!section) continue;
     crates.set(name, parseCrateDef(name, section));
   }
@@ -234,10 +245,32 @@ function parseUnitDef(name: string, section: Section): UnitDef {
       case 'Speed': def.speed = parseNum(value); break;
       case 'TurnRate': def.turnRate = parseNum(value); break;
       case 'Size': def.size = parseNum(value); break;
-      case 'Armour': def.armour = value.split(',')[0].trim(); break;
+      case 'Armour': {
+        // Format: "None, 50, InfRock" = type, damage reduction %, terrain
+        const armParts = value.split(',').map(s => s.trim());
+        def.armour = armParts[0];
+        if (armParts.length >= 3) {
+          def.armourTerrainBonus = parseNum(armParts[1]);
+          def.armourTerrainType = armParts[2];
+        }
+        break;
+      }
       case 'Score': def.score = parseNum(value); break;
       case 'TechLevel': def.techLevel = parseNum(value); break;
-      case 'ViewRange': def.viewRange = parseNum(value.split(',')[0]); break;
+      case 'ViewRange': {
+        // Formats: "4" | "4, 8" | "4,8,InfRock"
+        // 2-value: base, extended (aircraft — no terrain specified)
+        // 3-value: base, extended, terrain type
+        const vrParts = value.split(',').map(s => s.trim());
+        def.viewRange = parseNum(vrParts[0]);
+        if (vrParts.length >= 2) {
+          def.viewRangeExtended = parseNum(vrParts[1]);
+          if (vrParts.length >= 3) {
+            def.viewRangeExtendedTerrain = vrParts[2];
+          }
+        }
+        break;
+      }
       case 'PrimaryBuilding': {
         const parts = value.split(',').map(s => s.trim()).filter(Boolean);
         def.primaryBuilding = parts[0] ?? '';

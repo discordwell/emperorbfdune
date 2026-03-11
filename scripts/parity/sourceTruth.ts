@@ -301,16 +301,28 @@ function compareUnit(name: string, raw: RawSection | undefined, def: UnitDef): F
   b('ExcludeFromSkirmishLose', 'excludeFromSkirmishLose', def.excludeFromSkirmishLose);
   b('ExcludeFromCampaignLose', 'excludeFromCampaignLose', def.excludeFromCampaignLose);
 
-  // Armour (first item of comma-separated)
+  // Armour (comma-separated: type, terrainBonus, terrainType)
   const rawArmour = raw.entries.get('Armour');
   if (rawArmour) {
-    results.push(compare(cat, name, 'armour', rawArmour.split(',')[0].trim(), def.armour));
+    const armParts = rawArmour.split(',').map(s => s.trim());
+    results.push(compare(cat, name, 'armour', armParts[0], def.armour));
+    if (armParts.length >= 3) {
+      results.push(compare(cat, name, 'armourTerrainBonus', armParts[1], def.armourTerrainBonus));
+      results.push(compare(cat, name, 'armourTerrainType', armParts[2], def.armourTerrainType));
+    }
   }
 
-  // ViewRange (first item of comma-separated)
+  // ViewRange (comma-separated: base | base,extended | base,extended,terrain)
   const rawVR = raw.entries.get('ViewRange');
   if (rawVR) {
-    results.push(compare(cat, name, 'viewRange', rawVR.split(',')[0].trim(), def.viewRange));
+    const vrParts = rawVR.split(',').map(s => s.trim());
+    results.push(compare(cat, name, 'viewRange', vrParts[0], def.viewRange));
+    if (vrParts.length >= 2) {
+      results.push(compare(cat, name, 'viewRangeExtended', vrParts[1], def.viewRangeExtended));
+      if (vrParts.length >= 3) {
+        results.push(compare(cat, name, 'viewRangeExtendedTerrain', vrParts[2], def.viewRangeExtendedTerrain));
+      }
+    }
   }
 
   s('TurretAttach', 'turretAttach', def.turretAttach);
@@ -477,6 +489,15 @@ export function runComparison(rulesText: string): ParityReport {
   const raw = parseRawIni(rulesText);
   const rules = parseRules(rulesText);
 
+  // Case-insensitive section lookup (matches RulesParser fix for Cal50_B → [cal50_B] etc.)
+  const lowerRawSections = new Map<string, RawSection>();
+  for (const [k, v] of raw.sections) {
+    const lower = k.toLowerCase();
+    if (!lowerRawSections.has(lower)) lowerRawSections.set(lower, v);
+  }
+  const getRawSection = (name: string): RawSection | undefined =>
+    raw.sections.get(name) ?? lowerRawSections.get(name.toLowerCase());
+
   const fields: FieldComparison[] = [];
 
   // General
@@ -487,32 +508,32 @@ export function runComparison(rulesText: string): ParityReport {
 
   // Units
   for (const [name, def] of rules.units) {
-    fields.push(...compareUnit(name, raw.sections.get(name), def));
+    fields.push(...compareUnit(name, getRawSection(name), def));
   }
 
   // Buildings
   for (const [name, def] of rules.buildings) {
-    fields.push(...compareBuilding(name, raw.sections.get(name), def));
+    fields.push(...compareBuilding(name, getRawSection(name), def));
   }
 
   // Turrets
   for (const [name, def] of rules.turrets) {
-    fields.push(...compareTurret(name, raw.sections.get(name), def));
+    fields.push(...compareTurret(name, getRawSection(name), def));
   }
 
   // Bullets
   for (const [name, def] of rules.bullets) {
-    fields.push(...compareBullet(name, raw.sections.get(name), def));
+    fields.push(...compareBullet(name, getRawSection(name), def));
   }
 
   // Warheads
   for (const [name, def] of rules.warheads) {
-    fields.push(...compareWarhead(name, raw.sections.get(name), def));
+    fields.push(...compareWarhead(name, getRawSection(name), def));
   }
 
   // Crates
   for (const [name, def] of rules.crates) {
-    fields.push(...compareCrate(name, raw.sections.get(name), def));
+    fields.push(...compareCrate(name, getRawSection(name), def));
   }
 
   const matches = fields.filter(f => f.status === 'match').length;
