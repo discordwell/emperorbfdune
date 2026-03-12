@@ -28,6 +28,7 @@ class HookProbeServer {
   private resolved = false;
   private settleTimer: NodeJS.Timeout | null = null;
   private resolveDone: ((records: ConnectionRecord[]) => void) | null = null;
+  commandsEnabled = true;
 
   constructor(port: number, commands: string[], extraPolls: number) {
     this.port = port;
@@ -62,6 +63,14 @@ class HookProbeServer {
 
   get remainingCommands(): string[] {
     return [...this.queue];
+  }
+
+  snapshotRecords(): ConnectionRecord[] {
+    return this.connections.map((record) => ({
+      ...record,
+      responses: [...record.responses],
+      rawLines: [...record.rawLines],
+    }));
   }
 
   async stop(): Promise<void> {
@@ -145,6 +154,7 @@ class HookProbeServer {
   }
 
   private nextCommand(): string {
+    if (!this.commandsEnabled) return 'none';
     if (this.queue.length > 0) {
       return this.queue.shift()!;
     }
@@ -171,6 +181,10 @@ async function main() {
 
   try {
     console.log(`[probe] starting TCP hook probe on port 18890`);
+    if (args.deployMode) {
+      server.commandsEnabled = false;
+      console.log(`[probe] deploy mode: commands disabled during deployment phase`);
+    }
     await server.start();
 
     console.log(`[probe] booting VM and loading snapshot "${args.snapshot}"`);
@@ -190,9 +204,21 @@ async function main() {
       await sleep(args.runWaitMs);
     }
 
+    for (const typedCommand of args.typeCommands) {
+      console.log(`[probe] type text: ${typedCommand}`);
+      await typeText(controller, typedCommand);
+      await controller.sendKey(['ret']);
+      await sleep(args.runWaitMs);
+    }
+
     if (args.finalWaitMs > 0) {
       console.log(`[probe] final wait: ${args.finalWaitMs}ms`);
       await sleep(args.finalWaitMs);
+    }
+
+    if (args.deployMode) {
+      server.commandsEnabled = true;
+      console.log(`[probe] deploy mode: commands now enabled`);
     }
 
     for (const keyChord of args.sendKeys) {
@@ -218,7 +244,16 @@ async function main() {
       await controller.saveSnapshot(args.saveSnapshotName);
     }
 
-    const records = await server.waitForCompletion(args.timeoutMs);
+    let records: ConnectionRecord[] = [];
+    let probeError: string | null = null;
+    try {
+      records = await server.waitForCompletion(args.timeoutMs);
+    } catch (err) {
+      probeError = err instanceof Error ? err.message : String(err);
+      records = server.snapshotRecords();
+      process.exitCode = 1;
+      console.error(`[probe] warning: ${probeError}`);
+    }
 
     if (args.afterWaitMs > 0) {
       await sleep(args.afterWaitMs);
@@ -238,6 +273,7 @@ async function main() {
       extraPolls: args.extraPolls,
       captureDir: args.captureDir,
       afterCapturePath,
+      error: probeError,
       records,
       capturedAt: new Date().toISOString(),
     };
@@ -276,11 +312,13 @@ function parseArgs(argv: string[]) {
   let qmpMoveY: number | null = null;
   let qmpMoveWaitMs = 500;
   const runCommands: string[] = [];
+  const typeCommands: string[] = [];
   let runWaitMs = 4000;
   let finalWaitMs = 0;
   let saveSnapshotName = '';
   const sendKeys: string[][] = [];
   let sendKeyWaitMs = 1000;
+  let deployMode = false;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -314,6 +352,10 @@ function parseArgs(argv: string[]) {
       const command = argv[++i] ?? '';
       if (!command) throw new Error('--run requires a value');
       runCommands.push(command);
+    } else if (arg === '--type') {
+      const command = argv[++i] ?? '';
+      if (!command) throw new Error('--type requires a value');
+      typeCommands.push(command);
     } else if (arg === '--run-wait-ms') {
       runWaitMs = Number(argv[++i] ?? '0');
     } else if (arg === '--final-wait-ms') {
@@ -326,6 +368,8 @@ function parseArgs(argv: string[]) {
       sendKeys.push(value.split('+'));
     } else if (arg === '--send-key-wait-ms') {
       sendKeyWaitMs = Number(argv[++i] ?? '0');
+    } else if (arg === '--deploy-mode') {
+      deployMode = true;
     } else {
       throw new Error(`Unknown arg: ${arg}`);
     }
@@ -349,11 +393,13 @@ function parseArgs(argv: string[]) {
     qmpMoveY,
     qmpMoveWaitMs,
     runCommands,
+    typeCommands,
     runWaitMs,
     finalWaitMs,
     saveSnapshotName,
     sendKeys,
     sendKeyWaitMs,
+    deployMode,
   };
 }
 
@@ -382,6 +428,9 @@ async function typeText(controller: QemuController, text: string): Promise<void>
 function mapCharToKeys(char: string): string[] {
   if (/^[a-z0-9]$/.test(char)) {
     return [char];
+  }
+  if (/^[A-Z]$/.test(char)) {
+    return ['shift', char.toLowerCase()];
   }
 
   switch (char) {

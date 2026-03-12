@@ -777,6 +777,90 @@ static volatile DWORD g_callerEBP = 0;       /* caller's EBP = CInputDevice this
 static volatile LONG g_gameMouseX = 0;
 static volatile LONG g_gameMouseY = 0;
 
+/* Direct FIFO event injection — bypasses DInput entirely, writes straight to CInputDevice's
+ * event queue (at +0x2C, count at +0x142C). The live binary's WndProc path emits:
+ *   type=3 via 0x4D3C10 for mouse move
+ *   type=4 via 0x4D3D70 for button transitions
+ *   type=5 via 0x4D3ED0 for WM_MOUSEWHEEL-style input
+ * rawclick remains a diagnostics path for comparing event layouts; it is not the proven
+ * title-menu click path. */
+#define RAWCLICK_IDLE     0
+#define RAWCLICK_PENDING  1   /* write type=3 move + type=5 btn_down */
+#define RAWCLICK_UP       2   /* write type=5 btn_up on next GDD */
+#define RAWCLICK_DONE     3
+static volatile int    g_rawclickState = RAWCLICK_IDLE;
+static volatile float  g_rawclickX = 0.0f;
+static volatile float  g_rawclickY = 0.0f;
+static volatile DWORD  g_rawclickType = 5;  /* diagnostic event type override (typically 4 or 5) */
+
+#define MENUCLICK_IDLE         0
+#define MENUCLICK_PENDING_DOWN 1
+#define MENUCLICK_PENDING_UP   2
+#define MENUCLICK_DONE         3
+
+#define MENUDIRECT_NONE   0
+#define MENUDIRECT_CASE2  2
+#define MENUDIRECT_CASE3  3
+#define MENUDIRECT_CASE4  4
+#define MENUDIRECT_COMBO  9
+#define MENUDIRECT_MAINMSG 10
+#define MENUDIRECT_MAINCB 11
+#define MENUDIRECT_MAINCOMBO 12
+
+#define MENU_TARGET_NONE           0
+#define MENU_TARGET_SINGLE_PLAYER  1
+
+static volatile LONG g_menuClickState = MENUCLICK_IDLE;
+static volatile LONG g_menuClickTarget = MENU_TARGET_NONE;
+static volatile LONG g_menuClickStage = 0;
+static volatile LONG g_menuDirectMode = MENUDIRECT_NONE;
+static volatile LONG g_menuDirectTarget = MENU_TARGET_NONE;
+static volatile LONG g_menuDirectPumpCount = 0;
+static volatile LONG g_menuPumpPending = 0;
+static volatile LONG g_menuPumpCount = 1;
+static volatile LONG g_menuWrapPending = 0;
+static volatile LONG g_menuWrapTarget = MENU_TARGET_NONE;
+static volatile LONG g_menuWrapArg1 = 1;
+static volatile LONG g_menuWrapArg2 = 0;
+static volatile LONG g_menuWrapArg3 = 1;
+static volatile LONG g_menuWrapArg5 = 0;
+static volatile LONG g_menuWrapUsePayload = 0;
+static volatile LONG g_menuWrapForceClear18 = 0;
+static volatile LONG g_menuWrapForceClear2C = 0;
+static volatile LONG g_menuWrapArg5FromItem24 = 0;
+static volatile LONG g_menuTraceRemaining = 0;
+static volatile LONG g_menuClickUsedContainerPath = 0;
+
+typedef unsigned char (__attribute__((thiscall)) *MenuSelectItem_t)(void *self, void *item);
+typedef unsigned char (__attribute__((thiscall)) *MenuDispatchItem_t)(void *self, int action, int pressed, void *context);
+/* 0x55A460 is the item-level wrapper around 0x55A520.
+ * The extracted title-screen binary does not treat this like a simple down/up API:
+ * - arg1 gates the entire wrapper: 0 goes straight to the release/reset branch.
+ * - arg2 is forwarded to 0x55A520 as the queued action subtype.
+ * - the low byte of arg3 becomes the queued pressed/armed flag.
+ * - arg5 is forwarded as the queue record's extra value.
+ * - arg4 is not consumed by this wrapper in the extracted snapshot build.
+ */
+typedef unsigned char (__attribute__((thiscall)) *MenuWrapperItem_t)(
+    void *self,
+    int arg1,
+    int arg2,
+    int arg3,
+    void *context,
+    int arg5
+);
+typedef void (__attribute__((thiscall)) *MenuCase2Item_t)(void *self, void *payload, int activate);
+typedef void (__attribute__((thiscall)) *MenuCase3Item_t)(void *self, void *payload);
+typedef void (__attribute__((thiscall)) *MenuCase4Item_t)(void *self, int value);
+typedef void (__attribute__((thiscall)) *MenuAppPump_t)(void *self);
+typedef void (__attribute__((thiscall)) *TitleSelectChild_t)(void *self, int index);
+typedef void (__attribute__((thiscall)) *MenuContainerEvent_t)(void *self, void *event);
+typedef void *(__attribute__((thiscall)) *FindNamedObject_t)(void *self, const char *name);
+typedef void (__attribute__((thiscall)) *MainMenuProcessMessage_t)(void *self, void *event);
+typedef void (__attribute__((thiscall)) *MainMenuCallback_t)(void *self, void *arg);
+
+#define TITLE_SCREEN_VTABLE 0x005D35C4
+
 #define DINPUT7_OBJECTDATA_SIZE 16
 
 /* Write a single DInput7 event into the buffer at the given pointer.
@@ -838,6 +922,1317 @@ static void armDirectClickCommand(int targetX, int targetY, int assumeOrigin, co
         hookLog("TCP: %s armed at (%d,%d) from origin delta(%d,%d)",
                 label, targetX, targetY, deltaX, deltaY);
     }
+}
+
+static const char *menuTargetName(LONG target) {
+    switch (target) {
+    case MENU_TARGET_SINGLE_PLAYER:
+        return "singleplayer";
+    default:
+        return "unknown";
+    }
+}
+
+static const char *menuDirectModeName(LONG mode) {
+    switch (mode) {
+    case MENUDIRECT_CASE2:
+        return "case2";
+    case MENUDIRECT_CASE3:
+        return "case3";
+    case MENUDIRECT_CASE4:
+        return "case4";
+    case MENUDIRECT_COMBO:
+        return "combo";
+    case MENUDIRECT_MAINMSG:
+        return "mainmsg";
+    case MENUDIRECT_MAINCB:
+        return "maincb";
+    case MENUDIRECT_MAINCOMBO:
+        return "maincombo";
+    default:
+        return "unknown";
+    }
+}
+
+static const char *mainMenuTokenName(LONG target) {
+    switch (target) {
+    case MENU_TARGET_SINGLE_PLAYER:
+        return "Single";
+    default:
+        return NULL;
+    }
+}
+
+static DWORD mainMenuCallbackAddress(LONG target) {
+    switch (target) {
+    case MENU_TARGET_SINGLE_PLAYER:
+        return 0x004E3880;
+    default:
+        return 0;
+    }
+}
+
+static const char *tryReadAsciiString(const char *value) {
+    size_t i;
+
+    if (!value || IsBadReadPtr((void *)value, 1))
+        return NULL;
+
+    for (i = 0; i < 64; i++) {
+        unsigned char ch;
+
+        if (IsBadReadPtr((void *)(value + i), 1))
+            return NULL;
+        ch = (unsigned char)value[i];
+        if (ch == 0)
+            return i > 0 ? value : NULL;
+        if (ch < 0x20 || ch > 0x7e)
+            return NULL;
+    }
+
+    return NULL;
+}
+
+static const char *tryReadNamedObjectToken(void *object) {
+    BYTE *ptr = (BYTE *)object;
+    const char *value;
+
+    if (!ptr || IsBadReadPtr(ptr + 0x08, sizeof(void *)))
+        return NULL;
+
+    value = *(const char **)(ptr + 0x08);
+    return tryReadAsciiString(value);
+}
+
+static int wideEqualsAscii(const WCHAR *value, const char *ascii) {
+    if (!value || !ascii)
+        return 0;
+
+    for (; *ascii; ascii++, value++) {
+        if (IsBadReadPtr((void *)value, sizeof(WCHAR)))
+            return 0;
+        if (*value != (WCHAR)(unsigned char)*ascii)
+            return 0;
+    }
+
+    return !IsBadReadPtr((void *)value, sizeof(WCHAR)) && *value == 0;
+}
+
+static void *resolveActiveTitleScreen(void) {
+    BYTE *app = (BYTE *)0x818718;
+    void **screens = (void **)app;
+    LONG screenCount;
+    LONG screenIndex;
+
+    if (IsBadReadPtr(app, 0x10))
+        return NULL;
+
+    screenCount = *(LONG *)(app + 0x08);
+    screenIndex = *(LONG *)(app + 0x0C);
+    if (screenCount <= 0 || screenCount > 16 || screenIndex < 0 || screenIndex >= screenCount)
+        return NULL;
+
+    if (IsBadReadPtr(&screens[screenIndex], sizeof(void *)))
+        return NULL;
+
+    return screens[screenIndex];
+}
+
+static void *resolveCurrentMenuContainer(void) {
+    BYTE *screen = (BYTE *)resolveActiveTitleScreen();
+    void **children;
+    LONG childIndex;
+    LONG childCount;
+
+    if (!screen || IsBadReadPtr(screen, 0x1C))
+        return NULL;
+
+    children = *(void ***)(screen + 0x08);
+    childCount = *(LONG *)(screen + 0x0C);
+    childIndex = *(LONG *)(screen + 0x18);
+    if (!children || childCount <= 0 || childCount > 64 || childIndex < 0 || childIndex >= childCount)
+        return NULL;
+
+    if (IsBadReadPtr(&children[childIndex], sizeof(void *)))
+        return NULL;
+
+    return children[childIndex];
+}
+
+static void *findMenuItemByTarget(void *container, LONG target, LONG *outIndex);
+
+static void *selectMenuContainerForTarget(LONG target, LONG *outChildIndex) {
+    TitleSelectChild_t selectChild = (TitleSelectChild_t)0x4AE800;
+    BYTE *screen = (BYTE *)resolveActiveTitleScreen();
+    void **children;
+    LONG childIndex;
+    LONG childCount;
+    LONG candidateIndex = -1;
+    LONG i;
+
+    if (outChildIndex)
+        *outChildIndex = -1;
+
+    if (!screen || IsBadReadPtr(screen, 0x24))
+        return NULL;
+
+    children = *(void ***)(screen + 0x08);
+    childCount = *(LONG *)(screen + 0x0C);
+    childIndex = *(LONG *)(screen + 0x18);
+    if (!children || childCount <= 0 || childCount > 64)
+        return NULL;
+
+    if (childIndex < 0 && *(DWORD *)screen == TITLE_SCREEN_VTABLE) {
+        LONG primeIndex = 0;
+        hookLog("MENU: priming title screen via child=%ld for target=%s on screen=%p",
+                (long)primeIndex, menuTargetName(target), (void *)screen);
+        selectChild(screen, primeIndex);
+        childIndex = *(LONG *)(screen + 0x18);
+        hookLog("MENU: screen child index after prime=%ld target=%s",
+                (long)childIndex, menuTargetName(target));
+    }
+
+    if (childIndex >= 0 && childIndex < childCount &&
+        !IsBadReadPtr(&children[childIndex], sizeof(void *)) &&
+        findMenuItemByTarget(children[childIndex], target, NULL)) {
+        if (outChildIndex)
+            *outChildIndex = childIndex;
+        return children[childIndex];
+    }
+
+    for (i = 0; i < childCount; i++) {
+        if (IsBadReadPtr(&children[i], sizeof(void *)))
+            continue;
+        if (findMenuItemByTarget(children[i], target, NULL)) {
+            candidateIndex = i;
+            break;
+        }
+    }
+
+    if (candidateIndex < 0) {
+        hookLog("MENU: no child contains target=%s screen=%p childIndex=%ld count=%ld",
+                menuTargetName(target), (void *)screen, (long)childIndex, (long)childCount);
+        return NULL;
+    }
+
+    if (*(DWORD *)screen != TITLE_SCREEN_VTABLE) {
+        hookLog("MENU: screen=%p vtable=0x%08X unexpected for target=%s child=%ld",
+                (void *)screen, (unsigned)*(DWORD *)screen, menuTargetName(target), (long)candidateIndex);
+    } else if (childIndex != candidateIndex) {
+        hookLog("MENU: selecting child=%ld for target=%s on screen=%p (current=%ld)",
+                (long)candidateIndex, menuTargetName(target), (void *)screen, (long)childIndex);
+        selectChild(screen, candidateIndex);
+        childIndex = *(LONG *)(screen + 0x18);
+        hookLog("MENU: screen child index after select=%ld target=%s",
+                (long)childIndex, menuTargetName(target));
+    }
+
+    if (childIndex < 0 || childIndex >= childCount || IsBadReadPtr(&children[childIndex], sizeof(void *))) {
+        if (outChildIndex)
+            *outChildIndex = candidateIndex;
+        return children[candidateIndex];
+    }
+
+    if (outChildIndex)
+        *outChildIndex = childIndex;
+    return children[childIndex];
+}
+
+static void *findMenuItemByTarget(void *container, LONG target, LONG *outIndex) {
+    static const char *kSinglePlayer = "SINGLE PLAYER";
+    BYTE *menu = (BYTE *)container;
+    void **items;
+    LONG itemCount;
+    LONG i;
+
+    if (!menu || IsBadReadPtr(menu, 0x40))
+        return NULL;
+
+    items = *(void ***)(menu + 0x38);
+    itemCount = *(LONG *)(menu + 0x3C);
+    if (!items || itemCount <= 0 || itemCount > 128)
+        return NULL;
+
+    for (i = 0; i < itemCount; i++) {
+        BYTE *item;
+        BYTE *labelBlock;
+        const WCHAR *label;
+
+        if (IsBadReadPtr(&items[i], sizeof(void *)))
+            continue;
+        item = (BYTE *)items[i];
+        if (!item || IsBadReadPtr(item, 0x3C))
+            continue;
+
+        labelBlock = *(BYTE **)(item + 0x38);
+        if (!labelBlock || IsBadReadPtr(labelBlock, 0x20))
+            continue;
+
+        label = (const WCHAR *)(labelBlock + 0x18);
+        if (target == MENU_TARGET_SINGLE_PLAYER && wideEqualsAscii(label, kSinglePlayer)) {
+            if (outIndex) *outIndex = i;
+            return item;
+        }
+    }
+
+    return NULL;
+}
+
+static void logMenuAppState(const char *label) {
+    BYTE *app = (BYTE *)0x818718;
+
+    if (IsBadReadPtr(app, 0x95F0))
+        return;
+
+    hookLog("MENUAPP: %s sel=%ld d4=0x%08X d8=%p dc=%p e0=%u e1=%u",
+            label,
+            (long)*(LONG *)(app + 0x0C),
+            (unsigned)*(DWORD *)(app + 0x95D4),
+            *(void **)(app + 0x95D8),
+            *(void **)(app + 0x95DC),
+            (unsigned)*(BYTE *)(app + 0x95E0),
+            (unsigned)*(BYTE *)(app + 0x95E1));
+}
+
+static void logMainMenuState(const char *label) {
+    FindNamedObject_t findNamedObject = (FindNamedObject_t)0x4D6900;
+    BYTE *app = (BYTE *)0x818718;
+    BYTE *mainMenu;
+    BYTE *manager;
+
+    if (IsBadReadPtr(app, 0x20))
+        return;
+
+    mainMenu = (BYTE *)findNamedObject(app, "MainMenu");
+    manager = (BYTE *)findNamedObject(app, "MainMenuManager");
+
+    hookLog("MAINMENU: %s menu=%p vt=0x%08X tree=%p mgr=%p vt=0x%08X f4=%u f8=%ld fc=%u",
+            label,
+            (void *)mainMenu,
+            (mainMenu && !IsBadReadPtr(mainMenu, sizeof(DWORD))) ? (unsigned)*(DWORD *)mainMenu : 0,
+            (mainMenu && !IsBadReadPtr(mainMenu + 0xF0, sizeof(void *))) ? *(void **)(mainMenu + 0xF0) : NULL,
+            (void *)manager,
+            (manager && !IsBadReadPtr(manager, sizeof(DWORD))) ? (unsigned)*(DWORD *)manager : 0,
+            (manager && !IsBadReadPtr(manager + 0xF4, sizeof(BYTE))) ? (unsigned)*(BYTE *)(manager + 0xF4) : 0,
+            (manager && !IsBadReadPtr(manager + 0xF8, sizeof(LONG))) ? (long)*(LONG *)(manager + 0xF8) : -1,
+            (manager && !IsBadReadPtr(manager + 0xFC, sizeof(BYTE))) ? (unsigned)*(BYTE *)(manager + 0xFC) : 0);
+}
+
+static void logMenuQueueEntry(const char *label, LONG index) {
+    BYTE *entry;
+
+    if (index < 0 || index >= 0x1000) {
+        hookLog("MENUQ: %s idx=%ld (out-of-range)", label, (long)index);
+        return;
+    }
+
+    entry = (BYTE *)0x8824E8 + (index * 0x28);
+    if (IsBadReadPtr(entry, 0x28)) {
+        hookLog("MENUQ: %s idx=%ld unreadable entry=%p", label, (long)index, (void *)entry);
+        return;
+    }
+
+    hookLog("MENUQ: %s idx=%ld flag=%u next=%ld slot0c=%p slot14=%p a1=%ld a2=%u owner=%p a3=%p",
+            label,
+            (long)index,
+            (unsigned)*(BYTE *)(entry + 0x04),
+            (long)*(LONG *)(entry + 0x08),
+            *(void **)(entry + 0x0C),
+            *(void **)(entry + 0x14),
+            (long)*(LONG *)(entry + 0x18),
+            (unsigned)*(BYTE *)(entry + 0x1C),
+            *(void **)(entry + 0x20),
+            *(void **)(entry + 0x24));
+}
+
+static void logMenuQueueState(const char *label) {
+    LONG queueHead;
+    LONG freeHead;
+
+    if (IsBadReadPtr((void *)0x821CD8, sizeof(DWORD)) ||
+        IsBadReadPtr((void *)0x821CE8, sizeof(DWORD)) ||
+        IsBadReadPtr((void *)0x8AA4E8, sizeof(LONG)) ||
+        IsBadReadPtr((void *)0x8AA4EC, sizeof(LONG))) {
+        hookLog("MENUQ: %s queue globals unreadable", label);
+        return;
+    }
+
+    queueHead = *(LONG *)0x8AA4EC;
+    freeHead = *(LONG *)0x8AA4E8;
+    hookLog("MENUQ: %s gateCE8=%p gateCD8=0x%08X queueHead=%ld freeHead=%ld",
+            label,
+            *(void **)0x821CE8,
+            (unsigned)*(DWORD *)0x821CD8,
+            (long)queueHead,
+            (long)freeHead);
+    logMenuQueueEntry("queueHead", queueHead);
+    logMenuQueueEntry("freeHead", freeHead);
+}
+
+static LONG clampMenuPumpCount(LONG count) {
+    if (count < 1)
+        return 1;
+    if (count > 8)
+        return 8;
+    return count;
+}
+
+#define MENU_DISPATCH_VTABLE_PRIMARY 0x005D3CE4
+#define MENU_DISPATCH_VTABLE_SHIFTED 0x005D3D00
+
+static int isLikelyGamePtr(DWORD value) {
+    if (value < 0x00400000 || value >= 0x00700000)
+        return 0;
+    return !IsBadReadPtr((void *)value, sizeof(void *));
+}
+
+static int isLikelyHeapPtr(DWORD value) {
+    if (!value)
+        return 0;
+    if (value >= 0x00400000 && value < 0x00700000)
+        return 0;
+    return !IsBadReadPtr((void *)value, sizeof(void *));
+}
+
+static int isLikelyMenuDispatchVtable(DWORD value) {
+    return value == MENU_DISPATCH_VTABLE_PRIMARY || value == MENU_DISPATCH_VTABLE_SHIFTED;
+}
+
+static LONG menuDispatchHandlerOffset(DWORD vtable) {
+    if (vtable == MENU_DISPATCH_VTABLE_PRIMARY)
+        return 0x54;
+    if (vtable == MENU_DISPATCH_VTABLE_SHIFTED)
+        return 0x38;
+    return -1;
+}
+
+static LONG findMenuDispatchSlotIndex(BYTE *dispatchSelf, BYTE *item) {
+    LONG i;
+
+    if (!dispatchSelf || IsBadReadPtr(dispatchSelf + 0x104, sizeof(void *)))
+        return -1;
+
+    for (i = 0; i < 6; i++) {
+        void *slot;
+
+        if (IsBadReadPtr(dispatchSelf + 0xEC + (i * 4), sizeof(void *)))
+            break;
+        slot = *(void **)(dispatchSelf + 0xEC + (i * 4));
+        if (slot == item)
+            return i;
+    }
+    return -1;
+}
+
+static int isLikelyMenuDispatchSelf(BYTE *dispatchSelf, BYTE *item, DWORD *outVtable, LONG *outSlotIndex) {
+    DWORD vtable;
+    LONG slotIndex;
+
+    if (outVtable)
+        *outVtable = 0;
+    if (outSlotIndex)
+        *outSlotIndex = -1;
+
+    if (!dispatchSelf || !isLikelyHeapPtr((DWORD)(uintptr_t)dispatchSelf) ||
+        IsBadReadPtr(dispatchSelf, 0x44C)) {
+        return 0;
+    }
+
+    vtable = *(DWORD *)dispatchSelf;
+    if (!isLikelyMenuDispatchVtable(vtable))
+        return 0;
+
+    slotIndex = findMenuDispatchSlotIndex(dispatchSelf, item);
+    if (slotIndex < 0 && item)
+        return 0;
+
+    if (outVtable)
+        *outVtable = vtable;
+    if (outSlotIndex)
+        *outSlotIndex = slotIndex;
+    return 1;
+}
+
+static int isReadablePageProtect(DWORD protect) {
+    DWORD baseProtect = protect & 0xff;
+
+    if (protect & (PAGE_GUARD | PAGE_NOACCESS))
+        return 0;
+
+    return baseProtect == PAGE_READONLY ||
+           baseProtect == PAGE_READWRITE ||
+           baseProtect == PAGE_WRITECOPY ||
+           baseProtect == PAGE_EXECUTE_READ ||
+           baseProtect == PAGE_EXECUTE_READWRITE ||
+           baseProtect == PAGE_EXECUTE_WRITECOPY;
+}
+
+static BYTE *findGlobalMenuDispatchSelf(BYTE *item, DWORD *outVtable, LONG *outSlotIndex, void **outEventTarget) {
+    SYSTEM_INFO sysInfo;
+    BYTE *cursor;
+    BYTE *end;
+    MEMORY_BASIC_INFORMATION mbi;
+
+    if (outVtable)
+        *outVtable = 0;
+    if (outSlotIndex)
+        *outSlotIndex = -1;
+    if (outEventTarget)
+        *outEventTarget = NULL;
+    if (!item)
+        return NULL;
+
+    GetSystemInfo(&sysInfo);
+    cursor = (BYTE *)sysInfo.lpMinimumApplicationAddress;
+    end = (BYTE *)sysInfo.lpMaximumApplicationAddress;
+
+    while (cursor < end && VirtualQuery(cursor, &mbi, sizeof(mbi)) == sizeof(mbi)) {
+        BYTE *regionBase = (BYTE *)mbi.BaseAddress;
+        BYTE *regionEnd = regionBase + mbi.RegionSize;
+
+        if (mbi.State == MEM_COMMIT &&
+            isReadablePageProtect(mbi.Protect) &&
+            regionEnd > regionBase + 0x104) {
+            BYTE *p = (BYTE *)(((uintptr_t)regionBase + 3u) & ~3u);
+            BYTE *scanEnd = regionEnd - 0x104;
+
+            for (; p <= scanEnd; p += 4) {
+                DWORD vtable = *(DWORD *)p;
+                LONG i;
+
+                if (!isLikelyMenuDispatchVtable(vtable))
+                    continue;
+
+                for (i = 0; i < 6; i++) {
+                    void *slot = *(void **)(p + 0xEC + (i * 4));
+
+                    if (slot == item) {
+                        if (outVtable)
+                            *outVtable = vtable;
+                        if (outSlotIndex)
+                            *outSlotIndex = i;
+                        if (outEventTarget)
+                            *outEventTarget = slot;
+                        return p;
+                    }
+                }
+            }
+        }
+
+        if (regionEnd <= cursor)
+            break;
+        cursor = regionEnd;
+    }
+
+    return NULL;
+}
+
+static void logMenuWrapperSummary(const char *label, BYTE *root) {
+    LONG i;
+
+    if (!root || IsBadReadPtr(root, 0x30)) {
+        hookLog("MENU2: %s root=%p unreadable", label, (void *)root);
+        return;
+    }
+
+    hookLog("MENU2: %s root=%p d0=0x%08X d1=0x%08X d2=0x%08X d3=0x%08X items=%p count=%ld x40=0x%08X x44=0x%08X x48=0x%08X x4c=0x%08X",
+            label,
+            (void *)root,
+            (unsigned)*(DWORD *)(root + 0x00),
+            (unsigned)*(DWORD *)(root + 0x04),
+            (unsigned)*(DWORD *)(root + 0x08),
+            (unsigned)*(DWORD *)(root + 0x0C),
+            !IsBadReadPtr(root + 0x38, sizeof(void *)) ? *(void **)(root + 0x38) : NULL,
+            !IsBadReadPtr(root + 0x3C, sizeof(LONG)) ? (long)*(LONG *)(root + 0x3C) : -1,
+            !IsBadReadPtr(root + 0x40, sizeof(DWORD)) ? (unsigned)*(DWORD *)(root + 0x40) : 0,
+            !IsBadReadPtr(root + 0x44, sizeof(DWORD)) ? (unsigned)*(DWORD *)(root + 0x44) : 0,
+            !IsBadReadPtr(root + 0x48, sizeof(DWORD)) ? (unsigned)*(DWORD *)(root + 0x48) : 0,
+            !IsBadReadPtr(root + 0x4C, sizeof(DWORD)) ? (unsigned)*(DWORD *)(root + 0x4C) : 0);
+
+    for (i = 0; i < 8; i++) {
+        DWORD child = *(DWORD *)(root + (i * 4));
+
+        if (!isLikelyHeapPtr(child) || IsBadReadPtr((void *)child, 0x30))
+            continue;
+        hookLog("MENU2: %s child[%ld]=%p c0=0x%08X c1=0x%08X c2=0x%08X c3=0x%08X",
+                label,
+                (long)i,
+                (void *)child,
+                (unsigned)*(DWORD *)(child + 0x00),
+                (unsigned)*(DWORD *)(child + 0x04),
+                (unsigned)*(DWORD *)(child + 0x08),
+                (unsigned)*(DWORD *)(child + 0x0C));
+    }
+}
+
+static int isInterestingMenuVtable(DWORD value) {
+    return value == TITLE_SCREEN_VTABLE ||
+           value == MENU_DISPATCH_VTABLE_PRIMARY ||
+           value == MENU_DISPATCH_VTABLE_SHIFTED ||
+           value == 0x005D5F68 ||
+           value == 0x005D5FF0 ||
+           value == 0x005D0724;
+}
+
+static void logMenuObjectRefs(
+    const char *label,
+    BYTE *root,
+    LONG scanLimit,
+    BYTE *item,
+    BYTE *container,
+    BYTE *owner10
+) {
+    LONG offset;
+    LONG hits = 0;
+
+    if (!root || scanLimit <= 0 || IsBadReadPtr(root, scanLimit + 4))
+        return;
+
+    for (offset = 0; offset <= scanLimit; offset += 4) {
+        DWORD value = *(DWORD *)(root + offset);
+
+        if ((BYTE *)(uintptr_t)value == item ||
+            (BYTE *)(uintptr_t)value == container ||
+            (BYTE *)(uintptr_t)value == owner10) {
+            hookLog("MENU2: %s root=%p +0x%lx -> %p%s%s%s",
+                    label,
+                    (void *)root,
+                    (long)offset,
+                    (void *)(uintptr_t)value,
+                    ((BYTE *)(uintptr_t)value == item) ? " [item]" : "",
+                    ((BYTE *)(uintptr_t)value == container) ? " [container]" : "",
+                    ((BYTE *)(uintptr_t)value == owner10) ? " [owner10]" : "");
+            if (++hits >= 32)
+                break;
+            continue;
+        }
+
+        if (isInterestingMenuVtable(value)) {
+            hookLog("MENU2: %s root=%p +0x%lx embedded-vt=0x%08X",
+                    label, (void *)root, (long)offset, (unsigned)value);
+            if (++hits >= 32)
+                break;
+            continue;
+        }
+
+        if (isLikelyHeapPtr(value) && !IsBadReadPtr((void *)value, sizeof(DWORD))) {
+            DWORD pointeeVtable = *(DWORD *)(uintptr_t)value;
+            if (isInterestingMenuVtable(pointeeVtable)) {
+                hookLog("MENU2: %s root=%p +0x%lx ptr=%p vt=0x%08X",
+                        label,
+                        (void *)root,
+                        (long)offset,
+                        (void *)(uintptr_t)value,
+                        (unsigned)pointeeVtable);
+                if (++hits >= 32)
+                    break;
+            }
+        }
+    }
+
+    if (hits == 0) {
+        hookLog("MENU2: %s root=%p no interesting refs within 0x%lx",
+                label, (void *)root, (long)scanLimit);
+    }
+}
+
+static BYTE *findLikelyWrappedMenuDispatchSelf(
+    BYTE *root,
+    BYTE *item,
+    LONG depth,
+    LONG embedScanLimit,
+    LONG *outIndex0,
+    LONG *outIndex1,
+    LONG *outInnerOffset,
+    DWORD *outVtable
+) {
+    LONG offset;
+    LONG i;
+
+    if (outIndex0)
+        *outIndex0 = -1;
+    if (outIndex1)
+        *outIndex1 = -1;
+    if (outInnerOffset)
+        *outInnerOffset = -1;
+    if (outVtable)
+        *outVtable = 0;
+
+    if (embedScanLimit <= 0)
+        embedScanLimit = 0x200;
+
+    if (!root || IsBadReadPtr(root, 0x60))
+        return NULL;
+
+    if (isLikelyHeapPtr((DWORD)(uintptr_t)root)) {
+        for (offset = 0; offset <= embedScanLimit; offset += 4) {
+            BYTE *candidate = root + offset;
+            DWORD candidateVtable = 0;
+
+            if (isLikelyMenuDispatchSelf(candidate, item, &candidateVtable, NULL)) {
+                if (outInnerOffset)
+                    *outInnerOffset = offset;
+                if (outVtable)
+                    *outVtable = candidateVtable;
+                return candidate;
+            }
+        }
+    }
+
+    if (depth <= 0)
+        return NULL;
+
+    for (i = 0; i < 128; i++) {
+        DWORD child = *(DWORD *)(root + (i * 4));
+        BYTE *found;
+        LONG childIndex0 = -1;
+        LONG childIndex1 = -1;
+        LONG childInnerOffset = -1;
+        DWORD childVtable = 0;
+
+        if (!isLikelyHeapPtr(child) || IsBadReadPtr((void *)child, 0x60))
+            continue;
+
+        found = findLikelyWrappedMenuDispatchSelf(
+            (BYTE *)child, item, depth - 1, embedScanLimit,
+            &childIndex0, &childIndex1, &childInnerOffset, &childVtable);
+        if (!found)
+            continue;
+
+        if (outIndex0)
+            *outIndex0 = i;
+        if (outIndex1)
+            *outIndex1 = childIndex0;
+        if (outInnerOffset)
+            *outInnerOffset = childInnerOffset;
+        if (outVtable)
+            *outVtable = childVtable;
+        return found;
+    }
+
+    return NULL;
+}
+
+static void pumpMenuApp(const char *label, LONG count) {
+    MenuAppPump_t pump = (MenuAppPump_t)0x4D5E00;
+    LONG clamped = clampMenuPumpCount(count);
+    LONG i;
+
+    for (i = 0; i < clamped; i++) {
+        hookLog("MENUPUMP: %s iter=%ld/%ld", label ? label : "manual", (long)(i + 1), (long)clamped);
+        logMenuAppState("pump-before");
+        logMenuQueueState("pump-before");
+        pump((void *)0x818718);
+        logMenuAppState("pump-after");
+        logMenuQueueState("pump-after");
+    }
+}
+
+static int resolveMenuTargetEntry(
+    LONG target,
+    BYTE **outRawContainer,
+    BYTE **outContainer,
+    BYTE **outItem,
+    LONG *outChildIndex,
+    LONG *outItemIndex
+) {
+    BYTE *container;
+    BYTE *rawContainer;
+    BYTE *item;
+    BYTE *parent;
+    LONG childIndex = -1;
+    LONG itemIndex = -1;
+
+    if (outRawContainer)
+        *outRawContainer = NULL;
+    if (outContainer)
+        *outContainer = NULL;
+    if (outItem)
+        *outItem = NULL;
+    if (outChildIndex)
+        *outChildIndex = -1;
+    if (outItemIndex)
+        *outItemIndex = -1;
+
+    container = (BYTE *)selectMenuContainerForTarget(target, &childIndex);
+    if (!container) {
+        hookLog("MENU: no active container for target=%s", menuTargetName(target));
+        return 0;
+    }
+
+    item = (BYTE *)findMenuItemByTarget(container, target, &itemIndex);
+    if (!item) {
+        hookLog("MENU: target=%s not found in container=%p child=%ld", menuTargetName(target),
+                (void *)container, (long)childIndex);
+        return 0;
+    }
+
+    rawContainer = container;
+    parent = *(BYTE **)(item + 0x04);
+    if (parent && !IsBadReadPtr(parent, 0x48))
+        container = parent;
+
+    if (outRawContainer)
+        *outRawContainer = rawContainer;
+    if (outContainer)
+        *outContainer = container;
+    if (outItem)
+        *outItem = item;
+    if (outChildIndex)
+        *outChildIndex = childIndex;
+    if (outItemIndex)
+        *outItemIndex = itemIndex;
+    return 1;
+}
+
+static int tryContainerMenuTarget(
+    LONG target,
+    BYTE *container,
+    BYTE *item,
+    LONG childIndex,
+    LONG itemIndex
+) {
+    BYTE eventBuf[0x28];
+    BYTE *dispatchSelf = container;
+    DWORD vtable;
+    DWORD handler;
+    void *eventTarget = item;
+    LONG slotIndex = -1;
+    LONG wrapperIndex = -1;
+    LONG wrapperSubIndex = -1;
+    LONG wrapperInnerOffset = -1;
+
+    if (!container || !item || IsBadReadPtr(item, 0x04))
+        return 0;
+    if (IsBadReadPtr(container, 0x20)) {
+        hookLog("MENU2: target=%s child=%ld item=%p index=%ld container=%p root unreadable",
+                menuTargetName(target), (long)childIndex, (void *)item, (long)itemIndex, (void *)container);
+        return 0;
+    }
+
+    vtable = *(DWORD *)dispatchSelf;
+    if (!isLikelyMenuDispatchSelf(dispatchSelf, item, &vtable, &slotIndex)) {
+        BYTE *wrappedObject = findLikelyWrappedMenuDispatchSelf(
+            container, item, 3, 0x200, &wrapperIndex, &wrapperSubIndex, &wrapperInnerOffset, &vtable);
+        if (wrappedObject) {
+            dispatchSelf = wrappedObject;
+            slotIndex = findMenuDispatchSlotIndex(dispatchSelf, item);
+            hookLog("MENU2: target=%s child=%ld item=%p index=%ld wrapper=%p[%ld,%ld,+0x%lx] -> self=%p vt=0x%08X slot=%ld",
+                    menuTargetName(target), (long)childIndex, (void *)item, (long)itemIndex,
+                    (void *)container, (long)wrapperIndex, (long)wrapperSubIndex, (long)wrapperInnerOffset,
+                    (void *)dispatchSelf, (unsigned)vtable, (long)slotIndex);
+        } else {
+            BYTE *owner10 = NULL;
+            BYTE *screen = NULL;
+
+            hookLog("MENU2: target=%s child=%ld item=%p index=%ld container=%p no dispatch self found",
+                    menuTargetName(target), (long)childIndex, (void *)item, (long)itemIndex, (void *)container);
+            logMenuWrapperSummary("search", container);
+            wrappedObject = findLikelyWrappedMenuDispatchSelf(
+                item, item, 2, 0x200, &wrapperIndex, &wrapperSubIndex, &wrapperInnerOffset, &vtable);
+            if (wrappedObject) {
+                dispatchSelf = wrappedObject;
+                slotIndex = findMenuDispatchSlotIndex(dispatchSelf, item);
+                hookLog("MENU2: target=%s child=%ld item=%p index=%ld item-root[%ld,%ld,+0x%lx] -> self=%p vt=0x%08X slot=%ld",
+                        menuTargetName(target), (long)childIndex, (void *)item, (long)itemIndex,
+                        (long)wrapperIndex, (long)wrapperSubIndex, (long)wrapperInnerOffset,
+                        (void *)dispatchSelf, (unsigned)vtable, (long)slotIndex);
+            } else if (!IsBadReadPtr(item + 0x10, sizeof(void *))) {
+                owner10 = *(BYTE **)(item + 0x10);
+                if (isLikelyHeapPtr((DWORD)(uintptr_t)owner10)) {
+                    wrappedObject = findLikelyWrappedMenuDispatchSelf(
+                        owner10, item, 2, 0x200, &wrapperIndex, &wrapperSubIndex, &wrapperInnerOffset, &vtable);
+                    if (wrappedObject) {
+                        dispatchSelf = wrappedObject;
+                        slotIndex = findMenuDispatchSlotIndex(dispatchSelf, item);
+                        hookLog("MENU2: target=%s child=%ld item=%p index=%ld owner10=%p[%ld,%ld,+0x%lx] -> self=%p vt=0x%08X slot=%ld",
+                                menuTargetName(target), (long)childIndex, (void *)item, (long)itemIndex,
+                                (void *)owner10, (long)wrapperIndex, (long)wrapperSubIndex, (long)wrapperInnerOffset,
+                                (void *)dispatchSelf, (unsigned)vtable, (long)slotIndex);
+                    } else if (!IsBadReadPtr(owner10, 0x20)) {
+                        hookLog("MENU2: owner10=%p d0=0x%08X d1=0x%08X d2=0x%08X d3=0x%08X",
+                                (void *)owner10,
+                                (unsigned)*(DWORD *)(owner10 + 0x00),
+                                (unsigned)*(DWORD *)(owner10 + 0x04),
+                                (unsigned)*(DWORD *)(owner10 + 0x08),
+                                (unsigned)*(DWORD *)(owner10 + 0x0C));
+                    }
+                }
+            }
+
+            if (!wrappedObject) {
+                screen = (BYTE *)resolveActiveTitleScreen();
+                if (isLikelyHeapPtr((DWORD)(uintptr_t)screen) && !IsBadReadPtr(screen, 0x200)) {
+                    wrappedObject = findLikelyWrappedMenuDispatchSelf(
+                        screen, item, 3, 0x1000, &wrapperIndex, &wrapperSubIndex, &wrapperInnerOffset, &vtable);
+                    if (wrappedObject) {
+                        dispatchSelf = wrappedObject;
+                        slotIndex = findMenuDispatchSlotIndex(dispatchSelf, item);
+                        hookLog("MENU2: target=%s child=%ld item=%p index=%ld screen=%p[%ld,%ld,+0x%lx] -> self=%p vt=0x%08X slot=%ld",
+                                menuTargetName(target), (long)childIndex, (void *)item, (long)itemIndex,
+                                (void *)screen, (long)wrapperIndex, (long)wrapperSubIndex, (long)wrapperInnerOffset,
+                                (void *)dispatchSelf, (unsigned)vtable, (long)slotIndex);
+                    } else {
+                        BYTE *screenOwner = NULL;
+                        hookLog("MENU2: screen-root=%p no dispatch self found for target=%s item=%p",
+                                (void *)screen, menuTargetName(target), (void *)item);
+                        logMenuObjectRefs("screen-scan", screen, 0x900, item, container, owner10);
+                        if (!IsBadReadPtr(screen + 0x34, sizeof(void *)))
+                            screenOwner = *(BYTE **)(screen + 0x34);
+                        if (isLikelyHeapPtr((DWORD)(uintptr_t)screenOwner) && !IsBadReadPtr(screenOwner, 0x100)) {
+                            logMenuObjectRefs("screen-owner-scan", screenOwner, 0x600, item, container, owner10);
+                        }
+                        logMenuObjectRefs("container-scan", container, 0x200, item, container, owner10);
+                    }
+                }
+            }
+
+            if (!wrappedObject) {
+                void *globalEventTarget = NULL;
+
+                wrappedObject = findGlobalMenuDispatchSelf(item, &vtable, &slotIndex, &globalEventTarget);
+                if (wrappedObject) {
+                    dispatchSelf = wrappedObject;
+                    eventTarget = globalEventTarget ? globalEventTarget : item;
+                    hookLog("MENU2: target=%s child=%ld item=%p index=%ld global-scan -> self=%p vt=0x%08X slot=%ld eventTarget=%p",
+                            menuTargetName(target), (long)childIndex, (void *)item, (long)itemIndex,
+                            (void *)dispatchSelf, (unsigned)vtable, (long)slotIndex, eventTarget);
+                } else {
+                    hookLog("MENU2: target=%s child=%ld item=%p index=%ld global scan found no dispatcher",
+                            menuTargetName(target), (long)childIndex, (void *)item, (long)itemIndex);
+                }
+            }
+        }
+    }
+
+    if (slotIndex < 0 && target == MENU_TARGET_SINGLE_PLAYER) {
+        void *slot0 = NULL;
+        if (!IsBadReadPtr(dispatchSelf + 0xEC, sizeof(void *)))
+            slot0 = *(void **)(dispatchSelf + 0xEC);
+        if (slot0 && !IsBadReadPtr(slot0, sizeof(void *))) {
+            eventTarget = slot0;
+            slotIndex = 0;
+        }
+    }
+
+    LONG handlerOffset = menuDispatchHandlerOffset(vtable);
+
+    if (!vtable || handlerOffset < 0 ||
+        IsBadReadPtr((void *)vtable, handlerOffset + sizeof(DWORD))) {
+        hookLog("MENU2: target=%s child=%ld item=%p index=%ld container=%p self=%p bad vtable=0x%08X",
+                menuTargetName(target), (long)childIndex, (void *)item, (long)itemIndex,
+                (void *)container, (void *)dispatchSelf, (unsigned)vtable);
+        logMenuWrapperSummary("badvt", container);
+        return 0;
+    }
+
+    handler = *(DWORD *)(vtable + handlerOffset);
+    if (!handler || handler == 0x00401670 || IsBadReadPtr((void *)handler, 1)) {
+        hookLog("MENU2: target=%s child=%ld item=%p index=%ld container=%p self=%p vt=0x%08X handler=0x%08X invalid",
+                menuTargetName(target), (long)childIndex, (void *)item, (long)itemIndex,
+                (void *)container, (void *)dispatchSelf, (unsigned)vtable, (unsigned)handler);
+        logMenuWrapperSummary("invalid", container);
+        return 0;
+    }
+
+    memset(eventBuf, 0, sizeof(eventBuf));
+    *(DWORD *)(eventBuf + 0x10) = 2;
+    *(DWORD *)(eventBuf + 0x18) = 0;
+    *(BYTE *)(eventBuf + 0x1C) = 1;
+    *(void **)(eventBuf + 0x20) = eventTarget;
+
+    hookLog("MENU2: target=%s child=%ld item=%p index=%ld container=%p self=%p slot=%ld eventTarget=%p vt=0x%08X handler=0x%08X",
+            menuTargetName(target), (long)childIndex, (void *)item, (long)itemIndex,
+            (void *)container, (void *)dispatchSelf, (long)slotIndex, eventTarget, (unsigned)vtable, (unsigned)handler);
+
+    ((MenuContainerEvent_t)handler)(dispatchSelf, eventBuf);
+
+    hookLog("MENU2: target=%s post state440=%ld state444=%ld state448=%p",
+            menuTargetName(target),
+            !IsBadReadPtr(dispatchSelf + 0x440, sizeof(LONG)) ? (long)*(LONG *)(dispatchSelf + 0x440) : -1,
+            !IsBadReadPtr(dispatchSelf + 0x444, sizeof(LONG)) ? (long)*(LONG *)(dispatchSelf + 0x444) : -1,
+            !IsBadReadPtr(dispatchSelf + 0x448, sizeof(void *)) ? *(void **)(dispatchSelf + 0x448) : NULL);
+    return 1;
+}
+
+static int tryDispatchMenuTarget(LONG target, int phase) {
+    MenuSelectItem_t selectItem = (MenuSelectItem_t)0x5311D0;
+    MenuWrapperItem_t clickItem = (MenuWrapperItem_t)0x55A460;
+    BYTE *rawContainer;
+    BYTE *container;
+    BYTE *item;
+    LONG childIndex = -1;
+    LONG itemIndex = -1;
+    int wrapperGate;
+    int actionSubtype;
+    int armedFlag;
+    unsigned char selectResult = 0;
+    unsigned char clickResult = 0;
+    LONG actionType;
+    LONG stageBase = (phase == 0) ? 100 : 200;
+
+    g_menuClickStage = stageBase + 1;
+
+    if (!resolveMenuTargetEntry(target, &rawContainer, &container, &item, &childIndex, &itemIndex))
+        return 0;
+
+    g_menuClickStage = stageBase + 2;
+    actionType = *(LONG *)(item + 0x30);
+    hookLog("MENU: target=%s child=%ld item=%p index=%ld raw=%p container=%p actionType=%ld",
+            menuTargetName(target), (long)childIndex, (void *)item, (long)itemIndex,
+            (void *)rawContainer, (void *)container,
+            (long)actionType);
+    hookLog("MENUITEM: item=%p vt=0x%08X parent=%p p08=%p p0c=%p p10=%p p14=%p p18=0x%08X p1c=0x%08X p34=%p payload=%p",
+            (void *)item,
+            !IsBadReadPtr(item, sizeof(DWORD)) ? (unsigned)*(DWORD *)item : 0,
+            !IsBadReadPtr(item + 0x04, sizeof(void *)) ? *(void **)(item + 0x04) : NULL,
+            !IsBadReadPtr(item + 0x08, sizeof(void *)) ? *(void **)(item + 0x08) : NULL,
+            !IsBadReadPtr(item + 0x0C, sizeof(void *)) ? *(void **)(item + 0x0C) : NULL,
+            !IsBadReadPtr(item + 0x10, sizeof(void *)) ? *(void **)(item + 0x10) : NULL,
+            !IsBadReadPtr(item + 0x14, sizeof(void *)) ? *(void **)(item + 0x14) : NULL,
+            !IsBadReadPtr(item + 0x18, sizeof(DWORD)) ? (unsigned)*(DWORD *)(item + 0x18) : 0,
+            !IsBadReadPtr(item + 0x1C, sizeof(DWORD)) ? (unsigned)*(DWORD *)(item + 0x1C) : 0,
+            !IsBadReadPtr(item + 0x34, sizeof(void *)) ? *(void **)(item + 0x34) : NULL,
+            !IsBadReadPtr(item + 0x38, sizeof(void *)) ? *(void **)(item + 0x38) : NULL);
+
+    if (actionType == 1) {
+        if (phase == 0) {
+            g_menuClickStage = stageBase + 3;
+            int ok = tryContainerMenuTarget(target, rawContainer ? rawContainer : container, item, childIndex, itemIndex);
+            g_menuClickUsedContainerPath = ok ? 1 : 0;
+            if (ok) {
+                g_menuClickStage = stageBase + 4;
+                hookLog("MENU2: target=%s phase=%d dispatched via container path",
+                        menuTargetName(target), phase);
+                return 1;
+            }
+            g_menuClickStage = stageBase + 5;
+            hookLog("MENU2: target=%s phase=%d container path unavailable, falling back to wrapper",
+                    menuTargetName(target), phase);
+        } else if (g_menuClickUsedContainerPath) {
+            g_menuClickUsedContainerPath = 0;
+            g_menuClickStage = stageBase + 4;
+            hookLog("MENU2: target=%s phase=%d skipping synthetic release after container dispatch",
+                    menuTargetName(target), phase);
+            return 1;
+        }
+    }
+
+    /* Mirror the internal focus path first, then use the item's higher-level wrapper with
+     * the same engage/release contract the extracted binary uses:
+     * - phase 0 (down): enter the wrapper's active path and arm the queue record.
+     * - phase 1 (up): take the wrapper's release/reset branch. */
+    wrapperGate = (phase == 0) ? 1 : 0;
+    actionSubtype = 0;
+    armedFlag = (phase == 0) ? 1 : 0;
+
+    g_menuClickStage = stageBase + 6;
+    if (container)
+        selectResult = selectItem(container, item);
+    g_menuClickStage = stageBase + 7;
+    hookLog("MENU: target=%s phase=%d pre-wrapper gate=%d subtype=%d armed=%d",
+            menuTargetName(target), phase, wrapperGate, actionSubtype, armedFlag);
+    clickResult = clickItem(item, wrapperGate, actionSubtype, armedFlag, NULL, 0);
+    g_menuClickStage = stageBase + 8;
+
+    hookLog("MENU: dispatched target=%s phase=%d gate=%d subtype=%d armed=%d select=%u click=%u hover=%ld active=%ld",
+            menuTargetName(target),
+            phase,
+            wrapperGate,
+            actionSubtype,
+            armedFlag,
+            (unsigned)selectResult,
+            (unsigned)clickResult,
+            container && !IsBadReadPtr(container + 0x40, 8) ? (long)*(LONG *)(container + 0x40) : -999,
+            container && !IsBadReadPtr(container + 0x44, 8) ? (long)*(LONG *)(container + 0x44) : -999);
+    g_menuClickStage = stageBase + 9;
+    return 1;
+}
+
+static int tryWrapperMenuTarget(
+    LONG target,
+    LONG arg1,
+    LONG arg2,
+    LONG arg3,
+    LONG arg5,
+    LONG usePayload,
+    LONG forceClear18,
+    LONG forceClear2C,
+    LONG arg5FromItem24
+) {
+    MenuSelectItem_t selectItem = (MenuSelectItem_t)0x5311D0;
+    MenuWrapperItem_t wrapItem = (MenuWrapperItem_t)0x55A460;
+    BYTE *rawContainer;
+    BYTE *container;
+    BYTE *item;
+    void *context = NULL;
+    void *payload = NULL;
+    DWORD vtable = 0;
+    DWORD handler54 = 0;
+    DWORD handler64 = 0;
+    LONG resolvedArg5 = arg5;
+    LONG childIndex = -1;
+    LONG itemIndex = -1;
+    unsigned char selectResult = 0;
+    unsigned char wrapResult;
+
+    if (!resolveMenuTargetEntry(target, &rawContainer, &container, &item, &childIndex, &itemIndex))
+        return 0;
+
+    payload = *(void **)(item + 0x38);
+    if (usePayload) {
+        context = payload;
+        if (!context) {
+            hookLog("MENUWRAP: target=%s item=%p requested payload context but payload is null",
+                    menuTargetName(target), (void *)item);
+            return 0;
+        }
+    }
+
+    if (forceClear18 && *(BYTE *)(item + 0x18) != 0) {
+        hookLog("MENUWRAP: clearing item+0x18 gate on item=%p (was %u)",
+                (void *)item, (unsigned)*(BYTE *)(item + 0x18));
+        *(BYTE *)(item + 0x18) = 0;
+    }
+
+    if (container)
+        selectResult = selectItem(container, item);
+
+    if (forceClear2C && *(BYTE *)(item + 0x2C) != 0) {
+        hookLog("MENUWRAP: clearing item+0x2C gate on item=%p (was %u)",
+                (void *)item, (unsigned)*(BYTE *)(item + 0x2C));
+        *(BYTE *)(item + 0x2C) = 0;
+    }
+
+    if (arg5FromItem24) {
+        resolvedArg5 = *(LONG *)(item + 0x24);
+    }
+
+    if (!IsBadReadPtr(item, sizeof(DWORD))) {
+        vtable = *(DWORD *)item;
+        if (vtable && !IsBadReadPtr((void *)vtable, 0x68)) {
+            handler54 = *(DWORD *)(vtable + 0x54);
+            handler64 = *(DWORD *)(vtable + 0x64);
+        }
+    }
+
+    hookLog("MENUWRAP: target=%s child=%ld item=%p vt=0x%08X h54=0x%08X h64=0x%08X index=%ld actionType=%ld flag18=%u flag2c=%u item24=0x%08X d8=%ld c4[0]=0x%08X c4[1]=0x%08X c4[2]=0x%08X slot34=%p payload=%p a1=%ld a2=%ld a3=%ld a4=%p a5=%ld",
+            menuTargetName(target),
+            (long)childIndex,
+            (void *)item,
+            (unsigned)vtable,
+            (unsigned)handler54,
+            (unsigned)handler64,
+            (long)itemIndex,
+            (long)*(LONG *)(item + 0x30),
+            (unsigned)*(BYTE *)(item + 0x18),
+            (unsigned)*(BYTE *)(item + 0x2C),
+            (unsigned)*(DWORD *)(item + 0x24),
+            !IsBadReadPtr(item + 0xD8, sizeof(LONG)) ? (long)*(LONG *)(item + 0xD8) : -1,
+            !IsBadReadPtr(item + 0xC4, sizeof(DWORD)) ? (unsigned)*(DWORD *)(item + 0xC4) : 0,
+            !IsBadReadPtr(item + 0xC8, sizeof(DWORD)) ? (unsigned)*(DWORD *)(item + 0xC8) : 0,
+            !IsBadReadPtr(item + 0xCC, sizeof(DWORD)) ? (unsigned)*(DWORD *)(item + 0xCC) : 0,
+            *(void **)(item + 0x34),
+            payload,
+            (long)arg1,
+            (long)arg2,
+            (long)arg3,
+            context,
+            (long)resolvedArg5);
+    logMenuAppState("wrap-before");
+    logMenuQueueState("wrap-before");
+
+    wrapResult = wrapItem(item, (int)arg1, (int)arg2, (int)arg3, context, (int)resolvedArg5);
+
+    hookLog("MENUWRAP: select=%u result=%u hover=%ld active=%ld post18=%u post2c=%u",
+            (unsigned)selectResult,
+            (unsigned)wrapResult,
+            container && !IsBadReadPtr(container + 0x40, 8) ? (long)*(LONG *)(container + 0x40) : -999,
+            container && !IsBadReadPtr(container + 0x44, 8) ? (long)*(LONG *)(container + 0x44) : -999,
+            (unsigned)*(BYTE *)(item + 0x18),
+            (unsigned)*(BYTE *)(item + 0x2C));
+    logMenuAppState("wrap-after");
+    logMenuQueueState("wrap-after");
+    return 1;
+}
+
+static int tryDirectMenuTarget(LONG target, LONG mode, LONG pumpCount) {
+    MenuSelectItem_t selectItem = (MenuSelectItem_t)0x5311D0;
+    MenuCase2Item_t case2Item = (MenuCase2Item_t)0x4D6A40;
+    MenuCase3Item_t case3Item = (MenuCase3Item_t)0x4D69D0;
+    MenuCase4Item_t case4Item = (MenuCase4Item_t)0x4D5D00;
+    BYTE *rawContainer;
+    BYTE *container;
+    BYTE *item;
+    void *payload;
+    LONG childIndex = -1;
+    LONG itemIndex = -1;
+
+    if (!resolveMenuTargetEntry(target, &rawContainer, &container, &item, &childIndex, &itemIndex))
+        return 0;
+
+    payload = *(void **)(item + 0x38);
+    if (!payload) {
+        hookLog("MENUDIRECT: target=%s mode=%s item=%p has null payload",
+                menuTargetName(target), menuDirectModeName(mode), (void *)item);
+        return 0;
+    }
+
+    if (container)
+        selectItem(container, item);
+
+    hookLog("MENUDIRECT: target=%s mode=%s pump=%ld child=%ld item=%p index=%ld payload=%p actionType=%ld",
+            menuTargetName(target), menuDirectModeName(mode), (long)pumpCount, (long)childIndex, (void *)item,
+            (long)itemIndex, payload, (long)*(LONG *)(item + 0x30));
+    logMenuAppState("before");
+
+    switch (mode) {
+    case MENUDIRECT_CASE2:
+        case2Item((void *)0x818718, payload, 1);
+        break;
+    case MENUDIRECT_CASE3:
+        case3Item((void *)0x818718, payload);
+        break;
+    case MENUDIRECT_CASE4:
+        case4Item((void *)0x818718, 0);
+        break;
+    case MENUDIRECT_COMBO:
+        case3Item((void *)0x818718, payload);
+        case2Item((void *)0x818718, payload, 1);
+        case4Item((void *)0x818718, 0);
+        break;
+    default:
+        hookLog("MENUDIRECT: unknown mode=%ld target=%s", (long)mode, menuTargetName(target));
+        return 0;
+    }
+
+    logMenuAppState("after-set");
+    if (pumpCount > 0)
+        pumpMenuApp("direct", pumpCount);
+    logMenuAppState("after");
+    return 1;
+}
+
+static int tryMainMenuTarget(LONG target, LONG mode, LONG pumpCount) {
+    FindNamedObject_t findNamedObject = (FindNamedObject_t)0x4D6900;
+    MainMenuProcessMessage_t processMessage = (MainMenuProcessMessage_t)0x4E3520;
+    MainMenuCallback_t callback = (MainMenuCallback_t)(uintptr_t)mainMenuCallbackAddress(target);
+    MainMenuCallback_t managerPump = (MainMenuCallback_t)0x4E3C10;
+    BYTE *rawContainer;
+    BYTE *container;
+    BYTE *item;
+    BYTE *mainMenu;
+    BYTE *manager;
+    BYTE *itemToken = NULL;
+    BYTE *payload = NULL;
+    BYTE *owner10 = NULL;
+    const char *itemTokenName = NULL;
+    const char *payloadName = NULL;
+    const char *owner10Name = NULL;
+    const char *targetTokenName = mainMenuTokenName(target);
+    LONG childIndex = -1;
+    LONG itemIndex = -1;
+    LONG i;
+    struct {
+        DWORD unk0;
+        DWORD unk4;
+        const char *name;
+    } fakeToken = { 0, 0, NULL };
+    BYTE eventBuf[0x28];
+    void *eventTarget = NULL;
+
+    if (!targetTokenName) {
+        hookLog("MAINMENU: target=%s has no token mapping", menuTargetName(target));
+        return 0;
+    }
+
+    if (!resolveMenuTargetEntry(target, &rawContainer, &container, &item, &childIndex, &itemIndex))
+        return 0;
+
+    mainMenu = (BYTE *)findNamedObject((void *)0x818718, "MainMenu");
+    manager = (BYTE *)findNamedObject((void *)0x818718, "MainMenuManager");
+    if ((!mainMenu || IsBadReadPtr(mainMenu, 0xF4)) &&
+        manager && !IsBadReadPtr(manager, sizeof(DWORD)) &&
+        *(DWORD *)manager == 0x005D4078) {
+        mainMenu = manager;
+    }
+
+    if ((!mainMenu || IsBadReadPtr(mainMenu, 0xF4)) &&
+        (mode == MENUDIRECT_MAINMSG || mode == MENUDIRECT_MAINCOMBO)) {
+        hookLog("MAINMENU: target=%s main menu object missing for processMessage", menuTargetName(target));
+        if (mode == MENUDIRECT_MAINMSG)
+            return 0;
+    }
+
+    if (!IsBadReadPtr(item + 0x08, sizeof(void *)))
+        itemToken = *(BYTE **)(item + 0x08);
+    if (!IsBadReadPtr(item + 0x10, sizeof(void *)))
+        owner10 = *(BYTE **)(item + 0x10);
+    if (!IsBadReadPtr(item + 0x38, sizeof(void *)))
+        payload = *(BYTE **)(item + 0x38);
+
+    itemTokenName = tryReadNamedObjectToken(itemToken);
+    payloadName = tryReadNamedObjectToken(payload);
+    owner10Name = tryReadNamedObjectToken(owner10);
+
+    fakeToken.name = targetTokenName;
+    eventTarget = (itemTokenName && _stricmp(itemTokenName, targetTokenName) == 0)
+        ? (void *)itemToken
+        : (void *)&fakeToken;
+
+    memset(eventBuf, 0, sizeof(eventBuf));
+    *(DWORD *)(eventBuf + 0x10) = 2;
+    *(DWORD *)(eventBuf + 0x18) = 0;
+    *(BYTE *)(eventBuf + 0x1C) = 1;
+    *(void **)(eventBuf + 0x20) = eventTarget;
+
+    hookLog("MAINMENU: target=%s mode=%s child=%ld item=%p index=%ld raw=%p container=%p menu=%p mgr=%p item08=%p token=%s payload=%p payloadToken=%s owner10=%p ownerToken=%s eventTarget=%p eventToken=%s cb=0x%08X",
+            menuTargetName(target),
+            menuDirectModeName(mode),
+            (long)childIndex,
+            (void *)item,
+            (long)itemIndex,
+            (void *)rawContainer,
+            (void *)container,
+            (void *)mainMenu,
+            (void *)manager,
+            (void *)itemToken,
+            itemTokenName ? itemTokenName : "<null>",
+            (void *)payload,
+            payloadName ? payloadName : "<null>",
+            (void *)owner10,
+            owner10Name ? owner10Name : "<null>",
+            eventTarget,
+            targetTokenName,
+            (unsigned)(uintptr_t)mainMenuCallbackAddress(target));
+    logMainMenuState("before");
+    logMenuAppState("main-before");
+    logMenuQueueState("main-before");
+
+    if ((mode == MENUDIRECT_MAINMSG || mode == MENUDIRECT_MAINCOMBO) &&
+        mainMenu && !IsBadReadPtr(mainMenu, 0xF4)) {
+        processMessage(mainMenu, eventBuf);
+        hookLog("MAINMENU: processMessage target=%s completed", menuTargetName(target));
+        logMainMenuState("after-msg");
+        logMenuQueueState("after-msg");
+    }
+
+    if ((mode == MENUDIRECT_MAINCB || mode == MENUDIRECT_MAINCOMBO) && callback) {
+        callback(eventTarget, NULL);
+        hookLog("MAINMENU: callback target=%s completed", menuTargetName(target));
+        logMainMenuState("after-cb");
+        logMenuQueueState("after-cb");
+    }
+
+    for (i = 0; i < pumpCount; i++) {
+        managerPump(manager ? manager : mainMenu, NULL);
+        hookLog("MAINMENU: manager pump %ld/%ld target=%s", (long)(i + 1), (long)pumpCount, menuTargetName(target));
+        logMainMenuState("after-pump");
+        logMenuQueueState("after-pump");
+    }
+
+    logMenuAppState("main-after");
+    return 1;
 }
 
 /* Force frame pointer so we can walk the frame chain to find caller's EBP.
@@ -906,6 +2301,83 @@ static HRESULT WINAPI hookedMouseGetDeviceData(
                         (unsigned long)*(DWORD*)(ev+0), (long)(int)*(DWORD*)(ev+4));
             }
         }
+    }
+
+    if (g_menuTraceRemaining > 0) {
+        logMenuAppState("tick");
+        logMainMenuState("tick");
+        InterlockedDecrement(&g_menuTraceRemaining);
+    }
+
+    if (g_menuDirectMode != MENUDIRECT_NONE) {
+        LONG target = g_menuDirectTarget;
+        LONG mode = g_menuDirectMode;
+        LONG pumpCount = g_menuDirectPumpCount;
+        int ok;
+        if (mode == MENUDIRECT_MAINMSG || mode == MENUDIRECT_MAINCB || mode == MENUDIRECT_MAINCOMBO)
+            ok = tryMainMenuTarget(target, mode, pumpCount);
+        else
+            ok = tryDirectMenuTarget(target, mode, pumpCount);
+        g_menuDirectMode = MENUDIRECT_NONE;
+        g_menuDirectPumpCount = 0;
+        g_menuTraceRemaining = 6;
+        hookLog("MENUDIRECT: target=%s mode=%s pump=%ld %s",
+                menuTargetName(target), menuDirectModeName(mode), (long)pumpCount,
+                ok ? "completed" : "failed");
+    }
+
+    if (g_menuPumpPending) {
+        LONG pumpCount = g_menuPumpCount;
+        g_menuPumpPending = 0;
+        pumpMenuApp("manual", pumpCount);
+        g_menuTraceRemaining = 6;
+        hookLog("MENUPUMP: count=%ld completed", (long)pumpCount);
+    }
+
+    if (g_menuWrapPending) {
+        LONG target = g_menuWrapTarget;
+        LONG arg1 = g_menuWrapArg1;
+        LONG arg2 = g_menuWrapArg2;
+        LONG arg3 = g_menuWrapArg3;
+        LONG arg5 = g_menuWrapArg5;
+        LONG usePayload = g_menuWrapUsePayload;
+        LONG forceClear18 = g_menuWrapForceClear18;
+        LONG forceClear2C = g_menuWrapForceClear2C;
+        LONG arg5FromItem24 = g_menuWrapArg5FromItem24;
+        int ok = tryWrapperMenuTarget(target, arg1, arg2, arg3, arg5, usePayload, forceClear18, forceClear2C, arg5FromItem24);
+        g_menuWrapPending = 0;
+        g_menuTraceRemaining = 6;
+        hookLog("MENUWRAP: target=%s a1=%ld a2=%ld a3=%ld a5=%ld payload=%ld clear18=%ld clear2c=%ld a5item24=%ld %s",
+                menuTargetName(target),
+                (long)arg1,
+                (long)arg2,
+                (long)arg3,
+                (long)arg5,
+                (long)usePayload,
+                (long)forceClear18,
+                (long)forceClear2C,
+                (long)arg5FromItem24,
+                ok ? "completed" : "failed");
+    }
+
+    if (g_menuClickState == MENUCLICK_PENDING_DOWN) {
+        LONG target = g_menuClickTarget;
+        g_menuClickStage = 10;
+        int ok = tryDispatchMenuTarget(target, 0);
+        g_menuClickState = ok ? MENUCLICK_PENDING_UP : MENUCLICK_DONE;
+        g_menuClickStage = ok ? 11 : 12;
+        g_menuTraceRemaining = 6;
+        hookLog("MENU: menuclick target=%s down %s",
+                menuTargetName(target), ok ? "completed" : "failed");
+    } else if (g_menuClickState == MENUCLICK_PENDING_UP) {
+        LONG target = g_menuClickTarget;
+        g_menuClickStage = 20;
+        int ok = tryDispatchMenuTarget(target, 1);
+        g_menuClickState = MENUCLICK_DONE;
+        g_menuClickStage = ok ? 21 : 22;
+        g_menuTraceRemaining = 6;
+        hookLog("MENU: menuclick target=%s up %s",
+                menuTargetName(target), ok ? "completed" : "failed");
     }
 
     /* --- v7 injection: OPTIMIZED 3-call state machine ---
@@ -1222,6 +2694,71 @@ static HRESULT WINAPI hookedMouseGetDeviceData(
      * Even from the game thread, calling it during DInput polling causes
      * 0xC0000005 crashes (function relies on state not yet updated).
      * g_gameMouseX/Y remain 0 — use readmem for cursor diagnosis instead. */
+
+    /* --- Direct FIFO injection (rawclick) ---
+     * Writes synthetic events straight into CInputDevice's event queue,
+     * bypassing ProcessInput's type assignment.  Runs on game thread (safe). */
+    if (g_rawclickState != RAWCLICK_IDLE && g_callerEBP) {
+        BYTE *cinput = (BYTE *)(uintptr_t)g_callerEBP;
+        DWORD *pCount = (DWORD *)(cinput + 0x142C);
+        DWORD count = *pCount;
+        float fx = g_rawclickX, fy = g_rawclickY;
+
+        if (g_rawclickState == RAWCLICK_PENDING && count + 2 <= 128) {
+            /* Slot 1: type=3 mouse_move — updates [GameApp+0x813C/8140] stored cursor */
+            BYTE *slot = cinput + 0x2C + count * 40;
+            memset(slot, 0, 40);
+            *(DWORD *)(slot + 0x00) = 3;       /* type = mouse_move */
+            *(float *)(slot + 0x08) = fx;      /* cursor X */
+            *(float *)(slot + 0x0C) = fy;      /* cursor Y */
+            *(DWORD *)(slot + 0x20) = 0xFFFFFFFF;
+            count++;
+
+            /* Slot 2: button-down event (type configurable, default=5) */
+            slot = cinput + 0x2C + count * 40;
+            memset(slot, 0, 40);
+            *(DWORD *)(slot + 0x00) = g_rawclickType;  /* type (4 or 5) */
+            *(BYTE  *)(slot + 0x06) = 1;               /* down flag */
+            *(float *)(slot + 0x08) = fx;              /* cursor X */
+            *(float *)(slot + 0x0C) = fy;              /* cursor Y */
+            *(float *)(slot + 0x10) = fx;              /* delta X */
+            *(float *)(slot + 0x14) = fy;              /* delta Y */
+            *(DWORD *)(slot + 0x18) = 1;               /* button state (left=bit0) */
+            *(DWORD *)(slot + 0x20) = 0xFFFFFFFF;
+            count++;
+
+            *pCount = count;
+
+            /* Also set CInputDevice cursor + button state */
+            *(float *)(cinput + 0x14) = fx;
+            *(float *)(cinput + 0x18) = fy;
+            *(BYTE  *)(cinput + 0x1431) = 1;  /* left button state = pressed */
+
+            g_rawclickState = RAWCLICK_UP;
+            hookLog("RAWCLICK: wrote move+btn_down type=%d at (%.0f,%.0f) slots %d-%d",
+                    g_rawclickType, fx, fy, count - 2, count - 1);
+
+        } else if (g_rawclickState == RAWCLICK_UP && count + 1 <= 128) {
+            /* Button-up event */
+            BYTE *slot = cinput + 0x2C + count * 40;
+            memset(slot, 0, 40);
+            *(DWORD *)(slot + 0x00) = g_rawclickType;
+            *(BYTE  *)(slot + 0x06) = 0;               /* up flag */
+            *(float *)(slot + 0x08) = fx;
+            *(float *)(slot + 0x0C) = fy;
+            *(float *)(slot + 0x10) = fx;
+            *(float *)(slot + 0x14) = fy;
+            *(DWORD *)(slot + 0x20) = 0xFFFFFFFF;
+            count++;
+
+            *pCount = count;
+            *(BYTE *)(cinput + 0x1431) = 0;  /* left button state = released */
+
+            g_rawclickState = RAWCLICK_DONE;
+            hookLog("RAWCLICK: wrote btn_up type=%d at (%.0f,%.0f) slot %d",
+                    g_rawclickType, fx, fy, count - 1);
+        }
+    }
 
     /* Signal event handle to keep game polling */
     if (g_mouseEventHandle) SetEvent(g_mouseEventHandle);
@@ -1729,7 +3266,7 @@ static DWORD WINAPI wakeThreadProc(LPVOID param) {
                             float ciX = (float)g_gameMouseX;
                             float ciY = (float)g_gameMouseY;
                             snprintf(pollMsg, sizeof(pollMsg),
-                                "poll state=%d gds=%ld gdd=%ld kbd=%ld gas=%ld gcp=%ld cur=%ld,%ld hwnd=%d evt=%d ax=%ld ay=%ld ab=%ld ci=%.1f,%.1f hr=0x%08X re=%lu rq=%ld ra=0x%08X md=%p eb=0x%08X\n",
+                                "poll state=%d gds=%ld gdd=%ld kbd=%ld gas=%ld gcp=%ld cur=%ld,%ld hwnd=%d evt=%d ax=%ld ay=%ld ab=%ld ci=%.1f,%.1f hr=0x%08X re=%lu rq=%ld ra=0x%08X md=%p eb=0x%08X rc=%d mc=%ld mt=%ld ms=%ld\n",
                                 (int)g_injState,
                                 (long)g_getDeviceStateCallCount,
                                 (long)g_getDeviceDataCallCount,
@@ -1746,7 +3283,11 @@ static DWORD WINAPI wakeThreadProc(LPVOID param) {
                                 (long)g_reacqTotal,
                                 (unsigned)g_lastGddRetAddr,
                                 (void*)g_mouseDevice,
-                                (unsigned)g_callerEBP);
+                                (unsigned)g_callerEBP,
+                                (int)g_rawclickState,
+                                (long)g_menuClickState,
+                                (long)g_menuClickTarget,
+                                (long)g_menuClickStage);
                             send(s, pollMsg, (int)strlen(pollMsg), 0);
 
                             char buf[256] = {0};
@@ -1818,6 +3359,190 @@ static DWORD WINAPI wakeThreadProc(LPVOID param) {
                                     g_forceClickFrames = 200;  /* 200 API calls worth of override */
                                     hookLog("TCP: gasclick armed at (%d,%d) for 200 frames", cmdX, cmdY);
 
+                                } else if (strncmp(buf, "rawclick ", 9) == 0) {
+                                    /* Direct FIFO injection: writes type=3 + type=5 events
+                                     * straight into CInputDevice's event queue, bypassing
+                                     * ProcessInput's type-4 assignment entirely.
+                                     * Usage: rawclick <x> <y> [type]  (type: 4 or 5, default 5) */
+                                    float rx = 0, ry = 0;
+                                    int rtype = 5;
+                                    sscanf(buf + 9, "%f %f %d", &rx, &ry, &rtype);
+                                    g_rawclickX = rx;
+                                    g_rawclickY = ry;
+                                    g_rawclickType = (DWORD)rtype;
+                                    g_rawclickState = RAWCLICK_PENDING;
+                                    if (g_mouseEventHandle) SetEvent(g_mouseEventHandle);
+                                    hookLog("TCP cmd: rawclick at (%.0f,%.0f) type=%d", rx, ry, rtype);
+                                    char resp[128];
+                                    snprintf(resp, sizeof(resp),
+                                        "RESP:rawclick armed at (%.0f,%.0f) type=%d\n", rx, ry, rtype);
+                                    send(s, resp, (int)strlen(resp), 0);
+
+                                } else if (strncmp(buf, "menuclick", 9) == 0) {
+                                    LONG target = MENU_TARGET_SINGLE_PLAYER;
+                                    if (strstr(buf, "singleplayer") == NULL &&
+                                        strstr(buf, "single player") == NULL &&
+                                        strstr(buf, "single-player") == NULL &&
+                                        strncmp(buf, "menuclick", 9) != 0) {
+                                        target = MENU_TARGET_NONE;
+                                    }
+
+                                    if (target == MENU_TARGET_NONE) {
+                                        const char *resp = "RESP:menuclick unknown target\n";
+                                        send(s, resp, (int)strlen(resp), 0);
+                                        hookLog("TCP cmd: menuclick unknown target [%s]", buf);
+                                    } else {
+                                        g_menuClickTarget = target;
+                                        g_menuClickStage = 1;
+                                        g_menuClickState = MENUCLICK_PENDING_DOWN;
+                                        if (g_mouseEventHandle) SetEvent(g_mouseEventHandle);
+                                        hookLog("TCP cmd: menuclick target=%s", menuTargetName(target));
+                                        {
+                                            char resp[128];
+                                            snprintf(resp, sizeof(resp),
+                                                "RESP:menuclick armed target=%s\n",
+                                                menuTargetName(target));
+                                            send(s, resp, (int)strlen(resp), 0);
+                                        }
+                                    }
+
+                                } else if (strncmp(buf, "menudirect", 10) == 0) {
+                                    LONG target = MENU_TARGET_SINGLE_PLAYER;
+                                    LONG mode = MENUDIRECT_COMBO;
+                                    LONG pumpCount = 0;
+                                    char *pumpPos = strstr(buf, "pump");
+
+                                    if (strstr(buf, "singleplayer") == NULL &&
+                                        strstr(buf, "single player") == NULL &&
+                                        strstr(buf, "single-player") == NULL) {
+                                        target = MENU_TARGET_NONE;
+                                    }
+
+                                    if (strstr(buf, "maincombo")) {
+                                        mode = MENUDIRECT_MAINCOMBO;
+                                    } else if (strstr(buf, "maincb") || strstr(buf, "callback")) {
+                                        mode = MENUDIRECT_MAINCB;
+                                    } else if (strstr(buf, "mainmsg")) {
+                                        mode = MENUDIRECT_MAINMSG;
+                                    } else if (strstr(buf, "case2")) {
+                                        mode = MENUDIRECT_CASE2;
+                                    } else if (strstr(buf, "case3")) {
+                                        mode = MENUDIRECT_CASE3;
+                                    } else if (strstr(buf, "case4")) {
+                                        mode = MENUDIRECT_CASE4;
+                                    } else if (strstr(buf, "combo")) {
+                                        mode = MENUDIRECT_COMBO;
+                                    }
+
+                                    if (pumpPos) {
+                                        LONG parsedPump = 0;
+                                        pumpCount = 1;
+                                        if (sscanf(pumpPos + 4, "%ld", &parsedPump) == 1 && parsedPump > 0)
+                                            pumpCount = parsedPump;
+                                    }
+
+                                    if (target == MENU_TARGET_NONE || mode == MENUDIRECT_NONE) {
+                                        const char *resp = "RESP:menudirect invalid target/mode\n";
+                                        send(s, resp, (int)strlen(resp), 0);
+                                        hookLog("TCP cmd: menudirect invalid [%s]", buf);
+                                    } else {
+                                        g_menuDirectTarget = target;
+                                        g_menuDirectMode = mode;
+                                        g_menuDirectPumpCount = pumpCount;
+                                        if (g_mouseEventHandle) SetEvent(g_mouseEventHandle);
+                                        hookLog("TCP cmd: menudirect target=%s mode=%s pump=%ld",
+                                                menuTargetName(target), menuDirectModeName(mode),
+                                                (long)pumpCount);
+                                        {
+                                            char resp[160];
+                                            snprintf(resp, sizeof(resp),
+                                                "RESP:menudirect armed target=%s mode=%s pump=%ld\n",
+                                                menuTargetName(target), menuDirectModeName(mode),
+                                                (long)pumpCount);
+                                            send(s, resp, (int)strlen(resp), 0);
+                                        }
+                                    }
+
+                                } else if (strncmp(buf, "menupump", 8) == 0) {
+                                    LONG pumpCount = 1;
+
+                                    if (sscanf(buf + 8, "%ld", &pumpCount) != 1)
+                                        pumpCount = 1;
+
+                                    g_menuPumpCount = clampMenuPumpCount(pumpCount);
+                                    g_menuPumpPending = 1;
+                                    if (g_mouseEventHandle) SetEvent(g_mouseEventHandle);
+                                    hookLog("TCP cmd: menupump count=%ld", (long)g_menuPumpCount);
+                                    {
+                                        char resp[96];
+                                        snprintf(resp, sizeof(resp),
+                                            "RESP:menupump armed count=%ld\n",
+                                            (long)g_menuPumpCount);
+                                        send(s, resp, (int)strlen(resp), 0);
+                                    }
+
+                                } else if (strncmp(buf, "menuwrap", 8) == 0) {
+                                    char targetName[64] = {0};
+                                    LONG target = MENU_TARGET_NONE;
+                                    LONG arg1 = 0;
+                                    LONG arg2 = 0;
+                                    LONG arg3 = 0;
+                                    LONG arg5 = 0;
+                                    LONG usePayload = strstr(buf, "payload") ? 1 : 0;
+                                    LONG forceClear18 = strstr(buf, "clear18") ? 1 : 0;
+                                    LONG forceClear2C = strstr(buf, "clear2c") ? 1 : 0;
+                                    LONG arg5FromItem24 = strstr(buf, "a5item24") ? 1 : 0;
+                                    int parsed = sscanf(buf, "menuwrap %63s %ld %ld %ld %ld",
+                                                        targetName, &arg1, &arg2, &arg3, &arg5);
+
+                                    if (_stricmp(targetName, "singleplayer") == 0 ||
+                                        _stricmp(targetName, "single-player") == 0) {
+                                        target = MENU_TARGET_SINGLE_PLAYER;
+                                    }
+
+                                    if (target == MENU_TARGET_NONE || parsed < 5) {
+                                        const char *resp = "RESP:menuwrap invalid target/args\n";
+                                        send(s, resp, (int)strlen(resp), 0);
+                                        hookLog("TCP cmd: menuwrap invalid [%s]", buf);
+                                    } else {
+                                        g_menuWrapTarget = target;
+                                        g_menuWrapArg1 = arg1;
+                                        g_menuWrapArg2 = arg2;
+                                        g_menuWrapArg3 = arg3;
+                                        g_menuWrapArg5 = arg5;
+                                        g_menuWrapUsePayload = usePayload;
+                                        g_menuWrapForceClear18 = forceClear18;
+                                        g_menuWrapForceClear2C = forceClear2C;
+                                        g_menuWrapArg5FromItem24 = arg5FromItem24;
+                                        g_menuWrapPending = 1;
+                                        if (g_mouseEventHandle) SetEvent(g_mouseEventHandle);
+                                        hookLog("TCP cmd: menuwrap target=%s a1=%ld a2=%ld a3=%ld a5=%ld payload=%ld clear18=%ld clear2c=%ld a5item24=%ld",
+                                                menuTargetName(target),
+                                                (long)arg1,
+                                                (long)arg2,
+                                                (long)arg3,
+                                                (long)arg5,
+                                                (long)usePayload,
+                                                (long)forceClear18,
+                                                (long)forceClear2C,
+                                                (long)arg5FromItem24);
+                                        {
+                                            char resp[192];
+                                            snprintf(resp, sizeof(resp),
+                                                "RESP:menuwrap armed target=%s a1=%ld a2=%ld a3=%ld a5=%ld payload=%ld clear18=%ld clear2c=%ld a5item24=%ld\n",
+                                                menuTargetName(target),
+                                                (long)arg1,
+                                                (long)arg2,
+                                                (long)arg3,
+                                                (long)arg5,
+                                                (long)usePayload,
+                                                (long)forceClear18,
+                                                (long)forceClear2C,
+                                                (long)arg5FromItem24);
+                                            send(s, resp, (int)strlen(resp), 0);
+                                        }
+                                    }
+
                                 } else if (strncmp(buf, "btn", 3) == 0) {
                                     /* Button-only injection: no position change.
                                      * Tests if game's internal cursor is already at the right spot. */
@@ -1827,6 +3552,56 @@ static DWORD WINAPI wakeThreadProc(LPVOID param) {
                                     g_injState = INJ_BTN_ONLY;
                                     if (g_mouseEventHandle) SetEvent(g_mouseEventHandle);
                                     hookLog("TCP: btn-only injection armed");
+
+                                } else if (strncmp(buf, "key", 3) == 0) {
+                                    int dikCode = -1;
+                                    if (strstr(buf, "enter")) dikCode = 0x1C;      /* DIK_RETURN */
+                                    else if (strstr(buf, "space")) dikCode = 0x39; /* DIK_SPACE */
+                                    else sscanf(buf + 3, "%d", &dikCode);
+
+                                    if (!g_shm || dikCode < 0 || dikCode > 255) {
+                                        const char *resp = "RESP:key invalid\n";
+                                        send(s, resp, (int)strlen(resp), 0);
+                                        hookLog("TCP cmd: key invalid [%s]", buf);
+                                    } else {
+                                        InterlockedExchange(&g_shm->done, 0);
+                                        InterlockedExchange(&g_shm->frameCount, 0);
+                                        InterlockedExchange(&g_shm->phase, PHASE_IDLE);
+                                        InterlockedExchange(&g_shm->keyCode, dikCode);
+                                        InterlockedExchange(&g_shm->cmdType, CMD_KEYPRESS);
+                                        {
+                                            char resp[128];
+                                            snprintf(resp, sizeof(resp),
+                                                "RESP:key armed dik=%d\n", dikCode);
+                                            send(s, resp, (int)strlen(resp), 0);
+                                        }
+                                        hookLog("TCP cmd: key DIK=%d armed", dikCode);
+                                    }
+
+                                } else if (strncmp(buf, "wmkey", 5) == 0) {
+                                    int vkCode = 0;
+                                    if (strstr(buf, "enter")) vkCode = VK_RETURN;
+                                    else if (strstr(buf, "space")) vkCode = VK_SPACE;
+                                    else sscanf(buf + 5, "%d", &vkCode);
+
+                                    if (vkCode <= 0) {
+                                        const char *resp = "RESP:wmkey invalid\n";
+                                        send(s, resp, (int)strlen(resp), 0);
+                                        hookLog("TCP cmd: wmkey invalid [%s]", buf);
+                                    } else {
+                                        HWND hw = g_gameHwnd;
+                                        if (!hw) hw = GetForegroundWindow();
+                                        PostMessageA(hw, WM_KEYDOWN, (WPARAM)vkCode, 0);
+                                        Sleep(100);
+                                        PostMessageA(hw, WM_KEYUP, (WPARAM)vkCode, 0);
+                                        {
+                                            char resp[128];
+                                            snprintf(resp, sizeof(resp),
+                                                "RESP:wmkey sent vk=%d\n", vkCode);
+                                            send(s, resp, (int)strlen(resp), 0);
+                                        }
+                                        hookLog("TCP cmd: wmkey vk=%d hwnd=%p", vkCode, (void *)hw);
+                                    }
 
                                 } else if (strncmp(buf, "fire", 4) == 0) {
                                     /* Fire mouse_event from inside game process.
@@ -2166,23 +3941,37 @@ static void installDeviceHooks(REFGUID rguid, LPDIRECTINPUTDEVICEA dev, const ch
      * on first device creation. Must happen after game EXE is fully loaded. */
     installWin32Hooks();
 
-    /* Patch game memory: set the -W flag (0x808d74 = 1) so WndProc processes
-     * WM_MOUSE messages instead of passing them to DefWindowProcA.
-     * Without this, PostMessage WM_LBUTTONDOWN is silently ignored.
-     * This is equivalent to launching GAME.EXE with the -W command-line flag. */
+    /* Patch game memory: set the legacy -W flag (0x808d74 = 1) so WndProc takes
+     * the WM_MOUSE path instead of falling through to DefWindowProcA.
+     *
+     * The extracted snapshot binary also gates that same path on a second byte at
+     * 0x817c6c. In the live title snapshots that dword is 0x00000100, meaning the
+     * first byte is still zero even though the neighboring flag byte is set.
+     * Patch both locations so WM mouse injection actually reaches the game's
+     * message-side input translator. */
     {
         static int patched = 0;
         if (!patched) {
             BYTE *flagAddr = (BYTE *)0x808d74;
+            BYTE *wmGateAddr = (BYTE *)0x817c6c;
             DWORD oldProt2;
             if (VirtualProtect(flagAddr, 1, PAGE_READWRITE, &oldProt2)) {
                 BYTE oldVal = *flagAddr;
                 *flagAddr = 1;
                 VirtualProtect(flagAddr, 1, oldProt2, &oldProt2);
                 hookLog("PATCH: set 0x808d74 = 1 (was %d) — WM_MOUSE processing enabled (-W flag)", oldVal);
-                patched = 1;
             } else {
                 hookLog("PATCH: VirtualProtect on 0x808d74 FAILED (err=%lu)", GetLastError());
+            }
+
+            if (VirtualProtect(wmGateAddr, 1, PAGE_READWRITE, &oldProt2)) {
+                BYTE oldVal = *wmGateAddr;
+                *wmGateAddr = 1;
+                VirtualProtect(wmGateAddr, 1, oldProt2, &oldProt2);
+                hookLog("PATCH: set 0x817c6c = 1 (was %d) — WndProc mouse gate enabled", oldVal);
+                patched = 1;
+            } else {
+                hookLog("PATCH: VirtualProtect on 0x817c6c FAILED (err=%lu)", GetLastError());
             }
         }
     }
