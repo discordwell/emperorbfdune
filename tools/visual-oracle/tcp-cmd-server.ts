@@ -49,7 +49,7 @@ export class TcpCommandServer {
 
           for (const line of lines) {
             const trimmed = line.trim();
-            if (trimmed === 'poll') {
+            if (trimmed.startsWith('poll')) {
               if (this.queue.length > 0) {
                 const cmd = this.queue.shift()!;
                 socket.write(cmd.command + '\n');

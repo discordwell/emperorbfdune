@@ -41,9 +41,81 @@ static HMODULE g_realDInput = NULL;
 static InputSharedState *g_shm = NULL;
 static HANDLE g_shmHandle = NULL;
 
+/* Forward declaration of logging function */
+static void hookLog(const char *fmt, ...);
+
+/* --- Win32 API hooks (GetAsyncKeyState, GetKeyState, GetCursorPos) ---
+ *
+ * The game's title screen menu ignores ALL synthetic mouse button input:
+ * DInput GetDeviceState/GetDeviceData, SendInput, mouse_event, PostMessage,
+ * SendMessage — none register as clicks on menu buttons.
+ *
+ * Hypothesis: the menu code uses GetAsyncKeyState(VK_LBUTTON) or
+ * GetKeyState(VK_LBUTTON) to poll button state, and GetCursorPos() for
+ * hit-testing. These Win32 APIs read hardware state that QEMU virtual
+ * hardware may not update from QMP-injected events.
+ *
+ * Solution: IAT-hook these functions in the game's import table so we
+ * return controlled values during click injection phases.
+ * If IAT hook fails (game doesn't import them directly), use inline
+ * (trampoline) hooks on the actual user32.dll functions.
+ */
+typedef SHORT (WINAPI *GetAsyncKeyState_t)(int vKey);
+typedef SHORT (WINAPI *GetKeyState_t)(int nVirtKey);
+typedef BOOL  (WINAPI *GetCursorPos_t)(LPPOINT lpPoint);
+
+static GetAsyncKeyState_t g_origGetAsyncKeyState = NULL;
+static GetKeyState_t      g_origGetKeyState = NULL;
+static GetCursorPos_t     g_origGetCursorPos = NULL;
+
+/* Inline hook trampolines — executable buffers that hold saved preamble bytes
+ * plus a JMP back to original+N. Used when IAT hooks fail. */
+static BYTE g_gasTrampoline[32] __attribute__((aligned(16)));
+static BYTE g_gksTrampoline[32] __attribute__((aligned(16)));
+static BYTE g_gcpTrampoline[32] __attribute__((aligned(16)));
+
+/* Install a 5-byte inline (detour) hook on a function.
+ * Overwrites the first 5 bytes with JMP rel32 to hookFunc.
+ * Builds a trampoline in trampolineBuf that executes the saved 5 bytes
+ * then jumps back to target+5.
+ * Returns the trampoline address (callable as the original function).
+ * WARNING: assumes the first 5 bytes are a clean instruction boundary. */
+static FARPROC installInlineHook(FARPROC target, FARPROC hookFunc,
+                                  BYTE *trampolineBuf, int trampolineSize) {
+    if (!target || !hookFunc || !trampolineBuf || trampolineSize < 16)
+        return NULL;
+
+    /* Make trampoline buffer executable */
+    DWORD oldProt;
+    VirtualProtect(trampolineBuf, trampolineSize, PAGE_EXECUTE_READWRITE, &oldProt);
+
+    /* Copy first 5 bytes of target to trampoline */
+    memcpy(trampolineBuf, (void *)target, 5);
+
+    /* Append JMP rel32 back to target+5 */
+    trampolineBuf[5] = 0xE9; /* JMP rel32 */
+    DWORD jmpBack = (DWORD)((BYTE *)target + 5) - (DWORD)(trampolineBuf + 10);
+    memcpy(trampolineBuf + 6, &jmpBack, 4);
+
+    /* Overwrite target's first 5 bytes with JMP to hookFunc */
+    VirtualProtect((void *)target, 5, PAGE_EXECUTE_READWRITE, &oldProt);
+    ((BYTE *)target)[0] = 0xE9; /* JMP rel32 */
+    DWORD jmpHook = (DWORD)hookFunc - (DWORD)((BYTE *)target + 5);
+    memcpy((BYTE *)target + 1, &jmpHook, 4);
+    VirtualProtect((void *)target, 5, oldProt, &oldProt);
+
+    hookLog("Inline hook: target=%p -> hook=%p, trampoline=%p",
+            (void *)target, (void *)hookFunc, (void *)trampolineBuf);
+
+    return (FARPROC)trampolineBuf;
+}
+
 /* Saved device pointers for identifying mouse vs keyboard in GetDeviceState */
 static LPDIRECTINPUTDEVICEA g_mouseDevice = NULL;
 static LPDIRECTINPUTDEVICEA g_keyboardDevice = NULL;
+
+/* Capture game's hwnd for direct message injection */
+static HWND g_gameHwnd = NULL;
 
 /* Keyboard cooperative level hook */
 typedef HRESULT (WINAPI *SetCooperativeLevel_t)(LPDIRECTINPUTDEVICEA, HWND, DWORD);
@@ -82,6 +154,10 @@ static SetDataFormat_t g_origMouseSetDataFormat = NULL;
 typedef HRESULT (WINAPI *SetProperty_t)(LPDIRECTINPUTDEVICEA, REFGUID, LPCDIPROPHEADER);
 static SetProperty_t g_origMouseSetProperty = NULL;
 
+/* Acquire hook — logs and ensures mouse device acquisition succeeds */
+typedef HRESULT (WINAPI *Acquire_t)(LPDIRECTINPUTDEVICEA);
+static Acquire_t g_origMouseAcquire = NULL;
+
 /* SetCooperativeLevel hook — logs cooperative level flags */
 typedef HRESULT (WINAPI *SetCooperativeLevel_t)(LPDIRECTINPUTDEVICEA, HWND, DWORD);
 static SetCooperativeLevel_t g_origMouseSetCooperativeLevel = NULL;
@@ -100,6 +176,251 @@ static void hookLog(const char *fmt, ...) {
     va_end(args);
     fprintf(g_logFile, "\n");
     fflush(g_logFile);
+}
+
+/* --- IAT (Import Address Table) hooking ---
+ *
+ * Walk the PE import table of the given module, find the import for
+ * dllName!funcName, and replace its address with hookFunc.
+ * Returns the original function address, or NULL if not found.
+ */
+static FARPROC hookIAT(HMODULE module, const char *dllName,
+                       const char *funcName, FARPROC hookFunc) {
+    IMAGE_DOS_HEADER *dos = (IMAGE_DOS_HEADER *)module;
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) return NULL;
+
+    IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)((BYTE *)module + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE) return NULL;
+
+    DWORD importRVA = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
+    if (!importRVA) return NULL;
+
+    IMAGE_IMPORT_DESCRIPTOR *imports = (IMAGE_IMPORT_DESCRIPTOR *)((BYTE *)module + importRVA);
+
+    for (; imports->Name; imports++) {
+        const char *name = (const char *)((BYTE *)module + imports->Name);
+        if (_stricmp(name, dllName) != 0) continue;
+
+        IMAGE_THUNK_DATA *origThunk = (IMAGE_THUNK_DATA *)((BYTE *)module + imports->OriginalFirstThunk);
+        IMAGE_THUNK_DATA *thunk = (IMAGE_THUNK_DATA *)((BYTE *)module + imports->FirstThunk);
+
+        for (; origThunk->u1.AddressOfData; origThunk++, thunk++) {
+            if (origThunk->u1.Ordinal & IMAGE_ORDINAL_FLAG) continue;
+            IMAGE_IMPORT_BY_NAME *imp = (IMAGE_IMPORT_BY_NAME *)
+                ((BYTE *)module + origThunk->u1.AddressOfData);
+            if (strcmp((const char *)imp->Name, funcName) == 0) {
+                FARPROC orig = (FARPROC)thunk->u1.Function;
+                DWORD oldProt;
+                VirtualProtect(&thunk->u1.Function, sizeof(FARPROC),
+                               PAGE_EXECUTE_READWRITE, &oldProt);
+                thunk->u1.Function = (DWORD_PTR)hookFunc;
+                VirtualProtect(&thunk->u1.Function, sizeof(FARPROC),
+                               oldProt, &oldProt);
+                hookLog("IAT hook: %s!%s replaced (orig=%p, hook=%p)",
+                        dllName, funcName, (void*)orig, (void*)hookFunc);
+                return orig;
+            }
+        }
+    }
+    hookLog("IAT hook: %s!%s NOT FOUND in module %p", dllName, funcName, (void*)module);
+    return NULL;
+}
+
+/* --- Injection state machine ---
+ * Shared between GetDeviceState (primary, called every frame) and
+ * GetDeviceData (secondary, called infrequently). */
+typedef enum {
+    INJ_IDLE = 0,
+    INJ_RESET,      /* Send large negative deltas to clamp cursor to (0,0) */
+    INJ_MOVE,       /* Send exact delta to target position */
+    INJ_SETTLE,     /* Wait frames for game to process hover */
+    INJ_BTN_DOWN,   /* Button 0 down event */
+    INJ_BTN_HOLD,   /* Hold button for a few frames */
+    INJ_BTN_UP,     /* Button 0 up event */
+    INJ_COMPLETE,   /* Injection done, ready for next command */
+    INJ_BTN_ONLY,   /* Button-only: no position change, just btn down/up */
+    INJ_ALLCLICK,    /* All-in-one: reset+move+btn_down+btn_up in single GDD call */
+    INJ_DIRECTCLICK, /* Direct: move+btn_down+btn_up, NO reset — use when cursor starts at (0,0) */
+    INJ_CLICK2_DOWN, /* click2: reset+move+btn_down in call 1 */
+    INJ_CLICK2_UP    /* click2: btn_up in call 2 */
+} InjectState;
+
+static volatile InjectState g_injState = INJ_IDLE;
+static volatile int g_injTargetX = 0;   /* DInput delta (raw, pre-sensitivity) */
+static volatile int g_injTargetY = 0;
+static volatile int g_injScreenX = 0;   /* Actual screen position (post-sensitivity) */
+static volatile int g_injScreenY = 0;   /* Used by GetCursorPos override */
+static volatile int g_injFrame = 0;
+static volatile int g_injClickRequested = 1;  /* 1=click after move, 0=move only */
+
+/* Force-override flag: makes GetCursorPos return (g_forceX, g_forceY) and
+ * GetAsyncKeyState(VK_LBUTTON) return pressed, regardless of injection state.
+ * Used for title screen clicks where we don't know which API the game checks.
+ * Counts down per GetAsyncKeyState/GetCursorPos call; 0 = inactive. */
+static volatile int g_forceClickFrames = 0;
+static volatile int g_forceX = 0;
+static volatile int g_forceY = 0;
+
+/* --- Hooked GetAsyncKeyState ---
+ * Returns VK_LBUTTON as pressed during injection BTN_DOWN/BTN_HOLD phases. */
+static volatile LONG g_gasCallCount = 0;
+
+static SHORT WINAPI hookedGetAsyncKeyState(int vKey) {
+    LONG c = InterlockedIncrement(&g_gasCallCount);
+    if (vKey == VK_LBUTTON) {
+        /* Force-click override (highest priority) */
+        if (g_forceClickFrames > 0) {
+            hookLog("GetAsyncKeyState(VK_LBUTTON) -> 0x8001 (FORCED, frames=%d, call#%ld)",
+                    g_forceClickFrames, c);
+            InterlockedDecrement((volatile LONG *)&g_forceClickFrames);
+            return (SHORT)0x8001;
+        }
+        if (g_injState == INJ_BTN_DOWN || g_injState == INJ_BTN_HOLD) {
+            hookLog("GetAsyncKeyState(VK_LBUTTON) -> 0x8001 (INJECTED, state=%d, call#%ld)",
+                    (int)g_injState, c);
+            /* bit 15 = currently pressed, bit 0 = pressed since last call */
+            return (SHORT)0x8001;
+        }
+        /* Log VK_LBUTTON polls periodically to confirm game IS calling this */
+        if (c <= 5 || (c % 5000 == 0)) {
+            SHORT real = g_origGetAsyncKeyState(vKey);
+            hookLog("GetAsyncKeyState(VK_LBUTTON) -> 0x%04X (real, call#%ld)", (unsigned short)real, c);
+            return real;
+        }
+    }
+    return g_origGetAsyncKeyState(vKey);
+}
+
+/* --- Hooked GetKeyState ---
+ * Returns VK_LBUTTON as pressed during injection BTN_DOWN/BTN_HOLD phases. */
+static SHORT WINAPI hookedGetKeyState(int nVirtKey) {
+    if (nVirtKey == VK_LBUTTON) {
+        if (g_forceClickFrames > 0) {
+            return (SHORT)0x8080;
+        }
+        if (g_injState == INJ_BTN_DOWN || g_injState == INJ_BTN_HOLD) {
+            return (SHORT)0x8080; /* high bit = toggled, bit 15 = pressed */
+        }
+    }
+    return g_origGetKeyState(nVirtKey);
+}
+
+/* --- Hooked GetCursorPos ---
+ * During injection settle/click phases, return the exact target position.
+ * This ensures hit-testing works even if cursor position is off. */
+static volatile LONG g_gcpCallCount = 0;
+
+static BOOL WINAPI hookedGetCursorPos(LPPOINT lpPoint) {
+    BOOL result = g_origGetCursorPos(lpPoint);
+    LONG c = InterlockedIncrement(&g_gcpCallCount);
+    /* Force-click override (highest priority) */
+    if (g_forceClickFrames > 0) {
+        LONG origX = lpPoint ? lpPoint->x : -1;
+        LONG origY = lpPoint ? lpPoint->y : -1;
+        if (lpPoint) {
+            lpPoint->x = g_forceX;
+            lpPoint->y = g_forceY;
+        }
+        hookLog("GetCursorPos -> (%d,%d) FORCED (was %ld,%ld, frames=%d, call#%ld)",
+                g_forceX, g_forceY, origX, origY, g_forceClickFrames, c);
+        return result;
+    }
+    if (g_injState >= INJ_SETTLE && g_injState <= INJ_BTN_UP) {
+        LONG origX = lpPoint ? lpPoint->x : -1;
+        LONG origY = lpPoint ? lpPoint->y : -1;
+        if (lpPoint) {
+            lpPoint->x = g_injScreenX;
+            lpPoint->y = g_injScreenY;
+        }
+        hookLog("GetCursorPos -> (%d,%d) OVERRIDDEN (was %ld,%ld, state=%d, call#%ld)",
+                g_injScreenX, g_injScreenY, origX, origY, (int)g_injState, c);
+    } else if (c <= 3 || (c % 5000 == 0)) {
+        hookLog("GetCursorPos -> (%ld,%ld) (real, state=%d, call#%ld)",
+                lpPoint ? lpPoint->x : -1, lpPoint ? lpPoint->y : -1,
+                (int)g_injState, c);
+    }
+    return result;
+}
+
+/* Install Win32 API IAT hooks on the game EXE module */
+static volatile LONG g_win32HooksInstalled = 0;
+
+static void installWin32Hooks(void) {
+    if (InterlockedCompareExchange(&g_win32HooksInstalled, 1, 0) != 0) return;
+
+    HMODULE gameModule = GetModuleHandleA(NULL); /* main EXE */
+    if (!gameModule) {
+        hookLog("WARNING: GetModuleHandle(NULL) returned NULL");
+        InterlockedExchange(&g_win32HooksInstalled, 0);
+        return;
+    }
+
+    hookLog("Installing Win32 API hooks on game module %p", (void*)gameModule);
+
+    g_origGetAsyncKeyState = (GetAsyncKeyState_t)hookIAT(
+        gameModule, "user32.dll", "GetAsyncKeyState",
+        (FARPROC)hookedGetAsyncKeyState);
+
+    g_origGetKeyState = (GetKeyState_t)hookIAT(
+        gameModule, "user32.dll", "GetKeyState",
+        (FARPROC)hookedGetKeyState);
+
+    g_origGetCursorPos = (GetCursorPos_t)hookIAT(
+        gameModule, "user32.dll", "GetCursorPos",
+        (FARPROC)hookedGetCursorPos);
+
+    /* Fallback: if IAT hook didn't find the import (game uses GetProcAddress
+     * or imports from a different DLL name), use INLINE (trampoline) hooks
+     * on the actual user32.dll functions. This catches ALL callers. */
+    HMODULE user32 = GetModuleHandleA("user32.dll");
+
+    if (!g_origGetAsyncKeyState && user32) {
+        FARPROC target = GetProcAddress(user32, "GetAsyncKeyState");
+        if (target) {
+            FARPROC tramp = installInlineHook(target,
+                (FARPROC)hookedGetAsyncKeyState, g_gasTrampoline, sizeof(g_gasTrampoline));
+            if (tramp) {
+                g_origGetAsyncKeyState = (GetAsyncKeyState_t)tramp;
+                hookLog("GetAsyncKeyState INLINE hooked at %p, trampoline=%p", (void*)target, (void*)tramp);
+            } else {
+                g_origGetAsyncKeyState = (GetAsyncKeyState_t)target;
+                hookLog("GetAsyncKeyState inline hook FAILED, using raw ptr: %p", (void*)target);
+            }
+        }
+    }
+    if (!g_origGetKeyState && user32) {
+        FARPROC target = GetProcAddress(user32, "GetKeyState");
+        if (target) {
+            FARPROC tramp = installInlineHook(target,
+                (FARPROC)hookedGetKeyState, g_gksTrampoline, sizeof(g_gksTrampoline));
+            if (tramp) {
+                g_origGetKeyState = (GetKeyState_t)tramp;
+                hookLog("GetKeyState INLINE hooked at %p, trampoline=%p", (void*)target, (void*)tramp);
+            } else {
+                g_origGetKeyState = (GetKeyState_t)target;
+                hookLog("GetKeyState inline hook FAILED, using raw ptr: %p", (void*)target);
+            }
+        }
+    }
+    if (!g_origGetCursorPos && user32) {
+        FARPROC target = GetProcAddress(user32, "GetCursorPos");
+        if (target) {
+            FARPROC tramp = installInlineHook(target,
+                (FARPROC)hookedGetCursorPos, g_gcpTrampoline, sizeof(g_gcpTrampoline));
+            if (tramp) {
+                g_origGetCursorPos = (GetCursorPos_t)tramp;
+                hookLog("GetCursorPos INLINE hooked at %p, trampoline=%p", (void*)target, (void*)tramp);
+            } else {
+                g_origGetCursorPos = (GetCursorPos_t)target;
+                hookLog("GetCursorPos inline hook FAILED, using raw ptr: %p", (void*)target);
+            }
+        }
+    }
+
+    hookLog("Win32 API hooks installed (GetAsyncKeyState=%s, GetKeyState=%s, GetCursorPos=%s)",
+            g_origGetAsyncKeyState ? "YES(hooked)" : "NO",
+            g_origGetKeyState ? "YES(hooked)" : "NO",
+            g_origGetCursorPos ? "YES" : "NO");
 }
 
 /* --- Shared memory setup --- */
@@ -129,26 +450,6 @@ static void setupSharedMemory(void) {
     InterlockedExchange(&g_shm->ready, 1);
     hookLog("Shared memory '%s' ready (%d bytes)", SHM_NAME, (int)sizeof(InputSharedState));
 }
-
-/* --- Injection state machine ---
- * Shared between GetDeviceState (primary, called every frame) and
- * GetDeviceData (secondary, called infrequently). */
-typedef enum {
-    INJ_IDLE = 0,
-    INJ_RESET,      /* Send large negative deltas to clamp cursor to (0,0) */
-    INJ_MOVE,       /* Send exact delta to target position */
-    INJ_SETTLE,     /* Wait frames for game to process hover */
-    INJ_BTN_DOWN,   /* Button 0 down event */
-    INJ_BTN_HOLD,   /* Hold button for a few frames */
-    INJ_BTN_UP,     /* Button 0 up event */
-    INJ_COMPLETE    /* Injection done, ready for next command */
-} InjectState;
-
-static volatile InjectState g_injState = INJ_IDLE;
-static volatile int g_injTargetX = 0;
-static volatile int g_injTargetY = 0;
-static volatile int g_injFrame = 0;
-static volatile int g_injClickRequested = 1;  /* 1=click after move, 0=move only */
 
 /* --- Hooked GetDeviceState for MOUSE --- */
 
@@ -234,7 +535,17 @@ static HRESULT WINAPI hookedMouseGetDeviceState(
                 ms->rgbButtons[0] = 0x80;
                 g_injState = INJ_BTN_HOLD;
                 g_injFrame = 0;
-                hookLog("INJ/GDS: button DOWN");
+                hookLog("INJ/GDS: button DOWN (DInput rgbButtons[0]=0x80)");
+
+                /* ALSO post WM_LBUTTONDOWN from the main thread.
+                 * We're inside GetDeviceState which runs on the game's main thread.
+                 * This covers games that use the message pump for click detection. */
+                if (g_gameHwnd) {
+                    LPARAM lp = MAKELPARAM(g_injTargetX, g_injTargetY);
+                    PostMessageA(g_gameHwnd, WM_LBUTTONDOWN, MK_LBUTTON, lp);
+                    hookLog("INJ/GDS: also PostMessage WM_LBUTTONDOWN at (%d,%d)",
+                            g_injTargetX, g_injTargetY);
+                }
                 break;
 
             case INJ_BTN_HOLD:
@@ -254,6 +565,12 @@ static HRESULT WINAPI hookedMouseGetDeviceState(
                 ms->rgbButtons[0] = 0;
                 g_injState = INJ_COMPLETE;
                 hookLog("INJ/GDS: button UP — click COMPLETE");
+
+                /* Post WM_LBUTTONUP to match the WM_LBUTTONDOWN sent in BTN_DOWN */
+                if (g_gameHwnd) {
+                    LPARAM lp = MAKELPARAM(g_injTargetX, g_injTargetY);
+                    PostMessageA(g_gameHwnd, WM_LBUTTONUP, 0, lp);
+                }
                 break;
 
             default:
@@ -305,6 +622,78 @@ static HRESULT WINAPI hookedKeyboardGetDeviceState(
             for (int i = 0; i < 256; i++) {
                 if (ks[i] & 0x80) hookLog("  DIK_%d = 0x%02X", i, ks[i]);
             }
+        }
+    }
+
+    /* --- F12 trigger key: click at current cursor position ---
+     *
+     * When F12 (DIK_F12 = 0x58) is detected pressed in the keyboard state,
+     * trigger a mouse click injection at the current cursor position.
+     * This avoids all focus issues because:
+     * - QMP send-key delivers keyboard events through DInput
+     * - The game is actively calling GetDeviceState (it has focus)
+     * - The mouse injection state machine runs in the same GetDeviceState calls
+     *
+     * Usage: position cursor via QMP tablet, then send F12 via QMP send-key.
+     */
+    if (hr == DI_OK && cbData >= 256 && lpvData) {
+        BYTE *ks = (BYTE *)lpvData;
+        static int f12WasDown = 0;
+
+        if ((ks[0x58] & 0x80) && !f12WasDown) {
+            /* F12 just pressed — trigger click at current cursor position */
+            f12WasDown = 1;
+            POINT pt;
+            if (g_origGetCursorPos) g_origGetCursorPos(&pt);
+            else GetCursorPos(&pt);
+
+            hookLog("F12 TRIGGER: clicking at cursor (%ld,%ld)", pt.x, pt.y);
+
+            /* Set up the injection state machine.
+             * Skip the RESET/MOVE phases — cursor is already positioned via QMP tablet.
+             * Go straight to SETTLE → BTN_DOWN → BTN_HOLD → BTN_UP. */
+            g_injTargetX = (int)pt.x;
+            g_injTargetY = (int)pt.y;
+            g_injClickRequested = 1;
+            g_injFrame = 0;
+            g_injState = INJ_SETTLE;
+
+            /* Consume the F12 key so the game doesn't see it */
+            ks[0x58] = 0;
+        } else if (!(ks[0x58] & 0x80)) {
+            f12WasDown = 0;
+        }
+
+        /* F11 (DIK_F11 = 0x57): same but with direct SendMessage approach
+         * from within the keyboard GetDeviceState context (which runs on
+         * the game's main thread) */
+        static int f11WasDown = 0;
+        if ((ks[0x57] & 0x80) && !f11WasDown) {
+            f11WasDown = 1;
+            POINT pt;
+            if (g_origGetCursorPos) g_origGetCursorPos(&pt);
+            else GetCursorPos(&pt);
+
+            hookLog("F11 TRIGGER: direct SendMessage click at (%ld,%ld)", pt.x, pt.y);
+
+            /* We're on the game's main thread right now.
+             * Set cursor override and send click message. */
+            g_injTargetX = (int)pt.x;
+            g_injTargetY = (int)pt.y;
+            g_injState = INJ_BTN_DOWN; /* activate GetCursorPos hook */
+
+            LPARAM lp = MAKELPARAM((int)pt.x, (int)pt.y);
+            if (g_gameHwnd) {
+                PostMessageA(g_gameHwnd, WM_LBUTTONDOWN, MK_LBUTTON, lp);
+                Sleep(100);
+                PostMessageA(g_gameHwnd, WM_LBUTTONUP, 0, lp);
+            }
+            Sleep(100);
+            g_injState = INJ_IDLE;
+
+            ks[0x57] = 0;
+        } else if (!(ks[0x57] & 0x80)) {
+            f11WasDown = 0;
         }
     }
 
@@ -372,6 +761,22 @@ static HRESULT WINAPI hookedKeyboardGetDeviceState(
 static volatile LONG g_getDeviceDataCallCount = 0;
 static DWORD g_injectSequence = 1000000;
 
+/* Track accumulated DInput cursor position (sum of all deltas seen by game) */
+static volatile LONG g_accumX = 0;
+static volatile LONG g_accumY = 0;
+static volatile LONG g_accumBtn = 0;  /* last button state seen */
+
+/* Last GetDeviceData HRESULT and real event count — for diagnostics */
+static volatile HRESULT g_lastGddHr = 0;
+static volatile DWORD g_lastGddRealEvents = 0;
+static volatile LONG g_reacqTotal = 0;
+static volatile DWORD g_lastGddRetAddr = 0;  /* return address of caller */
+static volatile DWORD g_callerEBP = 0;       /* caller's EBP = CInputDevice this */
+
+/* Game cursor position (set by GetDeviceData hook on game thread via CInputLayer::GetMousePos) */
+static volatile LONG g_gameMouseX = 0;
+static volatile LONG g_gameMouseY = 0;
+
 #define DINPUT7_OBJECTDATA_SIZE 16
 
 /* Write a single DInput7 event into the buffer at the given pointer.
@@ -383,22 +788,117 @@ static void writeInjEvent(BYTE *buf, DWORD dwOfs, DWORD dwData) {
     *(DWORD *)(buf + 12) = g_injectSequence++;
 }
 
+/* Read the game's current cursor from CInputDevice.
+ * The live binary stores the cursor as floats at +0x14/+0x18 and commits them
+ * after processing a GetDeviceData buffer. This lets us compute a relative move
+ * without relying on Windows cursor state or the old sensitivity heuristic. */
+static int tryReadCurrentCursor(float *outX, float *outY) {
+    if (!g_callerEBP)
+        return 0;
+
+    float *pX = (float *)((BYTE *)g_callerEBP + 0x14);
+    float *pY = (float *)((BYTE *)g_callerEBP + 0x18);
+    if (IsBadReadPtr((void *)pX, sizeof(float)) || IsBadReadPtr((void *)pY, sizeof(float)))
+        return 0;
+
+    float x = *pX;
+    float y = *pY;
+    if (x < -4096.0f || x > 4096.0f || y < -4096.0f || y > 4096.0f)
+        return 0;
+
+    if (outX) *outX = x;
+    if (outY) *outY = y;
+    return 1;
+}
+
+/* Arm the direct buffered-click path using a delta derived from the current
+ * game cursor. If we cannot read the cursor yet, fall back to origin-based
+ * semantics (the old dclick behavior). */
+static void armDirectClickCommand(int targetX, int targetY, int assumeOrigin, const char *label) {
+    float currentX = 0.0f, currentY = 0.0f;
+    int haveCursor = !assumeOrigin && tryReadCurrentCursor(&currentX, &currentY);
+    int baseX = haveCursor ? (int)(currentX >= 0.0f ? currentX + 0.5f : currentX - 0.5f) : 0;
+    int baseY = haveCursor ? (int)(currentY >= 0.0f ? currentY + 0.5f : currentY - 0.5f) : 0;
+    int deltaX = targetX - baseX;
+    int deltaY = targetY - baseY;
+
+    g_injScreenX = targetX;
+    g_injScreenY = targetY;
+    g_injTargetX = deltaX;
+    g_injTargetY = deltaY;
+    g_injClickRequested = 1;
+    g_injFrame = 0;
+    g_injState = INJ_DIRECTCLICK;
+    if (g_mouseEventHandle) SetEvent(g_mouseEventHandle);
+
+    if (haveCursor) {
+        hookLog("TCP: %s armed at (%d,%d) current(%.1f,%.1f) delta(%d,%d)",
+                label, targetX, targetY, currentX, currentY, deltaX, deltaY);
+    } else {
+        hookLog("TCP: %s armed at (%d,%d) from origin delta(%d,%d)",
+                label, targetX, targetY, deltaX, deltaY);
+    }
+}
+
+/* Force frame pointer so we can walk the frame chain to find caller's EBP.
+ * The game stores CInputDevice 'this' in EBP (via MOV EBP, ECX at 0x4D36CB).
+ * EBP is callee-saved across stdcall COM calls. With frame pointer enabled,
+ * [EBP+0] in our function = saved caller's EBP = CInputDevice this. */
+__attribute__((optimize("no-omit-frame-pointer")))
 static HRESULT WINAPI hookedMouseGetDeviceData(
     LPDIRECTINPUTDEVICEA self, DWORD cbObjectData,
     LPDIDEVICEOBJECTDATA rgdod, LPDWORD pdwInOut, DWORD dwFlags
 ) {
+    /* Capture caller's EBP FIRST (before any function calls that might clobber).
+     * With frame pointer: our EBP points to stack frame, [EBP+0] = saved old EBP. */
+    {
+        DWORD callerEbp;
+        __asm__ volatile ("movl 0(%%ebp), %0" : "=r"(callerEbp));
+        g_callerEBP = callerEbp;
+    }
+
+    /* Capture return address to find the game code calling GetDeviceData */
+    g_lastGddRetAddr = (DWORD)(uintptr_t)__builtin_return_address(0);
+
     /* Save buffer capacity BEFORE calling original (it overwrites pdwInOut) */
     DWORD savedCapacity = (pdwInOut && rgdod) ? *pdwInOut : 0;
 
     HRESULT hr = g_origMouseGetDeviceData(self, cbObjectData, rgdod, pdwInOut, dwFlags);
 
+    /* Auto-reacquire on ANY failure HRESULT from GetDeviceData.
+     * This handles: DIERR_NOTACQUIRED (0x8007001C), DIERR_INPUTLOST (0x8007001E),
+     * 0x8007000C (device lost/not-enough-memory), and other error codes that occur
+     * when game window doesn't have foreground focus (DISCL_FOREGROUND mode). */
+    if (FAILED(hr)) {
+        static LONG reacqCount = 0;
+        LONG rc = InterlockedIncrement(&reacqCount);
+        InterlockedIncrement(&g_reacqTotal);
+        HRESULT acqHr = self->lpVtbl->Acquire(self);
+        if (rc <= 10 || (rc % 500 == 0))
+            hookLog("Auto-reacquire: GDD hr=0x%08X, Acquire()=0x%08X (attempt #%ld)",
+                    (unsigned)hr, (unsigned)acqHr, rc);
+        if (SUCCEEDED(acqHr) || acqHr == DI_NOEFFECT /* already acquired */) {
+            /* Retry GetDeviceData after successful reacquisition */
+            if (pdwInOut) *pdwInOut = savedCapacity;
+            hr = g_origMouseGetDeviceData(self, cbObjectData, rgdod, pdwInOut, dwFlags);
+            if (rc <= 10 || (rc % 500 == 0))
+                hookLog("Auto-reacquire: retry GetDeviceData hr=0x%08X events=%lu",
+                        (unsigned)hr, pdwInOut ? (unsigned long)*pdwInOut : 0);
+            if (SUCCEEDED(acqHr))
+                reacqCount = 0;  /* Reset counter on success */
+        }
+    }
+
     LONG count = InterlockedIncrement(&g_getDeviceDataCallCount);
     DWORD realEvents = pdwInOut ? *pdwInOut : 0;
+    g_lastGddHr = hr;
+    g_lastGddRealEvents = realEvents;
 
     /* Log periodically and when events arrive */
     if (count == 1 || (count % 1000 == 0) || realEvents > 0) {
-        hookLog("GetDeviceData #%ld: events=%lu cbObj=%lu hr=0x%08X",
-                count, (unsigned long)realEvents, (unsigned long)cbObjectData, (unsigned)hr);
+        hookLog("GetDeviceData #%ld: events=%lu cbObj=%lu cap=%lu hr=0x%08X",
+                count, (unsigned long)realEvents, (unsigned long)cbObjectData,
+                (unsigned long)savedCapacity, (unsigned)hr);
         if (realEvents > 0 && rgdod && cbObjectData >= DINPUT7_OBJECTDATA_SIZE) {
             for (DWORD i = 0; i < realEvents && i < 4; i++) {
                 BYTE *ev = (BYTE *)rgdod + (i * cbObjectData);
@@ -408,7 +908,38 @@ static HRESULT WINAPI hookedMouseGetDeviceData(
         }
     }
 
-    /* --- Direct buffer injection --- */
+    /* --- v7 injection: OPTIMIZED 3-call state machine ---
+     *
+     * v6 bug: packed reset(-100000) + move(+400) in the SAME buffer.
+     * Games accumulate all X deltas per GetDeviceData call, then clamp:
+     *   total_dx = -100000 + 400 = -99600 → clamped to 0 (move lost!)
+     *
+     * v7 fix: split into SEPARATE GetDeviceData calls, minimizing total calls.
+     * GetDeviceData is only called every ~7.5s (no event notification), so
+     * each call costs real time. Optimized to just 3 calls:
+     *   Call 1 (RESET):   [X=-10000, Y=-10000]           → slam to (0,0)
+     *   Call 2 (CLICK):   [X=target, Y=target, btn_down] → move + press
+     *   Call 3 (RELEASE): [btn_up]                        → release
+     *
+     * Button down/up MUST be in separate calls: if both are in one buffer,
+     * the game sees btn_down then btn_up, ending with btn_pressed=false,
+     * and the click is missed.
+     */
+    /* Track accumulated cursor position from REAL events (when not injecting).
+     * This tracks what the game actually sees from hardware input. */
+    if ((g_injState == INJ_IDLE || g_injState == INJ_COMPLETE) &&
+        realEvents > 0 && rgdod && cbObjectData >= DINPUT7_OBJECTDATA_SIZE &&
+        !(dwFlags & 0x1)) {
+        for (DWORD i = 0; i < realEvents; i++) {
+            BYTE *ev = (BYTE *)rgdod + (i * cbObjectData);
+            DWORD ofs = *(DWORD *)(ev + 0);
+            LONG  val = (LONG)*(DWORD *)(ev + 4);
+            if (ofs == 0) g_accumX += val;
+            else if (ofs == 4) g_accumY += val;
+            else if (ofs == 12) g_accumBtn = val;
+        }
+    }
+
     if (g_injState == INJ_IDLE || g_injState == INJ_COMPLETE)
         return hr;
     if (!rgdod || !pdwInOut || cbObjectData < DINPUT7_OBJECTDATA_SIZE)
@@ -416,94 +947,284 @@ static HRESULT WINAPI hookedMouseGetDeviceData(
     if (dwFlags & 0x1) /* DIGDD_PEEK — don't inject on peek calls */
         return hr;
 
-    DWORD used = *pdwInOut;
-    DWORD room = savedCapacity > used ? savedCapacity - used : 0;
-    BYTE *writePtr = (BYTE *)rgdod + (used * cbObjectData);
+    /* SUPPRESS all real events — write from start of buffer */
+    BYTE *writePtr = (BYTE *)rgdod;
     DWORD added = 0;
 
     switch (g_injState) {
     case INJ_RESET:
-        /* Send large negative deltas to slam cursor to (0,0).
-         * Repeat for 3 frames to ensure the game processes it. */
-        if (room >= 2) {
-            writeInjEvent(writePtr, 0, (DWORD)(int)-800);  /* X = -800 */
+        /* Call 1: Slam cursor to (0,0) with large negative deltas. */
+        if (savedCapacity >= 2) {
+            writeInjEvent(writePtr, 0, (DWORD)(int)-10000);
             writePtr += cbObjectData;
-            writeInjEvent(writePtr, 4, (DWORD)(int)-600);  /* Y = -600 */
+            writeInjEvent(writePtr, 4, (DWORD)(int)-10000);
             added = 2;
-        }
-        g_injFrame++;
-        if (g_injFrame >= 3) {
+
+            /* Always go to MOVE first — game needs cursor at target position
+             * for several frames before click, so 3D hover detection works. */
             g_injState = INJ_MOVE;
             g_injFrame = 0;
-            hookLog("INJ: reset done (3 frames of -800,-600), moving to target (%d,%d)",
+            hookLog("INJ/GDD v8: RESET [X=-10000, Y=-10000] "
+                    "[suppressed %lu real] → next: MOVE(%d,%d)",
+                    (unsigned long)realEvents,
                     g_injTargetX, g_injTargetY);
         }
         break;
 
     case INJ_MOVE:
-        /* Send exact delta to target position.
-         * After reset, game cursor is at (0,0). This delta lands on target. */
-        if (room >= 2) {
+        /* Call 2: Move cursor to target position. */
+        if (savedCapacity >= 2) {
             writeInjEvent(writePtr, 0, (DWORD)(int)g_injTargetX);
             writePtr += cbObjectData;
             writeInjEvent(writePtr, 4, (DWORD)(int)g_injTargetY);
             added = 2;
-        }
-        g_injState = INJ_SETTLE;
-        g_injFrame = 0;
-        hookLog("INJ: move event injected (dx=%d, dy=%d)", g_injTargetX, g_injTargetY);
-        break;
-
-    case INJ_SETTLE:
-        /* No events — let game process the movement and detect hover */
-        g_injFrame++;
-        if (g_injFrame >= 8) {
+            g_injFrame = 0;
             if (g_injClickRequested) {
-                g_injState = INJ_BTN_DOWN;
+                /* Need to settle for a few frames so game detects hover. */
+                g_injState = INJ_SETTLE;
+                hookLog("INJ/GDD v8: MOVE [X=%d, Y=%d] → SETTLE (hover detection)",
+                        g_injTargetX, g_injTargetY);
             } else {
                 g_injState = INJ_COMPLETE;
+                hookLog("INJ/GDD v8: MOVE [X=%d, Y=%d] → COMPLETE",
+                        g_injTargetX, g_injTargetY);
             }
-            g_injFrame = 0;
-            hookLog("INJ: settle done (%d frames)", 8);
         }
         break;
 
     case INJ_BTN_DOWN:
-        if (room >= 1) {
-            writeInjEvent(writePtr, 12, 0x80);  /* Button 0 down */
-            added = 1;
-        }
-        g_injState = INJ_BTN_HOLD;
-        g_injFrame = 0;
-        hookLog("INJ: button DOWN injected");
-        break;
-
-    case INJ_BTN_HOLD:
-        g_injFrame++;
-        if (g_injFrame >= 4) {
-            g_injState = INJ_BTN_UP;
+        /* Button down WITH position events — game may require position data
+         * in the same GetDeviceData buffer as button events to register a click.
+         * Inject: [dx=0, dy=0, btn_down] to confirm cursor position + click. */
+        if (savedCapacity >= 3) {
+            writeInjEvent(writePtr, 0, 0);       /* X delta = 0 (no movement) */
+            writePtr += cbObjectData;
+            writeInjEvent(writePtr, 4, 0);       /* Y delta = 0 (no movement) */
+            writePtr += cbObjectData;
+            writeInjEvent(writePtr, 12, 0x80);   /* Button 0 down */
+            added = 3;
+            g_injState = INJ_BTN_HOLD;
             g_injFrame = 0;
+            hookLog("INJ/GDD v9: BTN_DOWN [dx=0,dy=0,btn=0x80] at (%d,%d) "
+                    "[suppressed %lu real] → next: BTN_HOLD",
+                    g_injTargetX, g_injTargetY, (unsigned long)realEvents);
+
+            /* WM messages during injection REMOVED — caused modal drag loop
+             * that blocked the game's main loop (gdd stops incrementing). */
         }
         break;
 
     case INJ_BTN_UP:
-        if (room >= 1) {
+        /* Button up WITH position events (matching BTN_DOWN pattern). */
+        if (savedCapacity >= 3) {
+            writeInjEvent(writePtr, 0, 0);       /* X delta = 0 */
+            writePtr += cbObjectData;
+            writeInjEvent(writePtr, 4, 0);       /* Y delta = 0 */
+            writePtr += cbObjectData;
+            writeInjEvent(writePtr, 12, 0x00);   /* Button 0 up */
+            added = 3;
+            g_injState = INJ_COMPLETE;
+            hookLog("INJ/GDD v9: BTN_UP [dx=0,dy=0,btn=0x00] → COMPLETE at (%d,%d) "
+                    "[suppressed %lu real]",
+                    g_injTargetX, g_injTargetY, (unsigned long)realEvents);
+
+            /* WM_LBUTTONUP during injection REMOVED — caused stall. */
+        }
+        break;
+
+    case INJ_SETTLE:
+        /* Settle — wait several frames for game to update 3D cursor/hover state
+         * before clicking. Game's CCursor3D needs time to ray-cast AABB on menu
+         * meshes and detect the hover (HighLight) state. */
+        g_injFrame++;
+        /* SetCursorPos+WM_MOUSEMOVE removed — caused issues in NONEXCLUSIVE mode. */
+        if (g_injFrame < 5) {
+            hookLog("INJ/GDD v8: SETTLE frame %d/5 [suppressed %lu real]",
+                    g_injFrame, (unsigned long)realEvents);
+        } else {
+            if (g_injClickRequested) {
+                g_injState = INJ_BTN_DOWN;
+                hookLog("INJ/GDD v8: SETTLE done → BTN_DOWN");
+            } else {
+                g_injState = INJ_COMPLETE;
+                hookLog("INJ/GDD v8: SETTLE done → COMPLETE");
+            }
+        }
+        break;
+
+    case INJ_BTN_HOLD:
+        /* Hold button for 3 frames before releasing */
+        g_injFrame++;
+        if (g_injFrame < 3) {
+            hookLog("INJ/GDD v8: BTN_HOLD frame %d/3", g_injFrame);
+        } else {
+            g_injState = INJ_BTN_UP;
+            hookLog("INJ/GDD v8: BTN_HOLD done → BTN_UP");
+        }
+        break;
+
+    case INJ_BTN_ONLY: {
+        /* Button-only injection (fclick or btn command). */
+        if (g_injClickRequested == 2 && savedCapacity >= 3) {
+            /* FCLICK: position delta + button down */
+            writeInjEvent(writePtr, 0, (DWORD)(int)g_injTargetX);
+            writePtr += cbObjectData;
+            writeInjEvent(writePtr, 4, (DWORD)(int)g_injTargetY);
+            writePtr += cbObjectData;
+            writeInjEvent(writePtr, 12, 0x80);
+            added = 3;
+            hookLog("INJ/GDD v7: FCLICK dx=%d dy=%d + btn_down",
+                    g_injTargetX, g_injTargetY);
+        } else if (savedCapacity >= 1) {
+            writeInjEvent(writePtr, 12, 0x80);
+            added = 1;
+            hookLog("INJ/GDD v7: BTN_ONLY btn_down");
+        }
+        g_injState = INJ_BTN_UP;
+        g_injFrame = 0;
+        break;
+    }
+
+    case INJ_ALLCLICK: {
+        /* ALL-IN-ONE: reset + move + btn_down + btn_up in a SINGLE GDD call.
+         * Real mouse hardware produces interleaved position+button events in one
+         * buffer when polled infrequently (which is the case on the title screen
+         * where GDD is called only every ~5-10 seconds in TCG emulation).
+         * Events: [dx_reset, dy_reset, dx_target, dy_target, btn_down, btn_up] */
+        DWORD needed = 6;
+        if (savedCapacity >= needed) {
+            writeInjEvent(writePtr, 0, (DWORD)(int)-10000);  /* X reset */
+            writePtr += cbObjectData;
+            writeInjEvent(writePtr, 4, (DWORD)(int)-10000);  /* Y reset */
+            writePtr += cbObjectData;
+            writeInjEvent(writePtr, 0, (DWORD)(int)g_injTargetX);  /* X move to target */
+            writePtr += cbObjectData;
+            writeInjEvent(writePtr, 4, (DWORD)(int)g_injTargetY);  /* Y move to target */
+            writePtr += cbObjectData;
+            writeInjEvent(writePtr, 12, 0x80);  /* Button down */
+            writePtr += cbObjectData;
+            writeInjEvent(writePtr, 12, 0x00);  /* Button up */
+            added = needed;
+            g_injState = INJ_COMPLETE;
+
+            hookLog("INJ/GDD v9: ALLCLICK [reset(-10000,-10000) move(%d,%d) btn_down btn_up] "
+                    "in SINGLE call [suppressed %lu real]",
+                    g_injTargetX, g_injTargetY, (unsigned long)realEvents);
+
+            /* DO NOT PostMessage — can disrupt DirectDraw focus */
+        } else {
+            hookLog("INJ/GDD v9: ALLCLICK needs %lu events but cap=%lu, falling back to RESET",
+                    (unsigned long)needed, (unsigned long)savedCapacity);
+            g_injState = INJ_RESET;  /* Fall back to multi-call approach */
+        }
+        break;
+    }
+
+    case INJ_DIRECTCLICK: {
+        /* DIRECT CLICK phase 1: MOVE ONLY, NO button, NO reset.
+         * Assumes cursor starts at (0,0) (from GetCursorPos at init).
+         * TargetX/Y are absolute screen coords = DInput deltas from origin.
+         * CRITICAL: Game's CCursor3D needs several frames after cursor moves
+         * to ray-cast AABB on menu meshes and detect hover (HighLight) state.
+         * Phase 2 (INJ_SETTLE) waits for hover detection.
+         * Phase 3 (INJ_BTN_DOWN) sends button press.
+         * Phase 4 (INJ_BTN_HOLD) holds for frames.
+         * Phase 5 (INJ_BTN_UP) releases button. */
+        DWORD needed = 2;
+        if (savedCapacity >= needed) {
+            writeInjEvent(writePtr, 0, (DWORD)(int)g_injTargetX);  /* X delta = target */
+            writePtr += cbObjectData;
+            writeInjEvent(writePtr, 4, (DWORD)(int)g_injTargetY);  /* Y delta = target */
+            added = needed;
+            g_injClickRequested = 1;  /* Tell SETTLE to proceed to BTN_DOWN */
+            g_injState = INJ_SETTLE;
+            g_injFrame = 0;
+
+            hookLog("INJ/GDD: DIRECTCLICK phase1 [move(%d,%d)] "
+                    "[suppressed %lu real] -> SETTLE (hover detection)",
+                    g_injTargetX, g_injTargetY, (unsigned long)realEvents);
+        } else {
+            hookLog("INJ/GDD: DIRECTCLICK needs %lu events but cap=%lu",
+                    (unsigned long)needed, (unsigned long)savedCapacity);
+        }
+        break;
+    }
+
+    case INJ_CLICK2_DOWN: {
+        /* click2 call 1: reset + move + btn_down — NO btn_up.
+         * Button stays pressed across the entire GDD interval (~80-100s).
+         * Game processes: cursor moves to target, btn_down seen, frame runs
+         * with button pressed → raycast → if over button, trigger event.
+         * btn_up comes in NEXT GDD call (INJ_CLICK2_UP). */
+        DWORD needed = 5;
+        if (savedCapacity >= needed) {
+            writeInjEvent(writePtr, 0, (DWORD)(int)-10000);  /* X reset */
+            writePtr += cbObjectData;
+            writeInjEvent(writePtr, 4, (DWORD)(int)-10000);  /* Y reset */
+            writePtr += cbObjectData;
+            writeInjEvent(writePtr, 0, (DWORD)(int)g_injTargetX);  /* X move */
+            writePtr += cbObjectData;
+            writeInjEvent(writePtr, 4, (DWORD)(int)g_injTargetY);  /* Y move */
+            writePtr += cbObjectData;
+            writeInjEvent(writePtr, 12, 0x80);  /* Button 0 down — NO btn_up */
+            added = needed;
+            g_injState = INJ_CLICK2_UP;
+            hookLog("INJ/GDD: CLICK2_DOWN [reset+move(%d,%d)+btn_down] "
+                    "[suppressed %lu real] → next: CLICK2_UP",
+                    g_injTargetX, g_injTargetY, (unsigned long)realEvents);
+        } else {
+            hookLog("INJ/GDD: CLICK2_DOWN needs %lu events but cap=%lu",
+                    (unsigned long)needed, (unsigned long)savedCapacity);
+        }
+        break;
+    }
+
+    case INJ_CLICK2_UP: {
+        /* click2 call 2: btn_up only.
+         * By this time, the game has had one full frame with button pressed
+         * at the target position. If the click registered, the menu should
+         * have already navigated. */
+        if (savedCapacity >= 1) {
             writeInjEvent(writePtr, 12, 0x00);  /* Button 0 up */
             added = 1;
+            g_injState = INJ_COMPLETE;
+            hookLog("INJ/GDD: CLICK2_UP [btn_up] → COMPLETE at (%d,%d) "
+                    "[suppressed %lu real]",
+                    g_injTargetX, g_injTargetY, (unsigned long)realEvents);
         }
-        g_injState = INJ_COMPLETE;
-        hookLog("INJ: button UP injected — click sequence COMPLETE");
         break;
+    }
 
     default:
+        hookLog("INJ/GDD v7: unexpected state=%d, suppressing %lu real events",
+                (int)g_injState, (unsigned long)realEvents);
         break;
     }
 
-    if (added > 0) {
-        *pdwInOut = used + added;
-        /* Also signal the event handle to keep the game polling */
-        if (g_mouseEventHandle) SetEvent(g_mouseEventHandle);
+    *pdwInOut = added;
+
+    /* Track accumulated cursor from injected events */
+    {
+        DWORD finalCount = *pdwInOut;
+        if (finalCount > 0 && rgdod && cbObjectData >= DINPUT7_OBJECTDATA_SIZE) {
+            for (DWORD i = 0; i < finalCount; i++) {
+                BYTE *ev = (BYTE *)rgdod + (i * cbObjectData);
+                DWORD ofs = *(DWORD *)(ev + 0);
+                LONG  val = (LONG)*(DWORD *)(ev + 4);
+                if (ofs == 0) g_accumX += val;
+                else if (ofs == 4) g_accumY += val;
+                else if (ofs == 12) g_accumBtn = val;
+            }
+        }
     }
+
+    /* NOTE: Do NOT call CInputLayer::GetMousePos (0x4D67F0) here.
+     * Even from the game thread, calling it during DInput polling causes
+     * 0xC0000005 crashes (function relies on state not yet updated).
+     * g_gameMouseX/Y remain 0 — use readmem for cursor diagnosis instead. */
+
+    /* Signal event handle to keep game polling */
+    if (g_mouseEventHandle) SetEvent(g_mouseEventHandle);
 
     return DI_OK;
 }
@@ -555,12 +1276,30 @@ static HRESULT WINAPI hookedMouseSetProperty(
     return g_origMouseSetProperty(self, rguidProp, pdiph);
 }
 
-/* Capture game's hwnd for direct message injection */
-static HWND g_gameHwnd = NULL;
-
 /* Forward declarations for WndProc hook (defined later) */
 static WNDPROC g_origWndProc;
 static LRESULT CALLBACK hookedWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+/* When non-zero, hookedWndProc bypasses DDraw and forwards mouse messages
+ * directly to the game's class WndProc. Set by "wpclick" TCP command,
+ * cleared after WM_LBUTTONUP is forwarded. */
+static volatile int g_bypassDDraw = 0;
+
+/* --- Hooked Acquire for MOUSE --- */
+
+static HRESULT WINAPI hookedMouseAcquire(LPDIRECTINPUTDEVICEA self) {
+    HRESULT hr = g_origMouseAcquire(self);
+    hookLog("Mouse Acquire() = 0x%08X (%s)",
+            (unsigned)hr,
+            hr == DI_OK ? "OK" :
+            hr == S_FALSE ? "ALREADY_ACQUIRED" :
+            hr == (HRESULT)0x80070005 ? "OTHERAPPHASPRIO" :
+            hr == (HRESULT)DIERR_NOTINITIALIZED ? "NOTINITIALIZED" : "OTHER");
+    if (FAILED(hr)) {
+        hookLog("WARNING: Mouse Acquire FAILED! Game will have no mouse input!");
+    }
+    return hr;
+}
 
 /* --- Hooked SetCooperativeLevel for MOUSE --- */
 
@@ -576,15 +1315,18 @@ static HRESULT WINAPI hookedMouseSetCooperativeLevel(
         hookLog("WndProc hook installed early (hwnd=%p, orig=%p)", (void*)hwnd, (void*)g_origWndProc);
     }
 
-    /* Force NON-EXCLUSIVE + BACKGROUND mode for synthetic input injection.
-     * EXCLUSIVE mode: Wine captures mouse at OS level, all synthetic APIs bypassed.
-     * FOREGROUND mode: DInput stops working when Wine loses macOS foreground.
-     * NON-EXCLUSIVE + BACKGROUND: DInput reads from message queue and works
-     * even when Wine isn't frontmost. mouse_event() generates events that
-     * DInput picks up regardless of focus state. */
+    /* v7: Force NONEXCLUSIVE + BACKGROUND for QEMU compatibility.
+     *
+     * EXCLUSIVE+FOREGROUND requires the window to be foreground when
+     * Acquire() is called. In QEMU, the game window may NOT be foreground
+     * at startup (console window competes for focus), causing Acquire()
+     * to fail. Once Acquire() fails, the game disables mouse input.
+     *
+     * NONEXCLUSIVE+BACKGROUND always acquires successfully.
+     * Delta scaling concern: NONEXCLUSIVE mode may apply mouse acceleration,
+     * but we inject events directly into GetDeviceData, bypassing this. */
     dwFlags = DISCL_NONEXCLUSIVE | DISCL_BACKGROUND;
-
-    hookLog("SetCooperativeLevel: hwnd=%p, origFlags=0x%lX → newFlags=0x%lX (forced NONEXCL)",
+    hookLog("SetCooperativeLevel: hwnd=%p, origFlags=0x%lX -> forced NONEXCL|BG (0x%lX)",
             (void*)hwnd, (unsigned long)origFlags, (unsigned long)dwFlags);
 
     return g_origMouseSetCooperativeLevel(self, hwnd, dwFlags);
@@ -728,12 +1470,29 @@ static LRESULT CALLBACK hookedWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM
         if (msg == WM_LBUTTONDOWN || msg == WM_LBUTTONUP || msg == WM_MOUSEMOVE) {
             int x = (short)LOWORD(lParam);
             int y = (short)HIWORD(lParam);
-            hookLog("WndProc: msg=0x%04X (%s) x=%d y=%d wParam=0x%lX [#%ld]",
+            hookLog("WndProc: msg=0x%04X (%s) x=%d y=%d wParam=0x%lX bypass=%d [#%ld]",
                     msg,
                     msg == WM_MOUSEMOVE ? "MOUSEMOVE" :
                     msg == WM_LBUTTONDOWN ? "LBUTTONDOWN" :
                     msg == WM_LBUTTONUP ? "LBUTTONUP" : "?",
-                    x, y, (unsigned long)wParam, c);
+                    x, y, (unsigned long)wParam, g_bypassDDraw, c);
+        }
+
+        /* DDraw bypass: forward mouse messages directly to game's class WndProc,
+         * skipping DDraw's subclassed WndProc which clips cursor in exclusive mode. */
+        if (g_bypassDDraw && (msg == WM_MOUSEMOVE || msg == WM_LBUTTONDOWN ||
+                              msg == WM_LBUTTONUP || msg == WM_RBUTTONDOWN ||
+                              msg == WM_RBUTTONUP)) {
+            WNDPROC classWp = (WNDPROC)GetClassLongPtrA(hwnd, GCLP_WNDPROC);
+            if (classWp && classWp != (WNDPROC)g_origWndProc) {
+                hookLog("  -> bypassing DDraw, forwarding to classWP=%p", (void*)classWp);
+                LRESULT result = CallWindowProcA(classWp, hwnd, msg, wParam, lParam);
+                if (msg == WM_LBUTTONUP) {
+                    g_bypassDDraw = 0;
+                    hookLog("  -> bypass cleared after LBUTTONUP");
+                }
+                return result;
+            }
         }
         break;
     }
@@ -871,9 +1630,16 @@ static DWORD WINAPI wakeThreadProc(LPVOID param) {
             }
         }
 
-        /* TCP command polling: connect to host 10.0.2.2:18890, send "poll\n",
-         * receive "click X Y\n" or "none\n". Uses raw Winsock (no WinInet)
-         * to avoid focus-stealing that WinInet causes. */
+        /* TCP command polling: connect to host 10.0.2.2:18890, send status,
+         * receive "click X Y\n" or "nop\n". NON-BLOCKING: just set state
+         * variables and return. The actual injection happens in GetDeviceState
+         * on the game's main thread. */
+        /* Pulse mouse event handle when injection is pending —
+         * this wakes the game's input polling so GDD fires faster */
+        if (g_mouseEventHandle && g_injState != INJ_IDLE && g_injState != INJ_COMPLETE) {
+            SetEvent(g_mouseEventHandle);
+        }
+
         {
             static DWORD lastTcpCheck = 0;
             static int wsaInited = 0;
@@ -883,54 +1649,482 @@ static DWORD WINAPI wakeThreadProc(LPVOID param) {
 
                 if (!wsaInited) {
                     WSADATA wsa;
-                    if (WSAStartup(MAKEWORD(2,2), &wsa) == 0)
+                    int wsaResult = WSAStartup(MAKEWORD(2,2), &wsa);
+                    if (wsaResult == 0) {
                         wsaInited = 1;
+                        hookLog("TCP: WSAStartup OK (version %d.%d)", wsa.wVersion & 0xFF, wsa.wVersion >> 8);
+                    } else {
+                        static int wsaLogCount = 0;
+                        if (wsaLogCount++ < 5)
+                            hookLog("TCP: WSAStartup FAILED err=%d", wsaResult);
+                    }
                 }
 
                 if (wsaInited) {
+                    static int tcpAttempt = 0;
+                    tcpAttempt++;
+                    if (tcpAttempt <= 3)
+                        hookLog("TCP: attempt %d, calling socket()...", tcpAttempt);
+
                     SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+                    if (s == INVALID_SOCKET) {
+                        if (tcpAttempt <= 5)
+                            hookLog("TCP: socket() FAILED wsa=%d", WSAGetLastError());
+                    }
                     if (s != INVALID_SOCKET) {
-                        /* Non-blocking connect with short timeout */
+                        if (tcpAttempt <= 3)
+                            hookLog("TCP: socket OK (s=%d), connecting...", (int)s);
+
                         struct sockaddr_in addr;
+                        memset(&addr, 0, sizeof(addr));
                         addr.sin_family = AF_INET;
                         addr.sin_port = htons(18890);
                         addr.sin_addr.s_addr = inet_addr("10.0.2.2");
 
-                        /* Set socket timeout to 1 second */
+                        /* Non-blocking connect with 500ms select timeout. */
+                        u_long nonBlock = 1;
+                        ioctlsocket(s, FIONBIO, &nonBlock);
+
+                        int connResult = connect(s, (struct sockaddr*)&addr, sizeof(addr));
+                        int connErr = WSAGetLastError();
+                        if (tcpAttempt <= 3)
+                            hookLog("TCP: connect()=%d wsa=%d", connResult, connErr);
+
+                        if (connResult != 0 && connErr == WSAEWOULDBLOCK) {
+                            fd_set wfds;
+                            FD_ZERO(&wfds);
+                            FD_SET(s, &wfds);
+                            struct timeval tv = { 0, 500000 }; /* 500ms */
+                            int selResult = select(0, NULL, &wfds, NULL, &tv);
+                            if (tcpAttempt <= 3)
+                                hookLog("TCP: select()=%d", selResult);
+                            if (selResult > 0 && FD_ISSET(s, &wfds)) {
+                                connResult = 0;
+                            } else {
+                                connResult = -1;
+                            }
+                        }
+
+                        nonBlock = 0;
+                        ioctlsocket(s, FIONBIO, &nonBlock);
                         DWORD timeout = 1000;
                         setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout));
                         setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (char*)&timeout, sizeof(timeout));
 
-                        if (connect(s, (struct sockaddr*)&addr, sizeof(addr)) == 0) {
-                            send(s, "poll\n", 5, 0);
+                        if (connResult != 0) {
+                            if (tcpAttempt <= 10)
+                                hookLog("TCP: FAILED attempt %d", tcpAttempt);
+                        }
+                        if (connResult == 0) {
+                            hookLog("TCP: CONNECTED on attempt %d!", tcpAttempt);
+                            /* Send diagnostic info with poll */
+                            char pollMsg[512];
+                            POINT pt = {0, 0};
+                            if (g_origGetCursorPos) g_origGetCursorPos(&pt);
+                            else GetCursorPos(&pt);
+                            /* Read CInputLayer cursor position from game thread's last result.
+                             * GetMousePos is UNSAFE to call from the TCP thread (causes 0xC0000005).
+                             * Instead, the GetDeviceData hook calls it on the game thread and stores
+                             * the result in g_gameMouseX/Y globals. */
+                            float ciX = (float)g_gameMouseX;
+                            float ciY = (float)g_gameMouseY;
+                            snprintf(pollMsg, sizeof(pollMsg),
+                                "poll state=%d gds=%ld gdd=%ld kbd=%ld gas=%ld gcp=%ld cur=%ld,%ld hwnd=%d evt=%d ax=%ld ay=%ld ab=%ld ci=%.1f,%.1f hr=0x%08X re=%lu rq=%ld ra=0x%08X md=%p eb=0x%08X\n",
+                                (int)g_injState,
+                                (long)g_getDeviceStateCallCount,
+                                (long)g_getDeviceDataCallCount,
+                                (long)g_kbdGetDeviceStateCallCount,
+                                (long)g_gasCallCount,
+                                (long)g_gcpCallCount,
+                                pt.x, pt.y,
+                                g_gameHwnd ? 1 : 0,
+                                g_mouseEventHandle ? 1 : 0,
+                                (long)g_accumX, (long)g_accumY, (long)g_accumBtn,
+                                ciX, ciY,
+                                (unsigned)g_lastGddHr,
+                                (unsigned long)g_lastGddRealEvents,
+                                (long)g_reacqTotal,
+                                (unsigned)g_lastGddRetAddr,
+                                (void*)g_mouseDevice,
+                                (unsigned)g_callerEBP);
+                            send(s, pollMsg, (int)strlen(pollMsg), 0);
+
                             char buf[256] = {0};
                             int n = recv(s, buf, sizeof(buf) - 1, 0);
                             if (n > 0) {
                                 buf[n] = 0;
                                 int cmdX = 0, cmdY = 0;
-                                if (sscanf(buf, "click %d %d", &cmdX, &cmdY) == 2) {
-                                    hookLog("TCP cmd: click at (%d,%d)", cmdX, cmdY);
+                                if (sscanf(buf, "click2 %d %d", &cmdX, &cmdY) == 2) {
+                                    /* The old click2 path packed RESET+MOVE into one
+                                     * GetDeviceData buffer. The live game binary sums
+                                     * all axis events in that buffer before clamping,
+                                     * so reset(-10000)+move(+400) collapses back to 0.
+                                     * Route click2 through the same cursor-relative
+                                     * direct path as click instead. */
+                                    hookLog("TCP cmd: click2 at (%d,%d)", cmdX, cmdY);
+                                    armDirectClickCommand(cmdX, cmdY, 0, "click2");
 
-                                    /* Direct buffer injection into GetDeviceData */
+                                } else if (sscanf(buf, "click %d %d", &cmdX, &cmdY) == 2) {
+                                    hookLog("TCP cmd: click at SCREEN (%d,%d) [cursor-relative DInput injection]", cmdX, cmdY);
+                                    armDirectClickCommand(cmdX, cmdY, 0, "click");
+
+                                } else if (strncmp(buf, "fclick", 6) == 0) {
+                                    /* Full click: small position delta + button.
+                                     * Mimics real mouse input pattern observed during intro:
+                                     * [X_delta, Y_delta, btn_down, btn_up] in same buffer.
+                                     * The game may require position events alongside button
+                                     * events to register a click (observed: btn-only fails). */
+                                    int fdx = 0, fdy = 0;
+                                    sscanf(buf, "fclick %d %d", &fdx, &fdy);
+                                    hookLog("TCP cmd: fclick (dx=%d, dy=%d)", fdx, fdy);
+                                    g_injTargetX = fdx;  /* used as delta, not absolute */
+                                    g_injTargetY = fdy;
+                                    g_injClickRequested = 2;  /* 2 = fclick mode */
+                                    g_injFrame = 0;
+                                    g_injState = INJ_BTN_ONLY;
+                                    if (g_mouseEventHandle) SetEvent(g_mouseEventHandle);
+                                    hookLog("TCP: fclick injection armed (dx=%d, dy=%d)", fdx, fdy);
+
+                                } else if (sscanf(buf, "aclick %d %d", &cmdX, &cmdY) == 2) {
+                                    /* All-in-one click: reset+move+btn in SINGLE GDD call.
+                                     * Hypothesis: game needs position and button events in
+                                     * the same GetDeviceData buffer to register a click. */
+                                    hookLog("TCP cmd: aclick at (%d,%d) [all-in-one]", cmdX, cmdY);
+                                    /* DO NOT call SetCursorPos — breaks fullscreen focus */
                                     g_injTargetX = cmdX;
                                     g_injTargetY = cmdY;
                                     g_injClickRequested = 1;
                                     g_injFrame = 0;
-                                    g_injState = INJ_RESET;
-                                    hookLog("TCP: started injection to (%d,%d)", cmdX, cmdY);
-
+                                    g_injState = INJ_ALLCLICK;
                                     if (g_mouseEventHandle) SetEvent(g_mouseEventHandle);
+                                    hookLog("TCP: aclick armed (ALL-IN-ONE at %d,%d)", cmdX, cmdY);
 
-                                    /* Wait for injection to complete */
-                                    for (int w = 0; w < 60; w++) {
-                                        Sleep(500);
-                                        if (g_mouseEventHandle) SetEvent(g_mouseEventHandle);
-                                        if (g_injState == INJ_COMPLETE) break;
+                                } else if (sscanf(buf, "dclick %d %d", &cmdX, &cmdY) == 2) {
+                                    /* Direct DInput injection: move + click, NO reset.
+                                     * X,Y are absolute screen coords = DInput deltas from (0,0). */
+                                    hookLog("TCP cmd: dclick at (%d,%d) [direct, no reset]", cmdX, cmdY);
+                                    armDirectClickCommand(cmdX, cmdY, 1, "dclick");
+
+                                } else if (sscanf(buf, "gasclick %d %d", &cmdX, &cmdY) == 2) {
+                                    /* Force ALL input APIs to report click at (X,Y).
+                                     * - GetCursorPos returns (X,Y)
+                                     * - GetAsyncKeyState(VK_LBUTTON) returns pressed
+                                     * - GetKeyState(VK_LBUTTON) returns pressed
+                                     * Held for many "frames" (API calls) to ensure the game
+                                     * sees the click regardless of which API it polls. */
+                                    hookLog("TCP cmd: gasclick at (%d,%d)", cmdX, cmdY);
+                                    g_forceX = cmdX;
+                                    g_forceY = cmdY;
+                                    g_forceClickFrames = 200;  /* 200 API calls worth of override */
+                                    hookLog("TCP: gasclick armed at (%d,%d) for 200 frames", cmdX, cmdY);
+
+                                } else if (strncmp(buf, "btn", 3) == 0) {
+                                    /* Button-only injection: no position change.
+                                     * Tests if game's internal cursor is already at the right spot. */
+                                    hookLog("TCP cmd: btn (button-only injection)");
+                                    g_injClickRequested = 1;
+                                    g_injFrame = 0;
+                                    g_injState = INJ_BTN_ONLY;
+                                    if (g_mouseEventHandle) SetEvent(g_mouseEventHandle);
+                                    hookLog("TCP: btn-only injection armed");
+
+                                } else if (strncmp(buf, "fire", 4) == 0) {
+                                    /* Fire mouse_event from inside game process.
+                                     * Uses current cursor position. */
+                                    POINT pt;
+                                    GetCursorPos(&pt);
+                                    hookLog("TCP cmd: fire at cursor (%ld,%ld)", pt.x, pt.y);
+                                    mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+                                    Sleep(200);
+                                    mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+                                    hookLog("TCP: fire complete");
+
+                                } else if (sscanf(buf, "wpclick %d %d", &cmdX, &cmdY) == 2) {
+                                    /* DDraw-bypass click: sets g_bypassDDraw flag then PostMessages.
+                                     * When the message arrives at hookedWndProc (on the game's main
+                                     * thread), it's forwarded directly to the game's class WndProc,
+                                     * skipping DDraw's WndProc which clips cursor coordinates. */
+                                    HWND hw = g_gameHwnd;
+                                    if (!hw) hw = GetForegroundWindow();
+                                    hookLog("TCP cmd: wpclick at (%d,%d) hwnd=%p", cmdX, cmdY, (void*)hw);
+                                    LPARAM lp = MAKELPARAM(cmdX, cmdY);
+                                    g_bypassDDraw = 1;
+                                    PostMessageA(hw, WM_MOUSEMOVE, 0, lp);
+                                    Sleep(100);
+                                    PostMessageA(hw, WM_LBUTTONDOWN, MK_LBUTTON, lp);
+                                    Sleep(200);
+                                    PostMessageA(hw, WM_LBUTTONUP, 0, lp);
+                                    hookLog("TCP: wpclick complete at (%d,%d)", cmdX, cmdY);
+
+                                } else if (sscanf(buf, "wclick %d %d", &cmdX, &cmdY) == 2) {
+                                    /* Window message click: PostMessage WM_LBUTTONDOWN/UP
+                                     * directly to game window with coordinates in LPARAM.
+                                     * Bypasses DirectInput entirely — for title screen menus
+                                     * that may process WM_ messages instead of DInput events. */
+                                    HWND hw = g_gameHwnd;
+                                    if (!hw) hw = GetForegroundWindow();
+                                    hookLog("TCP cmd: wclick at (%d,%d) hwnd=%p", cmdX, cmdY, (void*)hw);
+                                    LPARAM lp = MAKELPARAM(cmdX, cmdY);
+                                    /* Send WM_MOUSEMOVE first to update internal position */
+                                    PostMessageA(hw, WM_MOUSEMOVE, 0, lp);
+                                    Sleep(100);
+                                    PostMessageA(hw, WM_LBUTTONDOWN, MK_LBUTTON, lp);
+                                    Sleep(200);
+                                    PostMessageA(hw, WM_LBUTTONUP, 0, lp);
+                                    hookLog("TCP: wclick complete at (%d,%d)", cmdX, cmdY);
+
+                                } else if (sscanf(buf, "sclick %d %d", &cmdX, &cmdY) == 2) {
+                                    /* SendMessage click: synchronous WM_LBUTTONDOWN/UP.
+                                     * Unlike PostMessage, SendMessage processes immediately
+                                     * on the target window's thread. */
+                                    HWND hw = g_gameHwnd;
+                                    if (!hw) hw = GetForegroundWindow();
+                                    hookLog("TCP cmd: sclick at (%d,%d) hwnd=%p", cmdX, cmdY, (void*)hw);
+                                    LPARAM lp = MAKELPARAM(cmdX, cmdY);
+                                    SendMessageA(hw, WM_MOUSEMOVE, 0, lp);
+                                    SendMessageA(hw, WM_LBUTTONDOWN, MK_LBUTTON, lp);
+                                    Sleep(200);
+                                    SendMessageA(hw, WM_LBUTTONUP, 0, lp);
+                                    hookLog("TCP: sclick complete at (%d,%d)", cmdX, cmdY);
+
+                                } else if (strncmp(buf, "getmousepos", 11) == 0) {
+                                    /* Report last known game cursor position
+                                     * (updated by GetDeviceData hook on game thread) */
+                                    char out[128];
+                                    snprintf(out, sizeof(out),
+                                        "RESP:getmousepos x=%ld y=%ld\n",
+                                        (long)g_gameMouseX, (long)g_gameMouseY);
+                                    send(s, out, (int)strlen(out), 0);
+
+                                } else if (sscanf(buf, "sinput %d %d", &cmdX, &cmdY) == 2) {
+                                    /* SendInput click: goes through full Windows input pipeline.
+                                     * Absolute coords, then button down/up. Should reach
+                                     * DirectInput and also generate WM_ messages. */
+                                    hookLog("TCP cmd: sinput click at (%d,%d)", cmdX, cmdY);
+                                    INPUT inp[3];
+                                    memset(inp, 0, sizeof(inp));
+                                    /* Move to absolute position */
+                                    inp[0].type = INPUT_MOUSE;
+                                    inp[0].mi.dx = (cmdX * 65535) / 800;
+                                    inp[0].mi.dy = (cmdY * 65535) / 600;
+                                    inp[0].mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE;
+                                    /* Button down */
+                                    inp[1].type = INPUT_MOUSE;
+                                    inp[1].mi.dx = (cmdX * 65535) / 800;
+                                    inp[1].mi.dy = (cmdY * 65535) / 600;
+                                    inp[1].mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE | MOUSEEVENTF_LEFTDOWN;
+                                    /* Button up */
+                                    inp[2].type = INPUT_MOUSE;
+                                    inp[2].mi.dx = (cmdX * 65535) / 800;
+                                    inp[2].mi.dy = (cmdY * 65535) / 600;
+                                    inp[2].mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE | MOUSEEVENTF_LEFTUP;
+                                    UINT sent = SendInput(1, &inp[0], sizeof(INPUT)); /* move first */
+                                    Sleep(100);
+                                    sent += SendInput(1, &inp[1], sizeof(INPUT)); /* button down */
+                                    Sleep(200);
+                                    sent += SendInput(1, &inp[2], sizeof(INPUT)); /* button up */
+                                    hookLog("TCP: sinput complete at (%d,%d), sent=%u events", cmdX, cmdY, sent);
+
+                                } else if (sscanf(buf, "callwp %d %d", &cmdX, &cmdY) == 2) {
+                                    /* Bypass DDraw's WndProc: call game's CLASS WndProc directly.
+                                     * DDraw subclasses via SetWindowLongPtr, but the class-level
+                                     * WndProc (GetClassLongPtr GCLP_WNDPROC) still points to the
+                                     * game's original handler that processes WM_MOUSEMOVE for
+                                     * cursor positioning. */
+                                    HWND hw = g_gameHwnd;
+                                    if (!hw) hw = GetForegroundWindow();
+                                    WNDPROC classWp = (WNDPROC)GetClassLongPtrA(hw, GCLP_WNDPROC);
+                                    WNDPROC windowWp = (WNDPROC)GetWindowLongPtrA(hw, GWLP_WNDPROC);
+                                    hookLog("TCP cmd: callwp at (%d,%d) hwnd=%p classWP=%p windowWP=%p origWP=%p",
+                                            cmdX, cmdY, (void*)hw, (void*)classWp, (void*)windowWp, (void*)g_origWndProc);
+                                    LPARAM lp = MAKELPARAM(cmdX, cmdY);
+                                    /* Call game's class WndProc directly — bypasses DDraw's subclass */
+                                    if (classWp) {
+                                        CallWindowProcA(classWp, hw, WM_MOUSEMOVE, 0, lp);
+                                        Sleep(50);
+                                        CallWindowProcA(classWp, hw, WM_LBUTTONDOWN, MK_LBUTTON, lp);
+                                        Sleep(200);
+                                        CallWindowProcA(classWp, hw, WM_LBUTTONUP, 0, lp);
                                     }
-                                    hookLog("TCP: injection %s (state=%d)",
-                                            g_injState == INJ_COMPLETE ? "COMPLETE" : "TIMEOUT",
-                                            (int)g_injState);
+                                    hookLog("TCP: callwp complete at (%d,%d)", cmdX, cmdY);
+
+                                } else if (strncmp(buf, "getwp", 5) == 0) {
+                                    /* Report WndProc addresses for debugging */
+                                    HWND hw = g_gameHwnd;
+                                    if (!hw) hw = GetForegroundWindow();
+                                    WNDPROC classWp = (WNDPROC)GetClassLongPtrA(hw, GCLP_WNDPROC);
+                                    WNDPROC windowWp = (WNDPROC)GetWindowLongPtrA(hw, GWLP_WNDPROC);
+                                    char out[256];
+                                    snprintf(out, sizeof(out),
+                                        "RESP:getwp hwnd=%p classWP=%p windowWP=%p origWP=%p\n",
+                                        (void*)hw, (void*)classWp, (void*)windowWp, (void*)g_origWndProc);
+                                    send(s, out, (int)strlen(out), 0);
+                                    hookLog("TCP: getwp classWP=%p windowWP=%p origWP=%p",
+                                            (void*)classWp, (void*)windowWp, (void*)g_origWndProc);
+
+                                } else if (strncmp(buf, "speedup", 7) == 0) {
+                                    /* Force-install event notification on mouse device
+                                     * to speed up GetDeviceData polling. Creates an event,
+                                     * calls SetEventNotification, starts periodic signaling. */
+                                    if (g_mouseDevice && !g_mouseEventHandle) {
+                                        HANDLE hEvt = CreateEventA(NULL, FALSE, FALSE, NULL);
+                                        if (hEvt) {
+                                            HRESULT hr2 = g_origMouseSetEventNotification
+                                                ? g_origMouseSetEventNotification(g_mouseDevice, hEvt)
+                                                : g_mouseDevice->lpVtbl->SetEventNotification(g_mouseDevice, hEvt);
+                                            if (SUCCEEDED(hr2)) {
+                                                g_mouseEventHandle = hEvt;
+                                                hookLog("TCP: speedup OK — event=%p, SetEventNotification=0x%08X",
+                                                        (void*)hEvt, (unsigned)hr2);
+                                                /* Signal it immediately and let wake thread pulse it */
+                                                SetEvent(hEvt);
+                                            } else {
+                                                hookLog("TCP: speedup FAILED — SetEventNotification=0x%08X",
+                                                        (unsigned)hr2);
+                                                CloseHandle(hEvt);
+                                            }
+                                        }
+                                    } else if (g_mouseEventHandle) {
+                                        hookLog("TCP: speedup — event already set, pulsing");
+                                        SetEvent(g_mouseEventHandle);
+                                    } else {
+                                        hookLog("TCP: speedup — no mouse device yet");
+                                    }
+
+                                } else if (strncmp(buf, "intscan", 7) == 0) {
+                                    /* Scan memory for integer value: intscan START END VALUE */
+                                    unsigned int start = 0x808000, end = 0x812000, target = 0x190;
+                                    sscanf(buf + 8, "%x %x %x", &start, &end, &target);
+                                    char out[4096];
+                                    int pos = snprintf(out, sizeof(out), "intscan 0x%X-0x%X val=0x%X:", start, end, target);
+                                    int found = 0;
+                                    for (unsigned int a = start; a < end && a < start + 0x20000; a += 4) {
+                                        if (!IsBadReadPtr((void *)a, 4) && *(unsigned int *)a == target) {
+                                            pos += snprintf(out+pos, sizeof(out)-pos, " 0x%X", a);
+                                            found++;
+                                            if (found >= 40 || pos > 3800) break;
+                                        }
+                                    }
+                                    pos += snprintf(out+pos, sizeof(out)-pos, " (%d found)\n", found);
+                                    send(s, out, pos, 0);
+
+                                } else if (sscanf(buf, "move %d %d", &cmdX, &cmdY) == 2) {
+                                    SetCursorPos(cmdX, cmdY);
+                                    hookLog("TCP cmd: move to (%d,%d)", cmdX, cmdY);
+                                } else if (strncmp(buf, "resetacc", 8) == 0) {
+                                    /* Reset accumulators — for calibration */
+                                    g_accumX = 0;
+                                    g_accumY = 0;
+                                    g_accumBtn = 0;
+                                    hookLog("TCP cmd: accumulators reset");
+                                } else if (strncmp(buf, "cursorinfo", 10) == 0) {
+                                    /* Dump CInputLayer cursor state.
+                                     * g_gameMouseX/Y are set by GetDeviceData hook on game thread. */
+                                    char info[512];
+                                    DWORD *pCIL = (DWORD *)0x809830;
+
+                                    /* Dump first 64 bytes of CInputLayer */
+                                    char hexbuf[256] = {0};
+                                    int hp = 0;
+                                    for (int i = 0; i < 16; i++)
+                                        hp += snprintf(hexbuf+hp, sizeof(hexbuf)-hp, " %08X", pCIL[i]);
+
+                                    snprintf(info, sizeof(info),
+                                        "RESP:cursorinfo gmp=(%ld,%ld) accum=(%ld,%ld) "
+                                        "gdd=%ld gds=%ld cilDump=%s\n",
+                                        (long)g_gameMouseX, (long)g_gameMouseY,
+                                        (long)g_accumX, (long)g_accumY,
+                                        (long)g_getDeviceDataCallCount,
+                                        (long)g_getDeviceStateCallCount,
+                                        hexbuf);
+                                    send(s, info, (int)strlen(info), 0);
+                                    hookLog("TCP: sent cursorinfo (gmp=%ld,%ld)",
+                                            (long)g_gameMouseX, (long)g_gameMouseY);
+                                } else if (strncmp(buf, "readmem", 7) == 0) {
+                                    /* Read game memory: readmem HEXADDR [SIZE] */
+                                    unsigned int addr = 0, size = 64;
+                                    sscanf(buf + 8, "%x %u", &addr, &size);
+                                    if (size > 256) size = 256;
+                                    /* Allow any readable address (heap, stack, globals).
+                                     * Use IsBadReadPtr as safety check. */
+                                    if (addr >= 0x10000 && !IsBadReadPtr((void *)addr, size)) {
+                                        char out[1024];
+                                        int pos = snprintf(out, sizeof(out), "MEM:0x%08X:", addr);
+                                        for (unsigned int i = 0; i < size; i += 4) {
+                                            pos += snprintf(out+pos, sizeof(out)-pos, " %08X",
+                                                            *(unsigned int *)(addr + i));
+                                        }
+                                        pos += snprintf(out+pos, sizeof(out)-pos, "\n");
+                                        send(s, out, pos, 0);
+                                    } else {
+                                        char out[128];
+                                        snprintf(out, sizeof(out), "MEM:BAD_ADDR 0x%08X\n", addr);
+                                        send(s, out, (int)strlen(out), 0);
+                                    }
+                                } else if (strncmp(buf, "writemem", 8) == 0) {
+                                    /* Write game memory: writemem HEXADDR HEXVAL */
+                                    unsigned int addr = 0, val = 0;
+                                    sscanf(buf + 9, "%x %x", &addr, &val);
+                                    if (addr >= 0x400000 && addr < 0x900000) {
+                                        DWORD oldProt;
+                                        VirtualProtect((void *)addr, 4, PAGE_READWRITE, &oldProt);
+                                        *(unsigned int *)addr = val;
+                                        VirtualProtect((void *)addr, 4, oldProt, &oldProt);
+                                        char out[128];
+                                        snprintf(out, sizeof(out), "wrote 0x%08X to 0x%08X\n", val, addr);
+                                        send(s, out, (int)strlen(out), 0);
+                                        hookLog("TCP: writemem 0x%08X = 0x%08X", addr, val);
+                                    }
+                                } else if (strncmp(buf, "floatscan", 9) == 0) {
+                                    /* Scan memory for float values in range: floatscan START END MIN MAX */
+                                    unsigned int start = 0x808000, end = 0x812000;
+                                    float fmin = 100.0f, fmax = 500.0f;
+                                    sscanf(buf + 10, "%x %x %f %f", &start, &end, &fmin, &fmax);
+                                    char out[4096];
+                                    int pos = snprintf(out, sizeof(out), "floatscan 0x%X-0x%X [%.1f,%.1f]:", start, end, fmin, fmax);
+                                    int found = 0;
+                                    for (unsigned int a = start; a < end && a < start + 0x10000; a += 4) {
+                                        float v = *(float *)a;
+                                        if (v >= fmin && v <= fmax) {
+                                            pos += snprintf(out+pos, sizeof(out)-pos, " 0x%X=%.2f", a, v);
+                                            found++;
+                                            if (found >= 30 || pos > 3800) break;
+                                        }
+                                    }
+                                    pos += snprintf(out+pos, sizeof(out)-pos, " (%d found)\n", found);
+                                    send(s, out, pos, 0);
+                                } else if (strncmp(buf, "fulllog", 7) == 0) {
+                                    /* Return last 8KB of hook log */
+                                    FILE *lf = fopen("dinput-hook.log", "r");
+                                    if (lf) {
+                                        fseek(lf, 0, SEEK_END);
+                                        long sz = ftell(lf);
+                                        long start = sz > 8192 ? sz - 8192 : 0;
+                                        fseek(lf, start, SEEK_SET);
+                                        char logbuf[8300];
+                                        int nread = (int)fread(logbuf, 1, sizeof(logbuf)-1, lf);
+                                        logbuf[nread] = 0;
+                                        fclose(lf);
+                                        send(s, logbuf, nread, 0);
+                                        hookLog("TCP: sent %d bytes of fulllog", nread);
+                                    }
+                                } else if (strncmp(buf, "log", 3) == 0) {
+                                    /* Return last 2KB of hook log */
+                                    FILE *lf = fopen("dinput-hook.log", "r");
+                                    if (lf) {
+                                        fseek(lf, 0, SEEK_END);
+                                        long sz = ftell(lf);
+                                        long start = sz > 2048 ? sz - 2048 : 0;
+                                        fseek(lf, start, SEEK_SET);
+                                        char logbuf[2100];
+                                        int nread = (int)fread(logbuf, 1, sizeof(logbuf)-1, lf);
+                                        logbuf[nread] = 0;
+                                        fclose(lf);
+                                        send(s, logbuf, nread, 0);
+                                        hookLog("TCP: sent %d bytes of log", nread);
+                                    }
                                 }
+                                /* "nop" or anything else = do nothing */
                             }
                         }
                         closesocket(s);
@@ -968,6 +2162,101 @@ static void startWakeThread(void) {
 static void installDeviceHooks(REFGUID rguid, LPDIRECTINPUTDEVICEA dev, const char *source) {
     void **vtable = *(void ***)dev;
 
+    /* Install Win32 API hooks (GetAsyncKeyState, GetKeyState, GetCursorPos)
+     * on first device creation. Must happen after game EXE is fully loaded. */
+    installWin32Hooks();
+
+    /* Patch game memory: set the -W flag (0x808d74 = 1) so WndProc processes
+     * WM_MOUSE messages instead of passing them to DefWindowProcA.
+     * Without this, PostMessage WM_LBUTTONDOWN is silently ignored.
+     * This is equivalent to launching GAME.EXE with the -W command-line flag. */
+    {
+        static int patched = 0;
+        if (!patched) {
+            BYTE *flagAddr = (BYTE *)0x808d74;
+            DWORD oldProt2;
+            if (VirtualProtect(flagAddr, 1, PAGE_READWRITE, &oldProt2)) {
+                BYTE oldVal = *flagAddr;
+                *flagAddr = 1;
+                VirtualProtect(flagAddr, 1, oldProt2, &oldProt2);
+                hookLog("PATCH: set 0x808d74 = 1 (was %d) — WM_MOUSE processing enabled (-W flag)", oldVal);
+                patched = 1;
+            } else {
+                hookLog("PATCH: VirtualProtect on 0x808d74 FAILED (err=%lu)", GetLastError());
+            }
+        }
+    }
+
+    /* PATCH 2: NOP out the input-enabled check at 0x4D36EA.
+     * The function at 0x4D36C0 processes GetDeviceData mouse events.
+     * It checks a flag at [this+0x1430] and skips ALL processing if 0.
+     * In QEMU, this flag is never set (game init issue), so mouse input
+     * is completely ignored. Patching the je to NOPs forces processing.
+     * Original bytes: 0F 84 FE 02 00 00  (je +0x2FE)
+     * Patched bytes:  90 90 90 90 90 90  (6x NOP) */
+    {
+        static int patched2 = 0;
+        if (!patched2) {
+            BYTE *patchAddr = (BYTE *)0x4D36EA;
+            BYTE expected[] = {0x0F, 0x84, 0xFE, 0x02, 0x00, 0x00};
+            DWORD oldProt3;
+            if (VirtualProtect(patchAddr, 6, PAGE_EXECUTE_READWRITE, &oldProt3)) {
+                /* Verify bytes before patching */
+                if (memcmp(patchAddr, expected, 6) == 0) {
+                    memset(patchAddr, 0x90, 6);
+                    hookLog("PATCH2: NOP'd input-enabled check at 0x4D36EA (6 bytes)");
+                } else {
+                    hookLog("PATCH2: UNEXPECTED bytes at 0x4D36EA: %02X %02X %02X %02X %02X %02X",
+                            patchAddr[0], patchAddr[1], patchAddr[2],
+                            patchAddr[3], patchAddr[4], patchAddr[5]);
+                }
+                VirtualProtect(patchAddr, 6, oldProt3, &oldProt3);
+                patched2 = 1;
+            } else {
+                hookLog("PATCH2: VirtualProtect on 0x4D36EA FAILED (err=%lu)", GetLastError());
+            }
+        }
+    }
+
+    /* PATCH 3: NOP out the sensitivity multiplier for X and Y axes.
+     * At 0x4D376C: fmul dword ptr [ebp+0x10] (X axis, 3 bytes: D8 4D 10)
+     * At 0x4D3783: fmul dword ptr [ebp+0x10] (Y axis, 3 bytes: D8 4D 10)
+     * If sensitivity is 0.0 (uninitialized object), all mouse deltas become 0.
+     * NOP'ing these makes raw DInput deltas go directly to cursor position. */
+    {
+        static int patched3 = 0;
+        if (!patched3) {
+            BYTE fmulBytes[] = {0xD8, 0x4D, 0x10};
+            DWORD oldProt4;
+
+            /* Patch X axis sensitivity */
+            BYTE *xAddr = (BYTE *)0x4D376C;
+            if (VirtualProtect(xAddr, 3, PAGE_EXECUTE_READWRITE, &oldProt4)) {
+                if (memcmp(xAddr, fmulBytes, 3) == 0) {
+                    memset(xAddr, 0x90, 3);
+                    hookLog("PATCH3: NOP'd X-axis fmul at 0x4D376C");
+                } else {
+                    hookLog("PATCH3: UNEXPECTED X bytes: %02X %02X %02X", xAddr[0], xAddr[1], xAddr[2]);
+                }
+                VirtualProtect(xAddr, 3, oldProt4, &oldProt4);
+            }
+
+            /* Patch Y axis sensitivity */
+            BYTE *yAddr = (BYTE *)0x4D3783;
+            if (VirtualProtect(yAddr, 3, PAGE_EXECUTE_READWRITE, &oldProt4)) {
+                if (memcmp(yAddr, fmulBytes, 3) == 0) {
+                    memset(yAddr, 0x90, 3);
+                    hookLog("PATCH3: NOP'd Y-axis fmul at 0x4D3783");
+                } else {
+                    hookLog("PATCH3: UNEXPECTED Y bytes: %02X %02X %02X", yAddr[0], yAddr[1], yAddr[2]);
+                }
+                VirtualProtect(yAddr, 3, oldProt4, &oldProt4);
+            }
+
+            patched3 = 1;
+        }
+    }
+
     if (IsEqualGUID(rguid, &GUID_SysMouse)) {
         hookLog("Mouse device created via %s — dev=%p, vtable=%p", source, (void*)dev, (void*)vtable);
         hookLog("  vtable[9] (GetDeviceState) = %p", vtable[9]);
@@ -993,10 +2282,12 @@ static void installDeviceHooks(REFGUID rguid, LPDIRECTINPUTDEVICEA dev, const ch
          *   [13] SetCooperativeLevel  — log coop level
          */
         DWORD oldProt;
-        /* Patch 6 */
-        VirtualProtect(&vtable[6], sizeof(void *), PAGE_EXECUTE_READWRITE, &oldProt);
+        /* Patch 6-7 (SetProperty + Acquire) */
+        g_origMouseAcquire = (Acquire_t)vtable[7];
+        VirtualProtect(&vtable[6], sizeof(void *) * 2, PAGE_EXECUTE_READWRITE, &oldProt);
         vtable[6] = (void *)hookedMouseSetProperty;
-        VirtualProtect(&vtable[6], sizeof(void *), oldProt, &oldProt);
+        vtable[7] = (void *)hookedMouseAcquire;
+        VirtualProtect(&vtable[6], sizeof(void *) * 2, oldProt, &oldProt);
         /* Patch 9-13 (contiguous range) */
         VirtualProtect(&vtable[9], sizeof(void *) * 5, PAGE_EXECUTE_READWRITE, &oldProt);
         vtable[9] = (void *)hookedMouseGetDeviceState;
