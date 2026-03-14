@@ -145,6 +145,7 @@ static GetDeviceData_t g_origMouseGetDeviceData = NULL;
 typedef HRESULT (WINAPI *SetEventNotification_t)(LPDIRECTINPUTDEVICEA, HANDLE);
 static SetEventNotification_t g_origMouseSetEventNotification = NULL;
 static HANDLE g_mouseEventHandle = NULL;
+static HANDLE g_privateMouseEventHandle = NULL;
 
 /* SetDataFormat hook — logs the mouse data format the game uses */
 typedef HRESULT (WINAPI *SetDataFormat_t)(LPDIRECTINPUTDEVICEA, LPCDIDATAFORMAT);
@@ -792,6 +793,18 @@ static volatile int    g_rawclickState = RAWCLICK_IDLE;
 static volatile float  g_rawclickX = 0.0f;
 static volatile float  g_rawclickY = 0.0f;
 static volatile DWORD  g_rawclickType = 5;  /* diagnostic event type override (typically 4 or 5) */
+static volatile DWORD  g_rawclickButtonIndex = 0;
+
+#define GAMECLICK_IDLE     0
+#define GAMECLICK_PENDING  1
+#define GAMECLICK_HOLD     2
+#define GAMECLICK_UP       3
+#define GAMECLICK_DONE     4
+static volatile int    g_gameclickState = GAMECLICK_IDLE;
+static volatile float  g_gameclickX = 0.0f;
+static volatile float  g_gameclickY = 0.0f;
+static volatile DWORD  g_gameclickButtonIndex = 1;
+static volatile LONG   g_gameclickHoldFrames = 2;
 
 #define MENUCLICK_IDLE         0
 #define MENUCLICK_PENDING_DOWN 1
@@ -806,9 +819,15 @@ static volatile DWORD  g_rawclickType = 5;  /* diagnostic event type override (t
 #define MENUDIRECT_MAINMSG 10
 #define MENUDIRECT_MAINCB 11
 #define MENUDIRECT_MAINCOMBO 12
+#define MENUDIRECT_MAINSCAN 13
+#define MENUDIRECT_MAINFLOW 14
 
 #define MENU_TARGET_NONE           0
 #define MENU_TARGET_SINGLE_PLAYER  1
+
+#define MENUWATCH_TARGET_NONE      0
+#define MENUWATCH_TARGET_MANAGER   1
+#define MENUWATCH_TARGET_PENDING   2
 
 static volatile LONG g_menuClickState = MENUCLICK_IDLE;
 static volatile LONG g_menuClickTarget = MENU_TARGET_NONE;
@@ -828,8 +847,41 @@ static volatile LONG g_menuWrapUsePayload = 0;
 static volatile LONG g_menuWrapForceClear18 = 0;
 static volatile LONG g_menuWrapForceClear2C = 0;
 static volatile LONG g_menuWrapArg5FromItem24 = 0;
+static volatile LONG g_menuWrapAutoFlush = 0;
+static volatile LONG g_menuItemKeyPending = 0;
+static volatile LONG g_menuItemKeyTarget = MENU_TARGET_NONE;
+static volatile LONG g_menuItemKeyArg1 = 0;
+static volatile LONG g_menuItemKeyArg2 = 0;
+static volatile LONG g_menuItemKeyArg3 = 0;
+static volatile LONG g_menuItemKeyAutoFlush = 0;
+static volatile LONG g_menuItemFlushPending = 0;
+static volatile LONG g_menuItemFlushTarget = MENU_TARGET_NONE;
 static volatile LONG g_menuTraceRemaining = 0;
 static volatile LONG g_menuClickUsedContainerPath = 0;
+static volatile LONG g_menuWatchPendingCommand = 0;
+static volatile LONG g_menuWatchPendingHits = 24;
+static volatile LONG g_menuWatchRearmPending = 0;
+static volatile LONG g_menuWatchHitsLogged = 0;
+static volatile LONG g_menuWatchFaultsSeen = 0;
+static volatile LONG g_menuWatchHitLimit = 0;
+static volatile LONG g_menuWatchFaultBudget = 0;
+static volatile LONG g_menuWatchActive = 0;
+static volatile LONG g_menuWatchTarget = MENUWATCH_TARGET_NONE;
+static volatile DWORD g_screenOpenPendingAddr = 0;
+static volatile LONG g_screenOpenPendingMode = 0;
+static volatile LONG g_screenOpenAutoPumpCount = 0;
+static volatile LONG g_screenPendingApplyMode = 0;
+static volatile LONG g_screenEntryPending = 0;
+static volatile LONG g_pendingUiDispatchSeq = 0;
+static volatile LONG g_screenOpenTraceStage = 0;
+static char g_screenEntryName[64];
+static PVOID g_menuWatchVehHandle = NULL;
+static BYTE *g_menuWatchManager = NULL;
+static BYTE *g_menuWatchPageBase = NULL;
+static SIZE_T g_menuWatchPageSize = 0;
+static BYTE *g_menuWatchFieldBase = NULL;
+static SIZE_T g_menuWatchFieldSize = 0;
+static DWORD g_menuWatchProtectNoGuard = 0;
 
 typedef unsigned char (__attribute__((thiscall)) *MenuSelectItem_t)(void *self, void *item);
 typedef unsigned char (__attribute__((thiscall)) *MenuDispatchItem_t)(void *self, int action, int pressed, void *context);
@@ -852,14 +904,19 @@ typedef unsigned char (__attribute__((thiscall)) *MenuWrapperItem_t)(
 typedef void (__attribute__((thiscall)) *MenuCase2Item_t)(void *self, void *payload, int activate);
 typedef void (__attribute__((thiscall)) *MenuCase3Item_t)(void *self, void *payload);
 typedef void (__attribute__((thiscall)) *MenuCase4Item_t)(void *self, int value);
+typedef void (__attribute__((thiscall)) *MenuControllerDispatch_t)(void *self, int action, int flags);
 typedef void (__attribute__((thiscall)) *MenuAppPump_t)(void *self);
 typedef void (__attribute__((thiscall)) *TitleSelectChild_t)(void *self, int index);
 typedef void (__attribute__((thiscall)) *MenuContainerEvent_t)(void *self, void *event);
 typedef void *(__attribute__((thiscall)) *FindNamedObject_t)(void *self, const char *name);
 typedef void (__attribute__((thiscall)) *MainMenuProcessMessage_t)(void *self, void *event);
 typedef void (__attribute__((thiscall)) *MainMenuCallback_t)(void *self, void *arg);
+typedef void (__attribute__((thiscall)) *MainMenuTick_t)(void *self);
+typedef unsigned char (__attribute__((thiscall)) *MenuItemKey_t)(void *self, int arg1, int arg2, int arg3);
+typedef void (__attribute__((thiscall)) *MenuItemFlush_t)(void *self);
 
 #define TITLE_SCREEN_VTABLE 0x005D35C4
+#define WM_APP_PENDING_UI   (WM_APP + 0x52)
 
 #define DINPUT7_OBJECTDATA_SIZE 16
 
@@ -893,6 +950,86 @@ static int tryReadCurrentCursor(float *outX, float *outY) {
     if (outX) *outX = x;
     if (outY) *outY = y;
     return 1;
+}
+
+/* Mirror the extracted title-screen binary's queue writers closely enough for
+ * diagnostic injection:
+ * - 0x4D3C10 writes type=3 move records.
+ * - 0x4D3D70 writes type=4 button transition records.
+ *
+ * The queue record layout is:
+ *   +0x00 type
+ *   +0x08/+0x0C committed x/y
+ *   +0x10/+0x14 dx/dy from CInputDevice+0x24/+0x28
+ *   +0x18/+0x1C button-state dwords from CInputDevice+0x1431/+0x1435
+ *   +0x20 button index (-1 for move records)
+ *   +0x24 reserved (0)
+ */
+static void rawQueueWriteMoveEvent(BYTE *cinput, BYTE *slot, float targetX, float targetY) {
+    float oldX = *(float *)(cinput + 0x14);
+    float oldY = *(float *)(cinput + 0x18);
+    float dx = targetX - oldX;
+    float dy = targetY - oldY;
+    int useAltCursor = *(BYTE *)(cinput + 0x01) != 0;
+    float eventX = useAltCursor ? *(float *)(cinput + 0x1C) : targetX;
+    float eventY = useAltCursor ? *(float *)(cinput + 0x20) : targetY;
+
+    *(float *)(cinput + 0x24) = dx;
+    *(float *)(cinput + 0x28) = dy;
+    *(float *)(cinput + 0x14) = targetX;
+    *(float *)(cinput + 0x18) = targetY;
+
+    memset(slot, 0, 40);
+    *(DWORD *)(slot + 0x00) = 3;
+    *(float *)(slot + 0x08) = eventX;
+    *(float *)(slot + 0x0C) = eventY;
+    *(float *)(slot + 0x10) = *(float *)(cinput + 0x24);
+    *(float *)(slot + 0x14) = *(float *)(cinput + 0x28);
+    *(DWORD *)(slot + 0x18) = *(DWORD *)(cinput + 0x1431);
+    *(DWORD *)(slot + 0x1C) = *(DWORD *)(cinput + 0x1435);
+    *(DWORD *)(slot + 0x20) = 0xFFFFFFFF;
+    *(DWORD *)(slot + 0x24) = 0;
+}
+
+static void rawQueueWriteButtonEvent(BYTE *cinput, BYTE *slot, DWORD type, float targetX, float targetY, DWORD buttonIndex, BYTE buttonValue) {
+    float oldX = *(float *)(cinput + 0x14);
+    float oldY = *(float *)(cinput + 0x18);
+    float dx = targetX - oldX;
+    float dy = targetY - oldY;
+    int useAltCursor = *(BYTE *)(cinput + 0x01) != 0;
+    float eventX;
+    float eventY;
+
+    *(float *)(cinput + 0x24) = dx;
+    *(float *)(cinput + 0x28) = dy;
+    *(float *)(cinput + 0x14) = targetX;
+    *(float *)(cinput + 0x18) = targetY;
+    *((BYTE *)(cinput + 0x1431) + buttonIndex) = buttonValue;
+
+    eventX = useAltCursor ? *(float *)(cinput + 0x1C) : *(float *)(cinput + 0x14);
+    eventY = useAltCursor ? *(float *)(cinput + 0x20) : *(float *)(cinput + 0x18);
+
+    memset(slot, 0, 40);
+    *(DWORD *)(slot + 0x00) = type;
+    *(float *)(slot + 0x08) = eventX;
+    *(float *)(slot + 0x0C) = eventY;
+    *(float *)(slot + 0x10) = *(float *)(cinput + 0x24);
+    *(float *)(slot + 0x14) = *(float *)(cinput + 0x28);
+    *(DWORD *)(slot + 0x18) = *(DWORD *)(cinput + 0x1431);
+    *(DWORD *)(slot + 0x1C) = *(DWORD *)(cinput + 0x1435);
+    *(DWORD *)(slot + 0x20) = buttonIndex;
+    *(DWORD *)(slot + 0x24) = 0;
+}
+
+typedef void (__attribute__((thiscall)) *GameQueueMoveFn)(void *self, float x, float y);
+typedef void (__attribute__((thiscall)) *GameQueueButtonFn)(void *self, float x, float y, DWORD buttonIndex, DWORD buttonValue);
+
+static void callGameQueueMove(void *cinput, float targetX, float targetY) {
+    ((GameQueueMoveFn)0x004D3C10)(cinput, targetX, targetY);
+}
+
+static void callGameQueueButton(void *cinput, float targetX, float targetY, DWORD buttonIndex, DWORD buttonValue) {
+    ((GameQueueButtonFn)0x004D3D70)(cinput, targetX, targetY, buttonIndex, buttonValue);
 }
 
 /* Arm the direct buffered-click path using a delta derived from the current
@@ -949,6 +1086,10 @@ static const char *menuDirectModeName(LONG mode) {
         return "maincb";
     case MENUDIRECT_MAINCOMBO:
         return "maincombo";
+    case MENUDIRECT_MAINSCAN:
+        return "mainscan";
+    case MENUDIRECT_MAINFLOW:
+        return "mainflow";
     default:
         return "unknown";
     }
@@ -991,6 +1132,82 @@ static const char *tryReadAsciiString(const char *value) {
     }
 
     return NULL;
+}
+
+static DWORD namedScreenAddress(const char *name) {
+    if (!name)
+        return 0;
+    if (_stricmp(name, "campaign") == 0)
+        return 0x005FDB70;
+    if (_stricmp(name, "coop") == 0)
+        return 0x005FDB7C;
+    if (_stricmp(name, "loadsave") == 0 || _stricmp(name, "load") == 0)
+        return 0x005FDB24;
+    if (_stricmp(name, "options") == 0)
+        return 0x00600CBC;
+    if (_stricmp(name, "house") == 0)
+        return 0x005FDD78;
+    if (_stricmp(name, "briefing") == 0)
+        return 0x005FDD34;
+    if (_stricmp(name, "mainmenu") == 0)
+        return 0x005FD570;
+    if (_stricmp(name, "wollogin") == 0)
+        return 0x00600500;
+    if (_stricmp(name, "wolchatroom") == 0)
+        return 0x006034C8;
+    return 0;
+}
+
+static LONG clampMenuWatchHits(LONG count) {
+    if (count < 1)
+        return 1;
+    if (count > 64)
+        return 64;
+    return count;
+}
+
+static LONG menuWatchFaultBudget(LONG hits) {
+    LONG budget = hits * 32;
+
+    if (budget < 128)
+        budget = 128;
+    if (budget > 2048)
+        budget = 2048;
+    return budget;
+}
+
+static const char *menuWatchTargetName(LONG target) {
+    switch (target) {
+    case MENUWATCH_TARGET_MANAGER:
+        return "manager";
+    case MENUWATCH_TARGET_PENDING:
+        return "pending";
+    default:
+        return "none";
+    }
+}
+
+static const char *menuWatchAccessName(ULONG_PTR accessType) {
+    switch (accessType) {
+    case 0:
+        return "read";
+    case 1:
+        return "write";
+    case 8:
+        return "exec";
+    default:
+        return "other";
+    }
+}
+
+static DWORD readFrameCaller(DWORD ebp) {
+    if (!ebp || IsBadReadPtr((void *)(uintptr_t)(ebp + 4), sizeof(DWORD)))
+        return 0;
+    return *(DWORD *)(uintptr_t)(ebp + 4);
+}
+
+static int isLikelyGameCodeAddress(DWORD address) {
+    return address >= 0x00400000 && address < 0x00700000;
 }
 
 static const char *tryReadNamedObjectToken(void *object) {
@@ -1060,6 +1277,172 @@ static void *resolveCurrentMenuContainer(void) {
 }
 
 static void *findMenuItemByTarget(void *container, LONG target, LONG *outIndex);
+
+static const char *tryReadScreenEntryName(void **items, LONG itemCount, LONG index) {
+    BYTE *entry;
+
+    if (!items || itemCount <= 0 || index < 0 || index >= itemCount)
+        return NULL;
+    if (IsBadReadPtr(&items[index], sizeof(void *)))
+        return NULL;
+
+    entry = (BYTE *)items[index];
+    if (!entry || IsBadReadPtr(entry, sizeof(void *)))
+        return NULL;
+
+    return tryReadAsciiString(*(const char **)entry);
+}
+
+static void logActiveScreenState(const char *label) {
+    BYTE *app = (BYTE *)0x818718;
+    LONG sel;
+    LONG appCount;
+    BYTE *screen;
+    void **items = NULL;
+    LONG itemCount = 0;
+    LONG activeIndex = -1;
+    LONG pendingIndex = -1;
+    float anim = 0.0f;
+    DWORD ptr24 = 0;
+    DWORD ptr28 = 0;
+    DWORD ptr2c = 0;
+    DWORD ptr30 = 0;
+    DWORD ptr34 = 0;
+    const char *activeName = NULL;
+    const char *pendingName = NULL;
+
+    if (IsBadReadPtr(app, 0x20))
+        return;
+
+    sel = *(LONG *)(app + 0x0C);
+    appCount = *(LONG *)(app + 0x08);
+    if (sel < 0 || sel >= appCount) {
+        hookLog("SCREENSTATE: %s invalid sel=%ld count=%ld",
+                label ? label : "unknown", (long)sel, (long)appCount);
+        return;
+    }
+
+    screen = *(BYTE **)(app + (sel * 4));
+    if (!screen || IsBadReadPtr(screen, 0x38)) {
+        hookLog("SCREENSTATE: %s unreadable screen sel=%ld ptr=%p",
+                label ? label : "unknown", (long)sel, (void *)screen);
+        return;
+    }
+
+    items = *(void ***)(screen + 0x08);
+    itemCount = *(LONG *)(screen + 0x0C);
+    activeIndex = *(LONG *)(screen + 0x18);
+    pendingIndex = (!IsBadReadPtr(screen + 0x374, sizeof(LONG)))
+        ? *(LONG *)(screen + 0x370)
+        : -1;
+    anim = (!IsBadReadPtr(screen + 0x370, sizeof(float)))
+        ? *(float *)(screen + 0x36C)
+        : 0.0f;
+    ptr24 = (!IsBadReadPtr(screen + 0x28, sizeof(DWORD))) ? *(DWORD *)(screen + 0x24) : 0;
+    ptr28 = (!IsBadReadPtr(screen + 0x2C, sizeof(DWORD))) ? *(DWORD *)(screen + 0x28) : 0;
+    ptr2c = (!IsBadReadPtr(screen + 0x30, sizeof(DWORD))) ? *(DWORD *)(screen + 0x2C) : 0;
+    ptr30 = (!IsBadReadPtr(screen + 0x34, sizeof(DWORD))) ? *(DWORD *)(screen + 0x30) : 0;
+    ptr34 = (!IsBadReadPtr(screen + 0x38, sizeof(DWORD))) ? *(DWORD *)(screen + 0x34) : 0;
+    activeName = tryReadScreenEntryName(items, itemCount, activeIndex);
+    pendingName = tryReadScreenEntryName(items, itemCount, pendingIndex);
+
+    hookLog("SCREENSTATE: %s screen=%p vt=0x%08X items=%p count=%ld active=%ld(%s) cur20=%ld flag1c=%u ptr24=%p ptr28=%p ptr2c=%p ptr30=%p ptr34=%p anim=%.3f pending=%ld(%s)",
+            label ? label : "unknown",
+            (void *)screen,
+            (unsigned)*(DWORD *)screen,
+            (void *)items,
+            (long)itemCount,
+            (long)activeIndex,
+            activeName ? activeName : "<null>",
+            (long)*(LONG *)(screen + 0x20),
+            (unsigned)*(BYTE *)(screen + 0x1C),
+            (void *)(uintptr_t)ptr24,
+            (void *)(uintptr_t)ptr28,
+            (void *)(uintptr_t)ptr2c,
+            (void *)(uintptr_t)ptr30,
+            (void *)(uintptr_t)ptr34,
+            anim,
+            (long)pendingIndex,
+            pendingName ? pendingName : "<null>");
+}
+
+static void logActiveScreenEntries(const char *label) {
+    BYTE *app = (BYTE *)0x818718;
+    LONG sel;
+    LONG appCount;
+    BYTE *screen;
+    void **items;
+    LONG itemCount;
+    LONG activeIndex;
+    LONG i;
+
+    if (IsBadReadPtr(app, 0x20))
+        return;
+
+    sel = *(LONG *)(app + 0x0C);
+    appCount = *(LONG *)(app + 0x08);
+    if (sel < 0 || sel >= appCount) {
+        hookLog("SCREENENTRIES: %s invalid sel=%ld count=%ld",
+                label ? label : "unknown", (long)sel, (long)appCount);
+        return;
+    }
+
+    screen = *(BYTE **)(app + (sel * 4));
+    if (!screen || IsBadReadPtr(screen, 0x20)) {
+        hookLog("SCREENENTRIES: %s unreadable screen sel=%ld ptr=%p",
+                label ? label : "unknown", (long)sel, (void *)screen);
+        return;
+    }
+
+    items = *(void ***)(screen + 0x08);
+    itemCount = *(LONG *)(screen + 0x0C);
+    activeIndex = *(LONG *)(screen + 0x18);
+    hookLog("SCREENENTRIES: %s sel=%ld/%ld screen=%p vt=0x%08X items=%p count=%ld active=%ld",
+            label ? label : "unknown",
+            (long)sel,
+            (long)appCount,
+            (void *)screen,
+            (unsigned)*(DWORD *)screen,
+            (void *)items,
+            (long)itemCount,
+            (long)activeIndex);
+
+    if (!items || itemCount <= 0 || itemCount > 64)
+        return;
+
+    for (i = 0; i < itemCount && i < 24; i++) {
+        BYTE *entry;
+        const char *name = NULL;
+        DWORD state0c = 0;
+        DWORD state10 = 0;
+        DWORD state14 = 0;
+        DWORD state18 = 0;
+
+        if (IsBadReadPtr(&items[i], sizeof(void *)))
+            continue;
+        entry = (BYTE *)items[i];
+        if (!entry || IsBadReadPtr(entry, 0x1C)) {
+            hookLog("SCREENENTRIES: [%ld] entry=%p unreadable", (long)i, (void *)entry);
+            continue;
+        }
+
+        name = tryReadAsciiString(*(const char **)entry);
+        state0c = *(DWORD *)(entry + 0x0C);
+        state10 = *(DWORD *)(entry + 0x10);
+        state14 = *(DWORD *)(entry + 0x14);
+        state18 = *(DWORD *)(entry + 0x18);
+
+        hookLog("SCREENENTRIES: [%ld]%s entry=%p name=%s x0c=0x%08X x10=0x%08X x14=0x%08X x18=0x%08X",
+                (long)i,
+                (i == activeIndex) ? "*" : "",
+                (void *)entry,
+                name ? name : "<null>",
+                (unsigned)state0c,
+                (unsigned)state10,
+                (unsigned)state14,
+                (unsigned)state18);
+    }
+}
 
 static void *selectMenuContainerForTarget(LONG target, LONG *outChildIndex) {
     TitleSelectChild_t selectChild = (TitleSelectChild_t)0x4AE800;
@@ -1180,16 +1563,23 @@ static void *findMenuItemByTarget(void *container, LONG target, LONG *outIndex) 
 
 static void logMenuAppState(const char *label) {
     BYTE *app = (BYTE *)0x818718;
+    const char *d8Name;
+    const char *dcName;
 
     if (IsBadReadPtr(app, 0x95F0))
         return;
 
-    hookLog("MENUAPP: %s sel=%ld d4=0x%08X d8=%p dc=%p e0=%u e1=%u",
+    d8Name = tryReadAsciiString(*(const char **)(app + 0x95D8));
+    dcName = tryReadAsciiString(*(const char **)(app + 0x95DC));
+
+    hookLog("MENUAPP: %s sel=%ld d4=0x%08X d8=%p(%s) dc=%p(%s) e0=%u e1=%u",
             label,
             (long)*(LONG *)(app + 0x0C),
             (unsigned)*(DWORD *)(app + 0x95D4),
             *(void **)(app + 0x95D8),
+            d8Name ? d8Name : "<null>",
             *(void **)(app + 0x95DC),
+            dcName ? dcName : "<null>",
             (unsigned)*(BYTE *)(app + 0x95E0),
             (unsigned)*(BYTE *)(app + 0x95E1));
 }
@@ -1199,23 +1589,33 @@ static void logMainMenuState(const char *label) {
     BYTE *app = (BYTE *)0x818718;
     BYTE *mainMenu;
     BYTE *manager;
+    BYTE *controller = NULL;
 
     if (IsBadReadPtr(app, 0x20))
         return;
 
     mainMenu = (BYTE *)findNamedObject(app, "MainMenu");
     manager = (BYTE *)findNamedObject(app, "MainMenuManager");
+    if (manager && !IsBadReadPtr(manager + 0x04, sizeof(void *)))
+        controller = *(BYTE **)(manager + 0x04);
 
-    hookLog("MAINMENU: %s menu=%p vt=0x%08X tree=%p mgr=%p vt=0x%08X f4=%u f8=%ld fc=%u",
+    hookLog("MAINMENU: %s menu=%p vt=0x%08X tree=%p mgr=%p vt=0x%08X ctrl=%p ctrlvt=0x%08X gateCE9=%u list=%p count=%ld f4=%u f8=%ld fc=%u gmode=%ld gflag=%u",
             label,
             (void *)mainMenu,
             (mainMenu && !IsBadReadPtr(mainMenu, sizeof(DWORD))) ? (unsigned)*(DWORD *)mainMenu : 0,
             (mainMenu && !IsBadReadPtr(mainMenu + 0xF0, sizeof(void *))) ? *(void **)(mainMenu + 0xF0) : NULL,
             (void *)manager,
             (manager && !IsBadReadPtr(manager, sizeof(DWORD))) ? (unsigned)*(DWORD *)manager : 0,
+            (void *)controller,
+            (controller && !IsBadReadPtr(controller, sizeof(DWORD))) ? (unsigned)*(DWORD *)controller : 0,
+            (controller && !IsBadReadPtr(controller + 0xCE9, sizeof(BYTE))) ? (unsigned)*(BYTE *)(controller + 0xCE9) : 0,
+            (controller && !IsBadReadPtr(controller + 0x38, sizeof(void *))) ? *(void **)(controller + 0x38) : NULL,
+            (controller && !IsBadReadPtr(controller + 0x3C, sizeof(LONG))) ? (long)*(LONG *)(controller + 0x3C) : -1,
             (manager && !IsBadReadPtr(manager + 0xF4, sizeof(BYTE))) ? (unsigned)*(BYTE *)(manager + 0xF4) : 0,
             (manager && !IsBadReadPtr(manager + 0xF8, sizeof(LONG))) ? (long)*(LONG *)(manager + 0xF8) : -1,
-            (manager && !IsBadReadPtr(manager + 0xFC, sizeof(BYTE))) ? (unsigned)*(BYTE *)(manager + 0xFC) : 0);
+            (manager && !IsBadReadPtr(manager + 0xFC, sizeof(BYTE))) ? (unsigned)*(BYTE *)(manager + 0xFC) : 0,
+            !IsBadReadPtr((void *)0xB74C5C, sizeof(LONG)) ? (long)*(LONG *)0xB74C5C : -1,
+            !IsBadReadPtr((void *)0xB7DA25, sizeof(BYTE)) ? (unsigned)*(BYTE *)0xB7DA25 : 0);
 }
 
 static void logMenuQueueEntry(const char *label, LONG index) {
@@ -1267,6 +1667,373 @@ static void logMenuQueueState(const char *label) {
             (long)freeHead);
     logMenuQueueEntry("queueHead", queueHead);
     logMenuQueueEntry("freeHead", freeHead);
+}
+
+static void disarmMenuWatchpoint(const char *reason) {
+    DWORD oldProt;
+    LONG target = InterlockedCompareExchange(&g_menuWatchTarget, 0, 0);
+
+    if (g_menuWatchPageBase && g_menuWatchPageSize && g_menuWatchProtectNoGuard) {
+        if (!VirtualProtect(g_menuWatchPageBase, g_menuWatchPageSize,
+                            g_menuWatchProtectNoGuard, &oldProt)) {
+            hookLog("MENUWATCH: disarm restore FAILED page=%p err=%lu",
+                    (void *)g_menuWatchPageBase, GetLastError());
+        }
+    }
+
+    if (InterlockedExchange(&g_menuWatchActive, 0) != 0) {
+        hookLog("MENUWATCH: disarmed target=%s reason=%s hits=%ld/%ld faults=%ld/%ld object=%p page=%p",
+                menuWatchTargetName(target),
+                reason ? reason : "unknown",
+                (long)g_menuWatchHitsLogged,
+                (long)g_menuWatchHitLimit,
+                (long)g_menuWatchFaultsSeen,
+                (long)g_menuWatchFaultBudget,
+                (void *)g_menuWatchManager,
+                (void *)g_menuWatchPageBase);
+    }
+
+    g_menuWatchManager = NULL;
+    g_menuWatchPageBase = NULL;
+    g_menuWatchPageSize = 0;
+    g_menuWatchFieldBase = NULL;
+    g_menuWatchFieldSize = 0;
+    g_menuWatchProtectNoGuard = 0;
+    InterlockedExchange(&g_menuWatchRearmPending, 0);
+    InterlockedExchange(&g_menuWatchHitsLogged, 0);
+    InterlockedExchange(&g_menuWatchFaultsSeen, 0);
+    InterlockedExchange(&g_menuWatchHitLimit, 0);
+    InterlockedExchange(&g_menuWatchFaultBudget, 0);
+    InterlockedExchange(&g_menuWatchTarget, MENUWATCH_TARGET_NONE);
+}
+
+static LONG CALLBACK menuWatchVectoredHandler(struct _EXCEPTION_POINTERS *info) {
+    DWORD code;
+
+    if (!info || !info->ExceptionRecord || !info->ContextRecord)
+        return EXCEPTION_CONTINUE_SEARCH;
+
+    code = info->ExceptionRecord->ExceptionCode;
+
+    if (code == STATUS_GUARD_PAGE_VIOLATION) {
+        BYTE *accessed = NULL;
+        ULONG_PTR accessType = (ULONG_PTR)-1;
+        DWORD eip;
+        DWORD caller;
+        LONG faults;
+
+        if (!InterlockedCompareExchange(&g_menuWatchActive, 0, 0))
+            return EXCEPTION_CONTINUE_SEARCH;
+
+        if (info->ExceptionRecord->NumberParameters >= 2) {
+            accessType = info->ExceptionRecord->ExceptionInformation[0];
+            accessed = (BYTE *)(uintptr_t)info->ExceptionRecord->ExceptionInformation[1];
+        }
+
+        if (!accessed || !g_menuWatchPageBase || !g_menuWatchPageSize ||
+            accessed < g_menuWatchPageBase ||
+            accessed >= g_menuWatchPageBase + g_menuWatchPageSize) {
+            return EXCEPTION_CONTINUE_SEARCH;
+        }
+
+        faults = InterlockedIncrement(&g_menuWatchFaultsSeen);
+        eip = (DWORD)(uintptr_t)info->ContextRecord->Eip;
+        caller = readFrameCaller((DWORD)(uintptr_t)info->ContextRecord->Ebp);
+
+        if (g_menuWatchFieldBase &&
+            accessed >= g_menuWatchFieldBase &&
+            accessed < g_menuWatchFieldBase + g_menuWatchFieldSize &&
+            isLikelyGameCodeAddress(eip)) {
+            LONG hitNo = InterlockedIncrement(&g_menuWatchHitsLogged);
+            LONG target = InterlockedCompareExchange(&g_menuWatchTarget, 0, 0);
+
+            if (target == MENUWATCH_TARGET_PENDING) {
+                void *d8 = NULL;
+                void *dc = NULL;
+                const char *d8Name = NULL;
+                const char *dcName = NULL;
+                BYTE e0 = 0;
+                BYTE e1 = 0;
+
+                if (!IsBadReadPtr(g_menuWatchManager + 0x95D8, sizeof(void *)))
+                    d8 = *(void **)(g_menuWatchManager + 0x95D8);
+                if (!IsBadReadPtr(g_menuWatchManager + 0x95DC, sizeof(void *)))
+                    dc = *(void **)(g_menuWatchManager + 0x95DC);
+                d8Name = tryReadAsciiString((const char *)d8);
+                dcName = tryReadAsciiString((const char *)dc);
+                if (!IsBadReadPtr(g_menuWatchManager + 0x95E0, sizeof(BYTE)))
+                    e0 = *(BYTE *)(g_menuWatchManager + 0x95E0);
+                if (!IsBadReadPtr(g_menuWatchManager + 0x95E1, sizeof(BYTE)))
+                    e1 = *(BYTE *)(g_menuWatchManager + 0x95E1);
+
+                hookLog("MENUWATCH: target=%s hit=%ld/%ld fault=%ld/%ld %s addr=%p off=0x%04X eip=0x%08X caller=0x%08X d8=%p(%s) dc=%p(%s) e0=%u e1=%u",
+                        menuWatchTargetName(target),
+                        (long)hitNo,
+                        (long)g_menuWatchHitLimit,
+                        (long)faults,
+                        (long)g_menuWatchFaultBudget,
+                        menuWatchAccessName(accessType),
+                        (void *)accessed,
+                        (unsigned)(accessed - g_menuWatchManager),
+                        (unsigned)eip,
+                        (unsigned)caller,
+                        d8,
+                        d8Name ? d8Name : "<null>",
+                        dc,
+                        dcName ? dcName : "<null>",
+                        (unsigned)e0,
+                        (unsigned)e1);
+            } else {
+                BYTE f4 = 0;
+                LONG f8 = -1;
+                BYTE fc = 0;
+
+                if (!IsBadReadPtr(g_menuWatchManager + 0xF4, sizeof(BYTE)))
+                    f4 = *(BYTE *)(g_menuWatchManager + 0xF4);
+                if (!IsBadReadPtr(g_menuWatchManager + 0xF8, sizeof(LONG)))
+                    f8 = *(LONG *)(g_menuWatchManager + 0xF8);
+                if (!IsBadReadPtr(g_menuWatchManager + 0xFC, sizeof(BYTE)))
+                    fc = *(BYTE *)(g_menuWatchManager + 0xFC);
+
+                hookLog("MENUWATCH: target=%s hit=%ld/%ld fault=%ld/%ld %s addr=%p off=0x%02X eip=0x%08X caller=0x%08X f4=%u f8=%ld fc=%u",
+                        menuWatchTargetName(target),
+                        (long)hitNo,
+                        (long)g_menuWatchHitLimit,
+                        (long)faults,
+                        (long)g_menuWatchFaultBudget,
+                        menuWatchAccessName(accessType),
+                        (void *)accessed,
+                        (unsigned)(accessed - g_menuWatchManager),
+                        (unsigned)eip,
+                        (unsigned)caller,
+                        (unsigned)f4,
+                        (long)f8,
+                        (unsigned)fc);
+            }
+        } else if (faults <= 12 || (faults % 64) == 0) {
+            hookLog("MENUWATCH: target=%s page-touch fault=%ld/%ld %s addr=%p eip=0x%08X caller=0x%08X",
+                    menuWatchTargetName(InterlockedCompareExchange(&g_menuWatchTarget, 0, 0)),
+                    (long)faults,
+                    (long)g_menuWatchFaultBudget,
+                    menuWatchAccessName(accessType),
+                    (void *)accessed,
+                    (unsigned)eip,
+                    (unsigned)caller);
+        }
+
+        if (faults >= g_menuWatchFaultBudget || g_menuWatchHitsLogged >= g_menuWatchHitLimit)
+            InterlockedExchange(&g_menuWatchRearmPending, 2);
+        else
+            InterlockedExchange(&g_menuWatchRearmPending, 1);
+
+        info->ContextRecord->EFlags |= 0x100;
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
+
+    if (code == STATUS_SINGLE_STEP) {
+        LONG mode = InterlockedExchange(&g_menuWatchRearmPending, 0);
+
+        if (!mode)
+            return EXCEPTION_CONTINUE_SEARCH;
+
+        if (!InterlockedCompareExchange(&g_menuWatchActive, 0, 0))
+            return EXCEPTION_CONTINUE_EXECUTION;
+
+        if (mode == 2 || g_menuWatchFaultsSeen >= g_menuWatchFaultBudget) {
+            disarmMenuWatchpoint((g_menuWatchHitsLogged >= g_menuWatchHitLimit)
+                                 ? "hit-limit"
+                                 : "fault-budget");
+            return EXCEPTION_CONTINUE_EXECUTION;
+        }
+
+        if (g_menuWatchPageBase && g_menuWatchPageSize && g_menuWatchProtectNoGuard) {
+            DWORD oldProt;
+
+            if (VirtualProtect(g_menuWatchPageBase, g_menuWatchPageSize,
+                               g_menuWatchProtectNoGuard | PAGE_GUARD, &oldProt)) {
+                return EXCEPTION_CONTINUE_EXECUTION;
+            }
+
+            hookLog("MENUWATCH: rearm FAILED page=%p err=%lu",
+                    (void *)g_menuWatchPageBase, GetLastError());
+        }
+
+        disarmMenuWatchpoint("rearm-failed");
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
+
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
+static int ensureMenuWatchHandlerInstalled(void) {
+    if (g_menuWatchVehHandle)
+        return 1;
+
+    g_menuWatchVehHandle = AddVectoredExceptionHandler(1, menuWatchVectoredHandler);
+    if (!g_menuWatchVehHandle) {
+        hookLog("MENUWATCH: AddVectoredExceptionHandler FAILED err=%lu", GetLastError());
+        return 0;
+    }
+
+    hookLog("MENUWATCH: vectored handler installed handle=%p", g_menuWatchVehHandle);
+    return 1;
+}
+
+static int armMenuWatchpoint(LONG hits) {
+    FindNamedObject_t findNamedObject = (FindNamedObject_t)0x4D6900;
+    SYSTEM_INFO sysInfo;
+    MEMORY_BASIC_INFORMATION mbi;
+    BYTE *app = (BYTE *)0x818718;
+    BYTE *manager;
+    BYTE *fieldBase;
+    BYTE *pageBase;
+    DWORD protectNoGuard;
+    DWORD oldProt;
+
+    if (!ensureMenuWatchHandlerInstalled())
+        return 0;
+
+    if (IsBadReadPtr(app, 0x20)) {
+        hookLog("MENUWATCH: app unreadable");
+        return 0;
+    }
+
+    manager = (BYTE *)findNamedObject(app, "MainMenuManager");
+    if (!manager || IsBadReadPtr(manager, 0x100)) {
+        hookLog("MENUWATCH: manager lookup failed");
+        return 0;
+    }
+
+    fieldBase = manager + 0xF4;
+    if (VirtualQuery(fieldBase, &mbi, sizeof(mbi)) != sizeof(mbi) || mbi.State != MEM_COMMIT) {
+        hookLog("MENUWATCH: VirtualQuery failed field=%p err=%lu", (void *)fieldBase, GetLastError());
+        return 0;
+    }
+
+    protectNoGuard = mbi.Protect & ~PAGE_GUARD;
+    if (!protectNoGuard || protectNoGuard == PAGE_NOACCESS) {
+        hookLog("MENUWATCH: unexpected protect=0x%08X field=%p", (unsigned)mbi.Protect, (void *)fieldBase);
+        return 0;
+    }
+
+    GetSystemInfo(&sysInfo);
+    pageBase = (BYTE *)((uintptr_t)fieldBase & ~((uintptr_t)sysInfo.dwPageSize - 1u));
+
+    if (InterlockedCompareExchange(&g_menuWatchActive, 0, 0))
+        disarmMenuWatchpoint("rearm");
+
+    g_menuWatchManager = manager;
+    g_menuWatchFieldBase = fieldBase;
+    g_menuWatchFieldSize = 0x0C;
+    g_menuWatchPageBase = pageBase;
+    g_menuWatchPageSize = sysInfo.dwPageSize;
+    g_menuWatchProtectNoGuard = protectNoGuard;
+    InterlockedExchange(&g_menuWatchHitsLogged, 0);
+    InterlockedExchange(&g_menuWatchFaultsSeen, 0);
+    InterlockedExchange(&g_menuWatchHitLimit, clampMenuWatchHits(hits));
+    InterlockedExchange(&g_menuWatchFaultBudget, menuWatchFaultBudget(g_menuWatchHitLimit));
+
+    if (!VirtualProtect(pageBase, g_menuWatchPageSize, protectNoGuard | PAGE_GUARD, &oldProt)) {
+        hookLog("MENUWATCH: arm FAILED page=%p protect=0x%08X err=%lu",
+                (void *)pageBase, (unsigned)protectNoGuard, GetLastError());
+        g_menuWatchManager = NULL;
+        g_menuWatchFieldBase = NULL;
+        g_menuWatchFieldSize = 0;
+        g_menuWatchPageBase = NULL;
+        g_menuWatchPageSize = 0;
+        g_menuWatchProtectNoGuard = 0;
+        return 0;
+    }
+
+    InterlockedExchange(&g_menuWatchTarget, MENUWATCH_TARGET_MANAGER);
+    InterlockedExchange(&g_menuWatchActive, 1);
+    hookLog("MENUWATCH: armed target=%s object=%p vt=0x%08X field=%p page=%p size=0x%lx hits=%ld budget=%ld",
+            menuWatchTargetName(MENUWATCH_TARGET_MANAGER),
+            (void *)manager,
+            !IsBadReadPtr(manager, sizeof(DWORD)) ? (unsigned)*(DWORD *)manager : 0,
+            (void *)fieldBase,
+            (void *)pageBase,
+            (unsigned long)g_menuWatchPageSize,
+            (long)g_menuWatchHitLimit,
+            (long)g_menuWatchFaultBudget);
+    return 1;
+}
+
+static int armScreenPendingWatchpoint(LONG hits) {
+    SYSTEM_INFO sysInfo;
+    MEMORY_BASIC_INFORMATION mbi;
+    BYTE *app = (BYTE *)0x818718;
+    BYTE *fieldBase;
+    BYTE *pageBase;
+    DWORD protectNoGuard;
+    DWORD oldProt;
+
+    if (!ensureMenuWatchHandlerInstalled())
+        return 0;
+
+    if (IsBadReadPtr(app, 0x95E8)) {
+        hookLog("MENUWATCH: pending app unreadable");
+        return 0;
+    }
+
+    fieldBase = app + 0x95D8;
+    if (VirtualQuery(fieldBase, &mbi, sizeof(mbi)) != sizeof(mbi) || mbi.State != MEM_COMMIT) {
+        hookLog("MENUWATCH: pending VirtualQuery failed field=%p err=%lu", (void *)fieldBase, GetLastError());
+        return 0;
+    }
+
+    protectNoGuard = mbi.Protect & ~PAGE_GUARD;
+    if (!protectNoGuard || protectNoGuard == PAGE_NOACCESS) {
+        hookLog("MENUWATCH: pending unexpected protect=0x%08X field=%p", (unsigned)mbi.Protect, (void *)fieldBase);
+        return 0;
+    }
+
+    GetSystemInfo(&sysInfo);
+    pageBase = (BYTE *)((uintptr_t)fieldBase & ~((uintptr_t)sysInfo.dwPageSize - 1u));
+
+    if (InterlockedCompareExchange(&g_menuWatchActive, 0, 0))
+        disarmMenuWatchpoint("rearm");
+
+    g_menuWatchManager = app;
+    g_menuWatchFieldBase = fieldBase;
+    g_menuWatchFieldSize = 0x08;
+    g_menuWatchPageBase = pageBase;
+    g_menuWatchPageSize = sysInfo.dwPageSize;
+    g_menuWatchProtectNoGuard = protectNoGuard;
+    InterlockedExchange(&g_menuWatchHitsLogged, 0);
+    InterlockedExchange(&g_menuWatchFaultsSeen, 0);
+    InterlockedExchange(&g_menuWatchHitLimit, clampMenuWatchHits(hits));
+    InterlockedExchange(&g_menuWatchFaultBudget, menuWatchFaultBudget(g_menuWatchHitLimit));
+
+    if (!VirtualProtect(pageBase, g_menuWatchPageSize, protectNoGuard | PAGE_GUARD, &oldProt)) {
+        hookLog("MENUWATCH: pending arm FAILED page=%p protect=0x%08X err=%lu",
+                (void *)pageBase, (unsigned)protectNoGuard, GetLastError());
+        g_menuWatchManager = NULL;
+        g_menuWatchFieldBase = NULL;
+        g_menuWatchFieldSize = 0;
+        g_menuWatchPageBase = NULL;
+        g_menuWatchPageSize = 0;
+        g_menuWatchProtectNoGuard = 0;
+        return 0;
+    }
+
+    InterlockedExchange(&g_menuWatchTarget, MENUWATCH_TARGET_PENDING);
+    InterlockedExchange(&g_menuWatchActive, 1);
+    hookLog("MENUWATCH: armed target=%s object=%p field=%p page=%p size=0x%lx hits=%ld budget=%ld d8=%p(%s) dc=%p(%s) e0=%u e1=%u",
+            menuWatchTargetName(MENUWATCH_TARGET_PENDING),
+            (void *)app,
+            (void *)fieldBase,
+            (void *)pageBase,
+            (unsigned long)g_menuWatchPageSize,
+            (long)g_menuWatchHitLimit,
+            (long)g_menuWatchFaultBudget,
+            *(void **)(app + 0x95D8),
+            tryReadAsciiString(*(const char **)(app + 0x95D8)) ? tryReadAsciiString(*(const char **)(app + 0x95D8)) : "<null>",
+            *(void **)(app + 0x95DC),
+            tryReadAsciiString(*(const char **)(app + 0x95DC)) ? tryReadAsciiString(*(const char **)(app + 0x95DC)) : "<null>",
+            (unsigned)*(BYTE *)(app + 0x95E0),
+            (unsigned)*(BYTE *)(app + 0x95E1));
+    return 1;
 }
 
 static LONG clampMenuPumpCount(LONG count) {
@@ -1623,9 +2390,456 @@ static void pumpMenuApp(const char *label, LONG count) {
         logMenuAppState("pump-before");
         logMenuQueueState("pump-before");
         pump((void *)0x818718);
+        hookLog("MENUPUMP: %s iter=%ld/%ld returned stage=%ld",
+                label ? label : "manual",
+                (long)(i + 1),
+                (long)clamped,
+                (long)g_screenOpenTraceStage);
         logMenuAppState("pump-after");
         logMenuQueueState("pump-after");
     }
+}
+
+static void postPendingUiWork(const char *reason) {
+    HWND hwnd = g_gameHwnd;
+    LONG seq;
+
+    if (!hwnd)
+        return;
+
+    seq = InterlockedIncrement(&g_pendingUiDispatchSeq);
+    if (!PostMessageA(hwnd, WM_APP_PENDING_UI, (WPARAM)seq, 0)) {
+        hookLog("UIWORK: post reason=%s FAILED hwnd=%p err=%lu",
+                reason ? reason : "unknown", (void *)hwnd, GetLastError());
+        return;
+    }
+
+    hookLog("UIWORK: post reason=%s seq=%ld hwnd=%p",
+            reason ? reason : "unknown", (long)seq, (void *)hwnd);
+}
+
+static int applyPendingD8Lite(BYTE *app, const char *label) {
+    void (__attribute__((thiscall)) *attachPendingScreen)(void *self, void *pending) =
+        (void (__attribute__((thiscall)) *)(void *, void *))0x524A90;
+    void (__attribute__((thiscall)) *resetMenuState)(void *self) =
+        (void (__attribute__((thiscall)) *)(void *))0x4D3FA0;
+    void (__attribute__((thiscall)) *releasePendingObj)(void *self, void *obj) =
+        (void (__attribute__((thiscall)) *)(void *, void *))0x54BCB0;
+    void (__cdecl *freeHeap)(void *ptr) = (void (__cdecl *)(void *))0x5B0C8F;
+    LONG sel;
+    LONG count;
+    void *pending;
+    void *cleanup;
+    void *screenObj;
+
+    if (!app || IsBadReadPtr(app, 0x95E0))
+        return 0;
+
+    g_screenOpenTraceStage = 171;
+    pending = *(void **)(app + 0x95D8);
+    if (!pending)
+        return 0;
+
+    sel = *(LONG *)(app + 0x0C);
+    count = *(LONG *)(app + 0x08);
+    if (sel < 0 || sel >= count) {
+        hookLog("SCREENOPEN[%s]: d8 pending=%p invalid sel=%ld count=%ld",
+                label ? label : "unknown", pending, (long)sel, (long)count);
+        return 0;
+    }
+
+    cleanup = *(void **)(app + 0x95BC);
+    if (cleanup) {
+        g_screenOpenTraceStage = 172;
+        releasePendingObj(app + 0x74, cleanup);
+        *(void **)(app + 0x95BC) = NULL;
+    }
+
+    screenObj = *(void **)(app + (sel * 4));
+    if (!screenObj) {
+        hookLog("SCREENOPEN[%s]: d8 pending=%p null screen object sel=%ld",
+                label ? label : "unknown", pending, (long)sel);
+        return 0;
+    }
+
+    *(void **)(app + 0x95D8) = NULL;
+    g_screenOpenTraceStage = 173;
+    attachPendingScreen(screenObj, pending);
+    g_screenOpenTraceStage = 174;
+    freeHeap(pending);
+    g_screenOpenTraceStage = 175;
+    resetMenuState(app + 0x8160);
+    *(DWORD *)(app + 0x95C0) = 0;
+    g_screenOpenTraceStage = 176;
+    hookLog("SCREENOPEN[%s]: applied pending d8=%p sel=%ld screen=%p",
+            label ? label : "unknown", pending, (long)sel, screenObj);
+    return 1;
+}
+
+static int applyPendingDcLite(BYTE *app, const char *label) {
+    int (__cdecl *cmpStrings)(const char *lhs, const char *rhs) =
+        (int (__cdecl *)(const char *, const char *))0x5B25E0;
+    void (__attribute__((thiscall)) *resetDispatchList)(void *self, int a, int b) =
+        (void (__attribute__((thiscall)) *)(void *, int, int))0x49F460;
+    void (__attribute__((thiscall)) *clearList74)(void *self, int value) =
+        (void (__attribute__((thiscall)) *)(void *, int))0x54BD80;
+    void (__attribute__((thiscall)) *resetQueueRoot)(void *self) =
+        (void (__attribute__((thiscall)) *)(void *))0x4E8260;
+    void (__attribute__((thiscall)) *flushDispatchList)(void *self) =
+        (void (__attribute__((thiscall)) *)(void *))0x49F1E0;
+    void (__attribute__((thiscall)) *finishList74)(void *self) =
+        (void (__attribute__((thiscall)) *)(void *))0x54BD10;
+    void (__attribute__((thiscall)) *prepare95a0)(void *self) =
+        (void (__attribute__((thiscall)) *)(void *))0x4B2030;
+    void (__attribute__((thiscall)) *setB7D108Mode)(void *self, int value) =
+        (void (__attribute__((thiscall)) *)(void *, int))0x54C650;
+    void (__attribute__((thiscall)) *reset74Full)(void *self) =
+        (void (__attribute__((thiscall)) *)(void *))0x54BBE0;
+    void (__attribute__((thiscall)) *reset7D7650A)(void *self) =
+        (void (__attribute__((thiscall)) *)(void *))0x4ABA40;
+    void (__attribute__((thiscall)) *destroy821D64)(void *self) =
+        (void (__attribute__((thiscall)) *)(void *))0x4A0890;
+    void (__attribute__((thiscall)) *reset818458)(void *self) =
+        (void (__attribute__((thiscall)) *)(void *))0x4CFE20;
+    void (__cdecl *apply7D75B4)(DWORD value) = (void (__cdecl *)(DWORD))0x417690;
+    void (__attribute__((thiscall)) *reset817C10)(void *self) =
+        (void (__attribute__((thiscall)) *)(void *))0x4BFA10;
+    void (__attribute__((thiscall)) *refreshMenuApp)(void *self) =
+        (void (__attribute__((thiscall)) *)(void *))0x4D4DA0;
+    void (__attribute__((thiscall)) *reset7D7650B)(void *self) =
+        (void (__attribute__((thiscall)) *)(void *))0x4AB160;
+    void (__attribute__((thiscall)) *apply605B50)(void *self, const char *value) =
+        (void (__attribute__((thiscall)) *)(void *, const char *))0x54B980;
+    void (__cdecl *freeHeap)(void *ptr) = (void (__cdecl *)(void *))0x5B0C8F;
+    void (__attribute__((thiscall)) *flushPostSelect)(void *self) =
+        (void (__attribute__((thiscall)) *)(void *))0x49EF70;
+    void (__attribute__((thiscall)) *finalizeCurrent)(void *self) =
+        (void (__attribute__((thiscall)) *)(void *))0x524AF0;
+    FindNamedObject_t findNamedObject = (FindNamedObject_t)0x4D6900;
+    void (__attribute__((thiscall)) *applyNamedValue)(void *self, void *value) =
+        (void (__attribute__((thiscall)) *)(void *, void *))0x55A750;
+    void (__attribute__((thiscall)) *resetMenuState)(void *self) =
+        (void (__attribute__((thiscall)) *)(void *))0x4D3FA0;
+    const char *pendingName;
+    LONG count;
+    LONG found = -1;
+    LONG prevSel;
+    LONG i;
+    BYTE *screen;
+    void **items;
+    BYTE *list74;
+    BYTE *list88;
+    BYTE *current;
+    void *tmp;
+    BYTE *node;
+
+    if (!app || IsBadReadPtr(app, 0x95E0))
+        return 0;
+
+    g_screenOpenTraceStage = 151;
+    pendingName = *(const char **)(app + 0x95DC);
+    if (!pendingName)
+        return 0;
+
+    hookLog("SCREENOPEN[%s]: mode=4 resolving dc=%p (%s)",
+            label ? label : "unknown", pendingName, pendingName);
+
+    prevSel = *(LONG *)(app + 0x0C);
+    count = *(LONG *)(app + 0x08);
+    if (prevSel < 0 || prevSel >= count) {
+        hookLog("SCREENOPEN[%s]: mode=4 invalid current sel=%ld count=%ld",
+                label ? label : "unknown", (long)prevSel, (long)count);
+        return 0;
+    }
+
+    screen = *(BYTE **)(app + (prevSel * 4));
+    if (!screen || IsBadReadPtr(screen, 0x20)) {
+        hookLog("SCREENOPEN[%s]: mode=4 unreadable current screen sel=%ld ptr=%p",
+                label ? label : "unknown", (long)prevSel, (void *)screen);
+        return 0;
+    }
+
+    items = *(void ***)(screen + 0x08);
+    count = *(LONG *)(screen + 0x0C);
+    if (!items || count <= 0 || count > 64) {
+        hookLog("SCREENOPEN[%s]: mode=4 invalid screen items=%p count=%ld sel=%ld",
+                label ? label : "unknown", (void *)items, (long)count, (long)prevSel);
+        return 0;
+    }
+
+    for (i = 0; i < count; i++) {
+        BYTE *entry;
+        const char *entryName;
+
+        if (IsBadReadPtr(&items[i], sizeof(void *)))
+            continue;
+        entry = (BYTE *)items[i];
+        if (!entry || IsBadReadPtr(entry, 0x1C))
+            continue;
+        entryName = tryReadAsciiString(*(const char **)entry);
+        if (i < 4) {
+            hookLog("SCREENOPEN[%s]: mode=4 cand[%ld] entry=%p name=%s",
+                    label ? label : "unknown",
+                    (long)i,
+                    (void *)entry,
+                    entryName ? entryName : "<null>");
+        }
+        if (!entryName)
+            continue;
+        if (cmpStrings(entryName, pendingName) == 0) {
+            found = i;
+            hookLog("SCREENOPEN[%s]: mode=4 matched dc=%s at index=%ld entry=%p",
+                    label ? label : "unknown",
+                    pendingName,
+                    (long)found,
+                    (void *)entry);
+            break;
+        }
+    }
+
+    if (found < 0) {
+        hookLog("SCREENOPEN[%s]: mode=4 unresolved dc=%p (%s)",
+                label ? label : "unknown", pendingName, pendingName);
+        return 0;
+    }
+    list88 = app + 0x88;
+    list74 = app + 0x74;
+
+    g_screenOpenTraceStage = 152;
+    *(DWORD *)(app + 0x95D0) = 0;
+    *(DWORD *)(app + 0x95D4) = 0xFFFFFFFFu;
+    *(DWORD *)(app + 0x95BC) = 0;
+    resetDispatchList(list88, 0, 0);
+    clearList74(list74, 0);
+
+    if (prevSel >= 0 && prevSel < count) {
+        current = *(BYTE **)(app + (prevSel * 4));
+        if (current && !IsBadReadPtr(current, sizeof(void *))) {
+            void **vtable = *(void ***)current;
+            if (vtable && !IsBadReadPtr(vtable + 4, sizeof(void *)))
+                ((void (__attribute__((thiscall)) *)(void *))vtable[4])(current);
+        }
+    }
+
+    resetQueueRoot((void *)0x8824E8);
+    flushDispatchList(list88);
+    finishList74(list74);
+    *(LONG *)(app + 0x0C) = found;
+
+    g_screenOpenTraceStage = 1543;
+    /* Avoid allocator-side stalls on the forced commit path. */
+    *(DWORD *)(app + 0x95DC) = 0;
+    g_screenOpenTraceStage = 1544;
+
+    current = *(BYTE **)(app + (found * 4));
+    if (!current || IsBadReadPtr(current, sizeof(void *))) {
+        hookLog("SCREENOPEN[%s]: mode=4 found=%ld but current item missing",
+                label ? label : "unknown", (long)found);
+        return 0;
+    }
+
+    {
+        unsigned char okay = 1;
+
+        if (okay) {
+            g_screenOpenTraceStage = 1550;
+            *(DWORD *)(app + 0x95D4) = 0xFFFFFFFFu;
+            *(DWORD *)(uintptr_t)0xB7D118 = 0;
+            g_screenOpenTraceStage = 1551;
+            flushPostSelect(list88);
+            g_screenOpenTraceStage = 1552;
+            if (*(void **)(app + 0x95D8) == NULL) {
+                g_screenOpenTraceStage = 1553;
+                finalizeCurrent(current);
+                g_screenOpenTraceStage = 1554;
+            }
+
+            g_screenOpenTraceStage = 156;
+            node = *(BYTE **)(app + 0x70);
+            while (node && !IsBadReadPtr(node, 12)) {
+                const char *name = *(const char **)node;
+                void *value = *(void **)(node + 4);
+                BYTE *target = NULL;
+
+                if (name)
+                    target = (BYTE *)findNamedObject(app, name);
+                if (target)
+                    applyNamedValue(target, value);
+                node = *(BYTE **)(node + 8);
+            }
+
+            g_screenOpenTraceStage = 157;
+            resetMenuState(app + 0x8160);
+            *(DWORD *)(app + 0x95C0) = 0;
+            *(DWORD *)(uintptr_t)0xB7D118 = 1;
+        }
+    }
+
+    g_screenOpenTraceStage = 159;
+    hookLog("SCREENOPEN[%s]: mode=4 committed dc=%s found=%ld prev=%ld d8=%p",
+            label ? label : "unknown",
+            pendingName,
+            (long)found,
+            (long)prevSel,
+            *(void **)(app + 0x95D8));
+    return 1;
+}
+
+static int selectCurrentScreenEntry(BYTE *app, const char *entryName, const char *label) {
+    void (__attribute__((thiscall)) *selectScreenEntry)(void *self, void *pending) =
+        (void (__attribute__((thiscall)) *)(void *, void *))0x524A90;
+    void (__attribute__((thiscall)) *resetMenuState)(void *self) =
+        (void (__attribute__((thiscall)) *)(void *))0x4D3FA0;
+    LONG sel;
+    LONG count;
+    BYTE *screen;
+
+    if (!app || !entryName || !entryName[0] || IsBadReadPtr(app, 0x20))
+        return 0;
+
+    sel = *(LONG *)(app + 0x0C);
+    count = *(LONG *)(app + 0x08);
+    if (sel < 0 || sel >= count) {
+        hookLog("SCREENENTRY[%s]: invalid sel=%ld count=%ld name=%s",
+                label ? label : "unknown", (long)sel, (long)count, entryName);
+        return 0;
+    }
+
+    screen = *(BYTE **)(app + (sel * 4));
+    if (!screen || IsBadReadPtr(screen, sizeof(void *))) {
+        hookLog("SCREENENTRY[%s]: null screen sel=%ld name=%s",
+                label ? label : "unknown", (long)sel, entryName);
+        return 0;
+    }
+
+    selectScreenEntry(screen, (void *)entryName);
+    resetMenuState(app + 0x8160);
+    *(DWORD *)(app + 0x95C0) = 0;
+    hookLog("SCREENENTRY[%s]: selected name=%s sel=%ld screen=%p",
+            label ? label : "unknown", entryName, (long)sel, (void *)screen);
+    return 1;
+}
+
+static void processPendingUiWork(const char *source) {
+    const char *label = source ? source : "unknown";
+    LONG screenAutoPumpCount = 0;
+
+    if (g_screenOpenPendingAddr != 0) {
+        MenuCase3Item_t prepScreen = (MenuCase3Item_t)0x4D69D0;
+        MenuCase2Item_t openScreen = (MenuCase2Item_t)0x4D6A40;
+        MenuCase4Item_t commitScreen = (MenuCase4Item_t)0x4D5D00;
+        void (__cdecl *flushScreenQueue)(void) = (void (__cdecl *)(void))0x4EA190;
+        BYTE *app = (BYTE *)0x818718;
+        DWORD screenAddr = g_screenOpenPendingAddr;
+        LONG screenMode = g_screenOpenPendingMode;
+
+        g_screenOpenPendingAddr = 0;
+        g_screenOpenPendingMode = 0;
+        screenAutoPumpCount = g_screenOpenAutoPumpCount;
+        g_screenOpenAutoPumpCount = 0;
+        g_screenOpenTraceStage = 100;
+        hookLog("SCREENOPEN[%s]: mode=%ld addr=0x%08X before", label, (long)screenMode, (unsigned)screenAddr);
+        logMenuAppState("screen-before");
+        logMainMenuState("screen-before");
+        if (screenMode == 2 || screenMode == 4) {
+            g_screenOpenTraceStage = 101;
+            prepScreen((void *)0x818718, (void *)(uintptr_t)screenAddr);
+            g_screenOpenTraceStage = 102;
+            openScreen((void *)0x818718, (void *)(uintptr_t)screenAddr, 1);
+            g_screenOpenTraceStage = 103;
+            commitScreen((void *)0x818718, 0);
+        } else {
+            g_screenOpenTraceStage = 104;
+            openScreen((void *)0x818718, (void *)(uintptr_t)screenAddr, 1);
+        }
+        g_screenOpenTraceStage = 105;
+        flushScreenQueue();
+        g_screenOpenTraceStage = 106;
+        if (screenMode == 4)
+            applyPendingDcLite(app, label);
+        g_screenOpenTraceStage = 107;
+        if (screenMode == 3 || screenMode == 4)
+            applyPendingD8Lite(app, label);
+        g_screenOpenTraceStage = 108;
+        hookLog("SCREENOPEN[%s]: mode=%ld addr=0x%08X completed", label, (long)screenMode, (unsigned)screenAddr);
+        logMenuAppState("screen-after");
+        logMainMenuState("screen-after");
+        g_menuTraceRemaining = 6;
+        if (screenAutoPumpCount > 0) {
+            g_screenOpenTraceStage = 109;
+            hookLog("SCREENOPEN[%s]: autopump=%ld begin", label, (long)screenAutoPumpCount);
+            pumpMenuApp(label, screenAutoPumpCount);
+            g_screenOpenTraceStage = 110;
+            hookLog("SCREENOPEN[%s]: autopump=%ld completed", label, (long)screenAutoPumpCount);
+            logMenuAppState("screen-autopump-after");
+            logMainMenuState("screen-autopump-after");
+            g_menuTraceRemaining = 6;
+        }
+    }
+
+    if (g_screenPendingApplyMode != 0) {
+        void (__cdecl *flushScreenQueue)(void) = (void (__cdecl *)(void))0x4EA190;
+        BYTE *app = (BYTE *)0x818718;
+        LONG pendingMode = g_screenPendingApplyMode;
+
+        g_screenPendingApplyMode = 0;
+        g_screenOpenTraceStage = 180;
+        hookLog("SCREENPENDING[%s]: mode=%ld before", label, (long)pendingMode);
+        logMenuAppState("pending-before");
+        logMainMenuState("pending-before");
+
+        flushScreenQueue();
+        g_screenOpenTraceStage = 181;
+        if (pendingMode & 0x2)
+            applyPendingDcLite(app, label);
+        g_screenOpenTraceStage = 182;
+        if (pendingMode & 0x1)
+            applyPendingD8Lite(app, label);
+        g_screenOpenTraceStage = 183;
+
+        hookLog("SCREENPENDING[%s]: mode=%ld completed", label, (long)pendingMode);
+        logMenuAppState("pending-after");
+        logMainMenuState("pending-after");
+        g_menuTraceRemaining = 6;
+    }
+
+    if (g_screenEntryPending) {
+        BYTE *app = (BYTE *)0x818718;
+        char name[64];
+
+        memcpy(name, g_screenEntryName, sizeof(name));
+        name[sizeof(name) - 1] = 0;
+        g_screenEntryPending = 0;
+        selectCurrentScreenEntry(app, name, label);
+        g_menuTraceRemaining = 6;
+    }
+
+    if (g_menuPumpPending) {
+        LONG pumpCount = g_menuPumpCount;
+        g_menuPumpPending = 0;
+        pumpMenuApp(label, pumpCount);
+        g_menuTraceRemaining = 6;
+        hookLog("MENUPUMP[%s]: count=%ld completed", label, (long)pumpCount);
+    }
+}
+
+static int hasPendingWakeWork(void) {
+    return (g_injState != INJ_IDLE && g_injState != INJ_COMPLETE) ||
+           (g_rawclickState != RAWCLICK_IDLE && g_rawclickState != RAWCLICK_DONE) ||
+           (g_gameclickState != GAMECLICK_IDLE && g_gameclickState != GAMECLICK_DONE) ||
+           g_menuClickState == MENUCLICK_PENDING_DOWN ||
+           g_menuClickState == MENUCLICK_PENDING_UP ||
+           g_menuDirectMode != MENUDIRECT_NONE ||
+           g_menuPumpPending != 0 ||
+           g_menuWrapPending != 0 ||
+           g_menuItemKeyPending != 0 ||
+           g_menuItemFlushPending != 0 ||
+           g_menuWatchPendingCommand != 0 ||
+           g_menuWatchRearmPending != 0 ||
+           g_screenOpenPendingAddr != 0 ||
+           g_screenPendingApplyMode != 0 ||
+           g_screenEntryPending != 0 ||
+           g_menuTraceRemaining > 0;
 }
 
 static int resolveMenuTargetEntry(
@@ -2056,6 +3270,121 @@ static int tryWrapperMenuTarget(
     return 1;
 }
 
+static int tryFlushMenuTarget(LONG target) {
+    BYTE *rawContainer;
+    BYTE *container;
+    BYTE *item;
+    DWORD vtable = 0;
+    DWORD handler = 0;
+    LONG childIndex = -1;
+    LONG itemIndex = -1;
+
+    if (!resolveMenuTargetEntry(target, &rawContainer, &container, &item, &childIndex, &itemIndex))
+        return 0;
+
+    if (IsBadReadPtr(item, sizeof(DWORD))) {
+        hookLog("MENUFLUSH: target=%s item unreadable", menuTargetName(target));
+        return 0;
+    }
+
+    vtable = *(DWORD *)item;
+    if (!vtable || IsBadReadPtr((void *)vtable, 0x14)) {
+        hookLog("MENUFLUSH: target=%s item=%p bad vtable=0x%08X",
+                menuTargetName(target), (void *)item, (unsigned)vtable);
+        return 0;
+    }
+
+    handler = *(DWORD *)(vtable + 0x10);
+    if (!handler || IsBadReadPtr((void *)handler, 1)) {
+        hookLog("MENUFLUSH: target=%s item=%p invalid handler=0x%08X",
+                menuTargetName(target), (void *)item, (unsigned)handler);
+        return 0;
+    }
+
+    hookLog("MENUFLUSH: target=%s child=%ld item=%p vt=0x%08X flush=0x%08X pre2c=%u pre1c=0x%08X",
+            menuTargetName(target), (long)childIndex, (void *)item,
+            (unsigned)vtable, (unsigned)handler,
+            (unsigned)*(BYTE *)(item + 0x2C),
+            (unsigned)*(DWORD *)(item + 0x1C));
+    logMenuAppState("flush-before");
+    logMenuQueueState("flush-before");
+
+    ((MenuItemFlush_t)handler)(item);
+
+    hookLog("MENUFLUSH: target=%s post2c=%u post1c=0x%08X",
+            menuTargetName(target),
+            (unsigned)*(BYTE *)(item + 0x2C),
+            (unsigned)*(DWORD *)(item + 0x1C));
+    logMenuAppState("flush-after");
+    logMenuQueueState("flush-after");
+    return 1;
+}
+
+static int tryItemKeyMenuTarget(
+    LONG target,
+    LONG arg1,
+    LONG arg2,
+    LONG arg3,
+    LONG autoFlush
+) {
+    BYTE *rawContainer;
+    BYTE *container;
+    BYTE *item;
+    DWORD vtable = 0;
+    DWORD handler = 0;
+    LONG childIndex = -1;
+    LONG itemIndex = -1;
+    unsigned char result = 0;
+
+    if (!resolveMenuTargetEntry(target, &rawContainer, &container, &item, &childIndex, &itemIndex))
+        return 0;
+
+    if (IsBadReadPtr(item, sizeof(DWORD))) {
+        hookLog("MENUITEMKEY: target=%s item unreadable", menuTargetName(target));
+        return 0;
+    }
+
+    vtable = *(DWORD *)item;
+    if (!vtable || IsBadReadPtr((void *)vtable, 0x44)) {
+        hookLog("MENUITEMKEY: target=%s item=%p bad vtable=0x%08X",
+                menuTargetName(target), (void *)item, (unsigned)vtable);
+        return 0;
+    }
+
+    handler = *(DWORD *)(vtable + 0x40);
+    if (!handler || IsBadReadPtr((void *)handler, 1)) {
+        hookLog("MENUITEMKEY: target=%s item=%p invalid handler=0x%08X",
+                menuTargetName(target), (void *)item, (unsigned)handler);
+        return 0;
+    }
+
+    hookLog("MENUITEMKEY: target=%s child=%ld item=%p vt=0x%08X key=0x%08X a1=%ld a2=%ld a3=%ld flush=%ld flag15=%u flag18=%u flag20=%u owner10=%p",
+            menuTargetName(target), (long)childIndex, (void *)item,
+            (unsigned)vtable, (unsigned)handler,
+            (long)arg1, (long)arg2, (long)arg3, (long)autoFlush,
+            (unsigned)*(BYTE *)(item + 0x15),
+            (unsigned)*(BYTE *)(item + 0x18),
+            (unsigned)*(BYTE *)(item + 0x20),
+            *(void **)(item + 0x10));
+    logMenuAppState("itemkey-before");
+    logMenuQueueState("itemkey-before");
+
+    result = ((MenuItemKey_t)handler)(item, (int)arg1, (int)arg2, (int)arg3);
+
+    hookLog("MENUITEMKEY: target=%s result=%u post2c=%u post1c=0x%08X",
+            menuTargetName(target),
+            (unsigned)result,
+            (unsigned)*(BYTE *)(item + 0x2C),
+            (unsigned)*(DWORD *)(item + 0x1C));
+    logMenuAppState("itemkey-after");
+    logMenuQueueState("itemkey-after");
+
+    if (autoFlush)
+        return tryFlushMenuTarget(target);
+
+    return 1;
+}
+
 static int tryDirectMenuTarget(LONG target, LONG mode, LONG pumpCount) {
     MenuSelectItem_t selectItem = (MenuSelectItem_t)0x5311D0;
     MenuCase2Item_t case2Item = (MenuCase2Item_t)0x4D6A40;
@@ -2115,14 +3444,18 @@ static int tryDirectMenuTarget(LONG target, LONG mode, LONG pumpCount) {
 
 static int tryMainMenuTarget(LONG target, LONG mode, LONG pumpCount) {
     FindNamedObject_t findNamedObject = (FindNamedObject_t)0x4D6900;
+    MenuSelectItem_t selectItem = (MenuSelectItem_t)0x5311D0;
+    MenuControllerDispatch_t controllerDispatch = (MenuControllerDispatch_t)0x531250;
     MainMenuProcessMessage_t processMessage = (MainMenuProcessMessage_t)0x4E3520;
     MainMenuCallback_t callback = (MainMenuCallback_t)(uintptr_t)mainMenuCallbackAddress(target);
     MainMenuCallback_t managerPump = (MainMenuCallback_t)0x4E3C10;
+    MainMenuTick_t postPumpTick = (MainMenuTick_t)0x4E34E0;
     BYTE *rawContainer;
     BYTE *container;
     BYTE *item;
     BYTE *mainMenu;
     BYTE *manager;
+    BYTE *controller = NULL;
     BYTE *itemToken = NULL;
     BYTE *payload = NULL;
     BYTE *owner10 = NULL;
@@ -2158,11 +3491,14 @@ static int tryMainMenuTarget(LONG target, LONG mode, LONG pumpCount) {
     }
 
     if ((!mainMenu || IsBadReadPtr(mainMenu, 0xF4)) &&
-        (mode == MENUDIRECT_MAINMSG || mode == MENUDIRECT_MAINCOMBO)) {
+        (mode == MENUDIRECT_MAINMSG || mode == MENUDIRECT_MAINCOMBO || mode == MENUDIRECT_MAINSCAN)) {
         hookLog("MAINMENU: target=%s main menu object missing for processMessage", menuTargetName(target));
         if (mode == MENUDIRECT_MAINMSG)
             return 0;
     }
+
+    if (manager && !IsBadReadPtr(manager + 0x04, sizeof(void *)))
+        controller = *(BYTE **)(manager + 0x04);
 
     if (!IsBadReadPtr(item + 0x08, sizeof(void *)))
         itemToken = *(BYTE **)(item + 0x08);
@@ -2209,7 +3545,15 @@ static int tryMainMenuTarget(LONG target, LONG mode, LONG pumpCount) {
     logMenuAppState("main-before");
     logMenuQueueState("main-before");
 
-    if ((mode == MENUDIRECT_MAINMSG || mode == MENUDIRECT_MAINCOMBO) &&
+    if (container && !IsBadReadPtr(container, 0x10) && item && !IsBadReadPtr(item, 0x3C)) {
+        selectItem(container, item);
+        hookLog("MAINMENU: selectItem target=%s container=%p item=%p completed",
+                menuTargetName(target), (void *)container, (void *)item);
+        logMainMenuState("after-select");
+    }
+
+    if ((mode == MENUDIRECT_MAINMSG || mode == MENUDIRECT_MAINCOMBO ||
+         mode == MENUDIRECT_MAINSCAN || mode == MENUDIRECT_MAINFLOW) &&
         mainMenu && !IsBadReadPtr(mainMenu, 0xF4)) {
         processMessage(mainMenu, eventBuf);
         hookLog("MAINMENU: processMessage target=%s completed", menuTargetName(target));
@@ -2217,7 +3561,63 @@ static int tryMainMenuTarget(LONG target, LONG mode, LONG pumpCount) {
         logMenuQueueState("after-msg");
     }
 
-    if ((mode == MENUDIRECT_MAINCB || mode == MENUDIRECT_MAINCOMBO) && callback) {
+    if (mode == MENUDIRECT_MAINSCAN) {
+        LONG action;
+        LONG flags;
+        int changeCount = 0;
+
+        if (!controller || IsBadReadPtr(controller, 0xD00)) {
+            hookLog("MAINSCAN: target=%s controller missing/unreadable", menuTargetName(target));
+            return 0;
+        }
+
+        for (action = 0; action <= 6; action++) {
+            for (flags = 0; flags <= 7; flags++) {
+                LONG queueHeadBefore = *(LONG *)0x8AA4EC;
+                LONG freeHeadBefore = *(LONG *)0x8AA4E8;
+                BYTE f4Before = *(BYTE *)(manager + 0xF4);
+                LONG f8Before = *(LONG *)(manager + 0xF8);
+                BYTE fcBefore = *(BYTE *)(manager + 0xFC);
+
+                controllerDispatch(controller, action, flags);
+
+                if (queueHeadBefore != *(LONG *)0x8AA4EC ||
+                    freeHeadBefore != *(LONG *)0x8AA4E8 ||
+                    f4Before != *(BYTE *)(manager + 0xF4) ||
+                    f8Before != *(LONG *)(manager + 0xF8) ||
+                    fcBefore != *(BYTE *)(manager + 0xFC)) {
+                    changeCount++;
+                    hookLog("MAINSCAN: hit#%d action=%ld flags=%ld queueHead %ld->%ld freeHead %ld->%ld f4 %u->%u f8 %ld->%ld fc %u->%u",
+                            changeCount,
+                            (long)action,
+                            (long)flags,
+                            (long)queueHeadBefore,
+                            (long)*(LONG *)0x8AA4EC,
+                            (long)freeHeadBefore,
+                            (long)*(LONG *)0x8AA4E8,
+                            (unsigned)f4Before,
+                            (unsigned)*(BYTE *)(manager + 0xF4),
+                            (long)f8Before,
+                            (long)*(LONG *)(manager + 0xF8),
+                            (unsigned)fcBefore,
+                            (unsigned)*(BYTE *)(manager + 0xFC));
+                    logMenuQueueState("scan-hit");
+                    logMainMenuState("scan-hit");
+                    logMenuAppState("scan-hit");
+                }
+            }
+        }
+
+        if (!changeCount)
+            hookLog("MAINSCAN: target=%s no queue/state change across action=0..6 flags=0..7",
+                    menuTargetName(target));
+        else
+            hookLog("MAINSCAN: target=%s total-changing-combos=%d",
+                    menuTargetName(target), changeCount);
+    }
+
+    if ((mode == MENUDIRECT_MAINCB || mode == MENUDIRECT_MAINCOMBO ||
+         mode == MENUDIRECT_MAINFLOW) && callback) {
         callback(eventTarget, NULL);
         hookLog("MAINMENU: callback target=%s completed", menuTargetName(target));
         logMainMenuState("after-cb");
@@ -2229,6 +3629,13 @@ static int tryMainMenuTarget(LONG target, LONG mode, LONG pumpCount) {
         hookLog("MAINMENU: manager pump %ld/%ld target=%s", (long)(i + 1), (long)pumpCount, menuTargetName(target));
         logMainMenuState("after-pump");
         logMenuQueueState("after-pump");
+
+        if (mode == MENUDIRECT_MAINFLOW && postPumpTick) {
+            postPumpTick(manager ? (void *)manager : (void *)mainMenu);
+            hookLog("MAINMENU: post pump tick %ld/%ld target=%s", (long)(i + 1), (long)pumpCount, menuTargetName(target));
+            logMainMenuState("after-post");
+            logMenuQueueState("after-post");
+        }
     }
 
     logMenuAppState("main-after");
@@ -2309,12 +3716,16 @@ static HRESULT WINAPI hookedMouseGetDeviceData(
         InterlockedDecrement(&g_menuTraceRemaining);
     }
 
+    processPendingUiWork("gdd");
+
     if (g_menuDirectMode != MENUDIRECT_NONE) {
         LONG target = g_menuDirectTarget;
         LONG mode = g_menuDirectMode;
         LONG pumpCount = g_menuDirectPumpCount;
         int ok;
-        if (mode == MENUDIRECT_MAINMSG || mode == MENUDIRECT_MAINCB || mode == MENUDIRECT_MAINCOMBO)
+        if (mode == MENUDIRECT_MAINMSG || mode == MENUDIRECT_MAINCB ||
+            mode == MENUDIRECT_MAINCOMBO || mode == MENUDIRECT_MAINSCAN ||
+            mode == MENUDIRECT_MAINFLOW)
             ok = tryMainMenuTarget(target, mode, pumpCount);
         else
             ok = tryDirectMenuTarget(target, mode, pumpCount);
@@ -2324,14 +3735,6 @@ static HRESULT WINAPI hookedMouseGetDeviceData(
         hookLog("MENUDIRECT: target=%s mode=%s pump=%ld %s",
                 menuTargetName(target), menuDirectModeName(mode), (long)pumpCount,
                 ok ? "completed" : "failed");
-    }
-
-    if (g_menuPumpPending) {
-        LONG pumpCount = g_menuPumpCount;
-        g_menuPumpPending = 0;
-        pumpMenuApp("manual", pumpCount);
-        g_menuTraceRemaining = 6;
-        hookLog("MENUPUMP: count=%ld completed", (long)pumpCount);
     }
 
     if (g_menuWrapPending) {
@@ -2344,10 +3747,13 @@ static HRESULT WINAPI hookedMouseGetDeviceData(
         LONG forceClear18 = g_menuWrapForceClear18;
         LONG forceClear2C = g_menuWrapForceClear2C;
         LONG arg5FromItem24 = g_menuWrapArg5FromItem24;
+        LONG autoFlush = g_menuWrapAutoFlush;
         int ok = tryWrapperMenuTarget(target, arg1, arg2, arg3, arg5, usePayload, forceClear18, forceClear2C, arg5FromItem24);
+        if (ok && autoFlush)
+            ok = tryFlushMenuTarget(target);
         g_menuWrapPending = 0;
         g_menuTraceRemaining = 6;
-        hookLog("MENUWRAP: target=%s a1=%ld a2=%ld a3=%ld a5=%ld payload=%ld clear18=%ld clear2c=%ld a5item24=%ld %s",
+        hookLog("MENUWRAP: target=%s a1=%ld a2=%ld a3=%ld a5=%ld payload=%ld clear18=%ld clear2c=%ld a5item24=%ld flush=%ld %s",
                 menuTargetName(target),
                 (long)arg1,
                 (long)arg2,
@@ -2357,6 +3763,35 @@ static HRESULT WINAPI hookedMouseGetDeviceData(
                 (long)forceClear18,
                 (long)forceClear2C,
                 (long)arg5FromItem24,
+                (long)autoFlush,
+                ok ? "completed" : "failed");
+    }
+
+    if (g_menuItemKeyPending) {
+        LONG target = g_menuItemKeyTarget;
+        LONG arg1 = g_menuItemKeyArg1;
+        LONG arg2 = g_menuItemKeyArg2;
+        LONG arg3 = g_menuItemKeyArg3;
+        LONG autoFlush = g_menuItemKeyAutoFlush;
+        int ok = tryItemKeyMenuTarget(target, arg1, arg2, arg3, autoFlush);
+        g_menuItemKeyPending = 0;
+        g_menuTraceRemaining = 6;
+        hookLog("MENUITEMKEY: target=%s a1=%ld a2=%ld a3=%ld flush=%ld %s",
+                menuTargetName(target),
+                (long)arg1,
+                (long)arg2,
+                (long)arg3,
+                (long)autoFlush,
+                ok ? "completed" : "failed");
+    }
+
+    if (g_menuItemFlushPending) {
+        LONG target = g_menuItemFlushTarget;
+        int ok = tryFlushMenuTarget(target);
+        g_menuItemFlushPending = 0;
+        g_menuTraceRemaining = 6;
+        hookLog("MENUFLUSH: target=%s %s",
+                menuTargetName(target),
                 ok ? "completed" : "failed");
     }
 
@@ -2378,6 +3813,26 @@ static HRESULT WINAPI hookedMouseGetDeviceData(
         g_menuTraceRemaining = 6;
         hookLog("MENU: menuclick target=%s up %s",
                 menuTargetName(target), ok ? "completed" : "failed");
+    }
+
+    if (g_menuWatchPendingCommand != 0) {
+        LONG cmd = g_menuWatchPendingCommand;
+        LONG hits = g_menuWatchPendingHits;
+
+        g_menuWatchPendingCommand = 0;
+        if (cmd < 0) {
+            disarmMenuWatchpoint("manual");
+        } else {
+            int ok = (cmd == MENUWATCH_TARGET_PENDING)
+                ? armScreenPendingWatchpoint(hits)
+                : armMenuWatchpoint(hits);
+            hookLog("MENUWATCH: arm target=%s hits=%ld %s",
+                    menuWatchTargetName(cmd == MENUWATCH_TARGET_PENDING
+                                        ? MENUWATCH_TARGET_PENDING
+                                        : MENUWATCH_TARGET_MANAGER),
+                    (long)clampMenuWatchHits(hits),
+                    ok ? "completed" : "failed");
+        }
     }
 
     /* --- v7 injection: OPTIMIZED 3-call state machine ---
@@ -2409,6 +3864,73 @@ static HRESULT WINAPI hookedMouseGetDeviceData(
             if (ofs == 0) g_accumX += val;
             else if (ofs == 4) g_accumY += val;
             else if (ofs == 12) g_accumBtn = val;
+        }
+    }
+
+    /* rawclick bypasses the DInput return buffer and writes straight into the
+     * live CInputDevice queue. It must still run when the normal injection
+     * state machine is idle, so handle it before the early return below. */
+    if (g_rawclickState != RAWCLICK_IDLE && g_callerEBP) {
+        BYTE *cinput = (BYTE *)(uintptr_t)g_callerEBP;
+        DWORD *pCount = (DWORD *)(cinput + 0x142C);
+        DWORD count = *pCount;
+        float fx = g_rawclickX, fy = g_rawclickY;
+
+        if (g_rawclickState == RAWCLICK_PENDING && count + 2 <= 128) {
+            BYTE *slot = cinput + 0x2C + count * 40;
+            rawQueueWriteMoveEvent(cinput, slot, fx, fy);
+            count++;
+
+            slot = cinput + 0x2C + count * 40;
+            rawQueueWriteButtonEvent(cinput, slot, g_rawclickType, fx, fy, g_rawclickButtonIndex, 1);
+            count++;
+
+            *pCount = count;
+
+            g_rawclickState = RAWCLICK_UP;
+            hookLog("RAWCLICK: wrote move+btn_down type=%d button=%lu at (%.0f,%.0f) slots %d-%d count=%lu",
+                    g_rawclickType, (unsigned long)g_rawclickButtonIndex, fx, fy,
+                    count - 2, count - 1, (unsigned long)count);
+
+        } else if (g_rawclickState == RAWCLICK_UP && count + 1 <= 128) {
+            BYTE *slot = cinput + 0x2C + count * 40;
+            rawQueueWriteButtonEvent(cinput, slot, g_rawclickType, fx, fy, g_rawclickButtonIndex, 0);
+            count++;
+
+            *pCount = count;
+
+            g_rawclickState = RAWCLICK_DONE;
+            hookLog("RAWCLICK: wrote btn_up type=%d button=%lu at (%.0f,%.0f) slot %d count=%lu",
+                    g_rawclickType, (unsigned long)g_rawclickButtonIndex, fx, fy,
+                    count - 1, (unsigned long)count);
+        } else if (count + (g_rawclickState == RAWCLICK_PENDING ? 2 : 1) > 128) {
+            hookLog("RAWCLICK: skipped state=%d count=%lu (queue full)", g_rawclickState, (unsigned long)count);
+        }
+    }
+
+    if (g_gameclickState != GAMECLICK_IDLE && g_callerEBP) {
+        void *cinput = (void *)(uintptr_t)g_callerEBP;
+        float fx = g_gameclickX, fy = g_gameclickY;
+        DWORD buttonIndex = g_gameclickButtonIndex;
+
+        if (g_gameclickState == GAMECLICK_PENDING) {
+            callGameQueueMove(cinput, fx, fy);
+            callGameQueueButton(cinput, fx, fy, buttonIndex, 1);
+            g_gameclickState = GAMECLICK_HOLD;
+            g_gameclickHoldFrames = 2;
+            hookLog("GAMECLICK: called move+btn_down button=%lu at (%.0f,%.0f)",
+                    (unsigned long)buttonIndex, fx, fy);
+        } else if (g_gameclickState == GAMECLICK_HOLD) {
+            LONG holdFrames = g_gameclickHoldFrames - 1;
+            g_gameclickHoldFrames = holdFrames;
+            if (holdFrames <= 0) {
+                g_gameclickState = GAMECLICK_UP;
+            }
+        } else if (g_gameclickState == GAMECLICK_UP) {
+            callGameQueueButton(cinput, fx, fy, buttonIndex, 0);
+            g_gameclickState = GAMECLICK_DONE;
+            hookLog("GAMECLICK: called btn_up button=%lu at (%.0f,%.0f)",
+                    (unsigned long)buttonIndex, fx, fy);
         }
     }
 
@@ -2695,71 +4217,6 @@ static HRESULT WINAPI hookedMouseGetDeviceData(
      * 0xC0000005 crashes (function relies on state not yet updated).
      * g_gameMouseX/Y remain 0 — use readmem for cursor diagnosis instead. */
 
-    /* --- Direct FIFO injection (rawclick) ---
-     * Writes synthetic events straight into CInputDevice's event queue,
-     * bypassing ProcessInput's type assignment.  Runs on game thread (safe). */
-    if (g_rawclickState != RAWCLICK_IDLE && g_callerEBP) {
-        BYTE *cinput = (BYTE *)(uintptr_t)g_callerEBP;
-        DWORD *pCount = (DWORD *)(cinput + 0x142C);
-        DWORD count = *pCount;
-        float fx = g_rawclickX, fy = g_rawclickY;
-
-        if (g_rawclickState == RAWCLICK_PENDING && count + 2 <= 128) {
-            /* Slot 1: type=3 mouse_move — updates [GameApp+0x813C/8140] stored cursor */
-            BYTE *slot = cinput + 0x2C + count * 40;
-            memset(slot, 0, 40);
-            *(DWORD *)(slot + 0x00) = 3;       /* type = mouse_move */
-            *(float *)(slot + 0x08) = fx;      /* cursor X */
-            *(float *)(slot + 0x0C) = fy;      /* cursor Y */
-            *(DWORD *)(slot + 0x20) = 0xFFFFFFFF;
-            count++;
-
-            /* Slot 2: button-down event (type configurable, default=5) */
-            slot = cinput + 0x2C + count * 40;
-            memset(slot, 0, 40);
-            *(DWORD *)(slot + 0x00) = g_rawclickType;  /* type (4 or 5) */
-            *(BYTE  *)(slot + 0x06) = 1;               /* down flag */
-            *(float *)(slot + 0x08) = fx;              /* cursor X */
-            *(float *)(slot + 0x0C) = fy;              /* cursor Y */
-            *(float *)(slot + 0x10) = fx;              /* delta X */
-            *(float *)(slot + 0x14) = fy;              /* delta Y */
-            *(DWORD *)(slot + 0x18) = 1;               /* button state (left=bit0) */
-            *(DWORD *)(slot + 0x20) = 0xFFFFFFFF;
-            count++;
-
-            *pCount = count;
-
-            /* Also set CInputDevice cursor + button state */
-            *(float *)(cinput + 0x14) = fx;
-            *(float *)(cinput + 0x18) = fy;
-            *(BYTE  *)(cinput + 0x1431) = 1;  /* left button state = pressed */
-
-            g_rawclickState = RAWCLICK_UP;
-            hookLog("RAWCLICK: wrote move+btn_down type=%d at (%.0f,%.0f) slots %d-%d",
-                    g_rawclickType, fx, fy, count - 2, count - 1);
-
-        } else if (g_rawclickState == RAWCLICK_UP && count + 1 <= 128) {
-            /* Button-up event */
-            BYTE *slot = cinput + 0x2C + count * 40;
-            memset(slot, 0, 40);
-            *(DWORD *)(slot + 0x00) = g_rawclickType;
-            *(BYTE  *)(slot + 0x06) = 0;               /* up flag */
-            *(float *)(slot + 0x08) = fx;
-            *(float *)(slot + 0x0C) = fy;
-            *(float *)(slot + 0x10) = fx;
-            *(float *)(slot + 0x14) = fy;
-            *(DWORD *)(slot + 0x20) = 0xFFFFFFFF;
-            count++;
-
-            *pCount = count;
-            *(BYTE *)(cinput + 0x1431) = 0;  /* left button state = released */
-
-            g_rawclickState = RAWCLICK_DONE;
-            hookLog("RAWCLICK: wrote btn_up type=%d at (%.0f,%.0f) slot %d",
-                    g_rawclickType, fx, fy, count - 1);
-        }
-    }
-
     /* Signal event handle to keep game polling */
     if (g_mouseEventHandle) SetEvent(g_mouseEventHandle);
 
@@ -2774,6 +4231,35 @@ static HRESULT WINAPI hookedMouseSetEventNotification(
     hookLog("SetEventNotification called: hEvent=%p", (void*)hEvent);
     g_mouseEventHandle = hEvent;
     return g_origMouseSetEventNotification(self, hEvent);
+}
+
+static void ensureMouseWakeEvent(LPDIRECTINPUTDEVICEA self, const char *reason) {
+    HANDLE hEvt;
+    HRESULT hr;
+
+    if (!self || g_mouseEventHandle || !g_origMouseSetEventNotification)
+        return;
+
+    hEvt = CreateEventA(NULL, FALSE, FALSE, NULL);
+    if (!hEvt) {
+        hookLog("WakeEvent[%s]: CreateEvent failed err=%lu",
+                reason ? reason : "unknown", GetLastError());
+        return;
+    }
+
+    hr = g_origMouseSetEventNotification(self, hEvt);
+    if (FAILED(hr)) {
+        hookLog("WakeEvent[%s]: SetEventNotification failed hr=0x%08X",
+                reason ? reason : "unknown", (unsigned)hr);
+        CloseHandle(hEvt);
+        return;
+    }
+
+    g_privateMouseEventHandle = hEvt;
+    g_mouseEventHandle = hEvt;
+    SetEvent(hEvt);
+    hookLog("WakeEvent[%s]: installed private event=%p hr=0x%08X",
+            reason ? reason : "unknown", (void *)hEvt, (unsigned)hr);
 }
 
 /* --- Hooked SetDataFormat for MOUSE — log the data format --- */
@@ -2832,6 +4318,8 @@ static HRESULT WINAPI hookedMouseAcquire(LPDIRECTINPUTDEVICEA self) {
             hr == S_FALSE ? "ALREADY_ACQUIRED" :
             hr == (HRESULT)0x80070005 ? "OTHERAPPHASPRIO" :
             hr == (HRESULT)DIERR_NOTINITIALIZED ? "NOTINITIALIZED" : "OTHER");
+    if (SUCCEEDED(hr))
+        ensureMouseWakeEvent(self, "acquire");
     if (FAILED(hr)) {
         hookLog("WARNING: Mouse Acquire FAILED! Game will have no mouse input!");
     }
@@ -2993,6 +4481,12 @@ static void triggerInjectionClick(int gameX, int gameY, const char *label) {
 static volatile LONG g_wndProcMsgCount = 0;
 
 static LRESULT CALLBACK hookedWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (msg == WM_APP_PENDING_UI) {
+        hookLog("WndProc: WM_APP_PENDING_UI seq=%lu", (unsigned long)wParam);
+        processPendingUiWork("wndproc");
+        return 0;
+    }
+
     /* Log mouse-related and input messages */
     switch (msg) {
     case WM_MOUSEMOVE:
@@ -3171,9 +4665,11 @@ static DWORD WINAPI wakeThreadProc(LPVOID param) {
          * receive "click X Y\n" or "nop\n". NON-BLOCKING: just set state
          * variables and return. The actual injection happens in GetDeviceState
          * on the game's main thread. */
-        /* Pulse mouse event handle when injection is pending —
-         * this wakes the game's input polling so GDD fires faster */
-        if (g_mouseEventHandle && g_injState != INJ_IDLE && g_injState != INJ_COMPLETE) {
+        /* Pulse mouse event handle while any queued UI/menu/input work is pending.
+         * Title snapshots often never install their own event handle, so a private
+         * handle plus periodic pulses is what keeps GetDeviceData alive long enough
+         * to process synthetic work and emit follow-up traces. */
+        if (g_mouseEventHandle && hasPendingWakeWork()) {
             SetEvent(g_mouseEventHandle);
         }
 
@@ -3255,7 +4751,7 @@ static DWORD WINAPI wakeThreadProc(LPVOID param) {
                         if (connResult == 0) {
                             hookLog("TCP: CONNECTED on attempt %d!", tcpAttempt);
                             /* Send diagnostic info with poll */
-                            char pollMsg[512];
+                            char pollMsg[640];
                             POINT pt = {0, 0};
                             if (g_origGetCursorPos) g_origGetCursorPos(&pt);
                             else GetCursorPos(&pt);
@@ -3266,7 +4762,7 @@ static DWORD WINAPI wakeThreadProc(LPVOID param) {
                             float ciX = (float)g_gameMouseX;
                             float ciY = (float)g_gameMouseY;
                             snprintf(pollMsg, sizeof(pollMsg),
-                                "poll state=%d gds=%ld gdd=%ld kbd=%ld gas=%ld gcp=%ld cur=%ld,%ld hwnd=%d evt=%d ax=%ld ay=%ld ab=%ld ci=%.1f,%.1f hr=0x%08X re=%lu rq=%ld ra=0x%08X md=%p eb=0x%08X rc=%d mc=%ld mt=%ld ms=%ld\n",
+                                "poll state=%d gds=%ld gdd=%ld kbd=%ld gas=%ld gcp=%ld cur=%ld,%ld hwnd=%d evt=%d ax=%ld ay=%ld ab=%ld ci=%.1f,%.1f hr=0x%08X re=%lu rq=%ld ra=0x%08X md=%p eb=0x%08X rc=%d gc=%d mc=%ld mt=%ld ms=%ld so=%ld sp=%ld se=%ld sa=0x%08X\n",
                                 (int)g_injState,
                                 (long)g_getDeviceStateCallCount,
                                 (long)g_getDeviceDataCallCount,
@@ -3285,9 +4781,14 @@ static DWORD WINAPI wakeThreadProc(LPVOID param) {
                                 (void*)g_mouseDevice,
                                 (unsigned)g_callerEBP,
                                 (int)g_rawclickState,
+                                (int)g_gameclickState,
                                 (long)g_menuClickState,
                                 (long)g_menuClickTarget,
-                                (long)g_menuClickStage);
+                                (long)g_menuClickStage,
+                                (long)g_screenOpenTraceStage,
+                                (long)g_screenPendingApplyMode,
+                                (long)g_screenEntryPending,
+                                (unsigned)g_screenOpenPendingAddr);
                             send(s, pollMsg, (int)strlen(pollMsg), 0);
 
                             char buf[256] = {0};
@@ -3363,20 +4864,53 @@ static DWORD WINAPI wakeThreadProc(LPVOID param) {
                                     /* Direct FIFO injection: writes type=3 + type=5 events
                                      * straight into CInputDevice's event queue, bypassing
                                      * ProcessInput's type-4 assignment entirely.
-                                     * Usage: rawclick <x> <y> [type]  (type: 4 or 5, default 5) */
+                                     * Usage: rawclick <x> <y> [type] [buttonIndex]
+                                     *   type: 4 or 5, default 5
+                                     *   buttonIndex: 0..7, default 0 */
                                     float rx = 0, ry = 0;
                                     int rtype = 5;
-                                    sscanf(buf + 9, "%f %f %d", &rx, &ry, &rtype);
+                                    unsigned int buttonIndex = 0;
+                                    sscanf(buf + 9, "%f %f %d %u", &rx, &ry, &rtype, &buttonIndex);
+                                    if (buttonIndex > 7) buttonIndex = 7;
                                     g_rawclickX = rx;
                                     g_rawclickY = ry;
                                     g_rawclickType = (DWORD)rtype;
+                                    g_rawclickButtonIndex = (DWORD)buttonIndex;
                                     g_rawclickState = RAWCLICK_PENDING;
                                     if (g_mouseEventHandle) SetEvent(g_mouseEventHandle);
-                                    hookLog("TCP cmd: rawclick at (%.0f,%.0f) type=%d", rx, ry, rtype);
+                                    hookLog("TCP cmd: rawclick at (%.0f,%.0f) type=%d button=%u",
+                                            rx, ry, rtype, buttonIndex);
                                     char resp[128];
                                     snprintf(resp, sizeof(resp),
-                                        "RESP:rawclick armed at (%.0f,%.0f) type=%d\n", rx, ry, rtype);
+                                        "RESP:rawclick armed at (%.0f,%.0f) type=%d button=%u\n",
+                                        rx, ry, rtype, buttonIndex);
                                     send(s, resp, (int)strlen(resp), 0);
+
+                                } else if (strncmp(buf, "gameclick ", 10) == 0) {
+                                    /* Directly call the game's own queue helpers:
+                                     *   0x4D3C10(this, x, y)
+                                     *   0x4D3D70(this, x, y, buttonIndex, buttonValue)
+                                     * This mirrors the WM button wrappers more closely than
+                                     * raw queue writes. */
+                                    float gx = 0, gy = 0;
+                                    unsigned int buttonIndex = 1;
+                                    sscanf(buf + 10, "%f %f %u", &gx, &gy, &buttonIndex);
+                                    if (buttonIndex > 7) buttonIndex = 7;
+                                    g_gameclickX = gx;
+                                    g_gameclickY = gy;
+                                    g_gameclickButtonIndex = (DWORD)buttonIndex;
+                                    g_gameclickHoldFrames = 2;
+                                    g_gameclickState = GAMECLICK_PENDING;
+                                    if (g_mouseEventHandle) SetEvent(g_mouseEventHandle);
+                                    hookLog("TCP cmd: gameclick at (%.0f,%.0f) button=%u",
+                                            gx, gy, buttonIndex);
+                                    {
+                                        char resp[128];
+                                        snprintf(resp, sizeof(resp),
+                                            "RESP:gameclick armed at (%.0f,%.0f) button=%u\n",
+                                            gx, gy, buttonIndex);
+                                        send(s, resp, (int)strlen(resp), 0);
+                                    }
 
                                 } else if (strncmp(buf, "menuclick", 9) == 0) {
                                     LONG target = MENU_TARGET_SINGLE_PLAYER;
@@ -3420,6 +4954,10 @@ static DWORD WINAPI wakeThreadProc(LPVOID param) {
 
                                     if (strstr(buf, "maincombo")) {
                                         mode = MENUDIRECT_MAINCOMBO;
+                                    } else if (strstr(buf, "mainflow")) {
+                                        mode = MENUDIRECT_MAINFLOW;
+                                    } else if (strstr(buf, "mainscan") || strstr(buf, "scan")) {
+                                        mode = MENUDIRECT_MAINSCAN;
                                     } else if (strstr(buf, "maincb") || strstr(buf, "callback")) {
                                         mode = MENUDIRECT_MAINCB;
                                     } else if (strstr(buf, "mainmsg")) {
@@ -3463,6 +5001,293 @@ static DWORD WINAPI wakeThreadProc(LPVOID param) {
                                         }
                                     }
 
+                                } else if (strncmp(buf, "menuwatch", 9) == 0) {
+                                    LONG hits = 24;
+
+                                    if (strstr(buf, "off")) {
+                                        g_menuWatchPendingCommand = -1;
+                                        if (g_mouseEventHandle) SetEvent(g_mouseEventHandle);
+                                        hookLog("TCP cmd: menuwatch off");
+                                        send(s, "RESP:menuwatch off\n", 19, 0);
+                                    } else {
+                                        if (sscanf(buf + 9, "%ld", &hits) != 1)
+                                            hits = 24;
+                                        hits = clampMenuWatchHits(hits);
+                                        g_menuWatchPendingHits = hits;
+                                        g_menuWatchPendingCommand = MENUWATCH_TARGET_MANAGER;
+                                        if (g_mouseEventHandle) SetEvent(g_mouseEventHandle);
+                                        hookLog("TCP cmd: menuwatch hits=%ld", (long)hits);
+                                        {
+                                            char resp[128];
+                                            snprintf(resp, sizeof(resp),
+                                                "RESP:menuwatch armed hits=%ld\n",
+                                                     (long)hits);
+                                            send(s, resp, (int)strlen(resp), 0);
+                                        }
+                                    }
+
+                                } else if (strncmp(buf, "screenwatch", 11) == 0) {
+                                    LONG hits = 24;
+
+                                    if (strstr(buf, "off")) {
+                                        g_menuWatchPendingCommand = -1;
+                                        if (g_mouseEventHandle) SetEvent(g_mouseEventHandle);
+                                        hookLog("TCP cmd: screenwatch off");
+                                        send(s, "RESP:screenwatch off\n", 21, 0);
+                                    } else {
+                                        if (sscanf(buf + 11, "%ld", &hits) != 1)
+                                            hits = 24;
+                                        hits = clampMenuWatchHits(hits);
+                                        g_menuWatchPendingHits = hits;
+                                        g_menuWatchPendingCommand = MENUWATCH_TARGET_PENDING;
+                                        if (g_mouseEventHandle) SetEvent(g_mouseEventHandle);
+                                        hookLog("TCP cmd: screenwatch hits=%ld", (long)hits);
+                                        {
+                                            char resp[128];
+                                            snprintf(resp, sizeof(resp),
+                                                "RESP:screenwatch armed hits=%ld\n",
+                                                     (long)hits);
+                                            send(s, resp, (int)strlen(resp), 0);
+                                        }
+                                    }
+
+                                } else if (strncmp(buf, "screenentries", 13) == 0) {
+                                    logActiveScreenEntries("tcp");
+                                    send(s, "RESP:screenentries logged\n", 26, 0);
+
+                                } else if (strncmp(buf, "screenstate", 11) == 0) {
+                                    logActiveScreenState("tcp");
+                                    send(s, "RESP:screenstate logged\n", 24, 0);
+
+                                } else if (strncmp(buf, "screenentrysync ", 16) == 0 ||
+                                           strncmp(buf, "screenentry ", 12) == 0) {
+                                    int entrySync = (strncmp(buf, "screenentrysync ", 16) == 0);
+                                    const char *argBase = entrySync ? (buf + 16) : (buf + 12);
+                                    char name[64];
+
+                                    memset(name, 0, sizeof(name));
+                                    if (sscanf(argBase, "%63s", name) != 1) {
+                                        send(s,
+                                             entrySync ? "RESP:screenentrysync badarg\n"
+                                                       : "RESP:screenentry badarg\n",
+                                             entrySync ? 28 : 24,
+                                             0);
+                                    } else {
+                                        memcpy(g_screenEntryName, name, sizeof(g_screenEntryName));
+                                        g_screenEntryName[sizeof(g_screenEntryName) - 1] = 0;
+                                        g_screenEntryPending = 1;
+                                        if (g_mouseEventHandle) SetEvent(g_mouseEventHandle);
+                                        if (entrySync) {
+                                            DWORD_PTR dispatchResult = 0;
+                                            LONG seq = InterlockedIncrement(&g_pendingUiDispatchSeq);
+                                            DWORD err = 0;
+
+                                            g_screenOpenTraceStage = 185;
+                                            hookLog("TCP cmd: screenentrysync name=%s", name);
+                                            if (!g_gameHwnd) {
+                                                send(s, "RESP:screenentrysync nohwnd\n", 29, 0);
+                                                hookLog("UIWORK: sync reason=screenentrysync FAILED no hwnd name=%s",
+                                                        name);
+                                            } else if (SendMessageTimeoutA(g_gameHwnd, WM_APP_PENDING_UI, (WPARAM)seq, 0,
+                                                                          SMTO_ABORTIFHUNG | SMTO_BLOCK,
+                                                                          5000, &dispatchResult)) {
+                                                char resp[160];
+                                                snprintf(resp, sizeof(resp),
+                                                         "RESP:screenentrysync done name=%s stage=%ld\n",
+                                                         name, (long)g_screenOpenTraceStage);
+                                                send(s, resp, (int)strlen(resp), 0);
+                                                hookLog("UIWORK: sync reason=screenentrysync seq=%ld name=%s done stage=%ld result=%lu",
+                                                        (long)seq, name, (long)g_screenOpenTraceStage,
+                                                        (unsigned long)dispatchResult);
+                                            } else {
+                                                char resp[192];
+                                                err = GetLastError();
+                                                snprintf(resp, sizeof(resp),
+                                                         "RESP:screenentrysync timeout err=%lu name=%s stage=%ld\n",
+                                                         (unsigned long)err, name, (long)g_screenOpenTraceStage);
+                                                send(s, resp, (int)strlen(resp), 0);
+                                                hookLog("UIWORK: sync reason=screenentrysync seq=%ld name=%s timeout err=%lu stage=%ld",
+                                                        (long)seq, name, (unsigned long)err,
+                                                        (long)g_screenOpenTraceStage);
+                                            }
+                                        } else {
+                                            postPendingUiWork("screenentry");
+                                            hookLog("TCP cmd: screenentry name=%s", name);
+                                            {
+                                                char resp[128];
+                                                snprintf(resp, sizeof(resp),
+                                                         "RESP:screenentry armed name=%s\n", name);
+                                                send(s, resp, (int)strlen(resp), 0);
+                                            }
+                                        }
+                                    }
+
+                                } else if (strncmp(buf, "screenpendingsync", 17) == 0 ||
+                                           strncmp(buf, "screenpending", 13) == 0) {
+                                    int pendingSync = (strncmp(buf, "screenpendingsync", 17) == 0);
+                                    const char *argBase = pendingSync ? (buf + 17) : (buf + 13);
+                                    LONG pendingMode = 1;
+
+                                    if (strstr(argBase, "both")) {
+                                        pendingMode = 3;
+                                    } else if (strstr(argBase, "dc")) {
+                                        pendingMode = 2;
+                                    }
+
+                                    g_screenPendingApplyMode = pendingMode;
+                                    if (g_mouseEventHandle) SetEvent(g_mouseEventHandle);
+                                    if (pendingSync) {
+                                        DWORD_PTR dispatchResult = 0;
+                                        LONG seq = InterlockedIncrement(&g_pendingUiDispatchSeq);
+                                        DWORD err = 0;
+
+                                        g_screenOpenTraceStage = 184;
+                                        if (!g_gameHwnd) {
+                                            send(s, "RESP:screenpendingsync nohwnd\n", 31, 0);
+                                            hookLog("UIWORK: sync reason=screenpendingsync FAILED no hwnd");
+                                        } else if (SendMessageTimeoutA(g_gameHwnd, WM_APP_PENDING_UI, (WPARAM)seq, 0,
+                                                                      SMTO_ABORTIFHUNG | SMTO_BLOCK,
+                                                                      5000, &dispatchResult)) {
+                                            char resp[160];
+                                            snprintf(resp, sizeof(resp),
+                                                     "RESP:screenpendingsync done mode=%ld stage=%ld\n",
+                                                     (long)pendingMode, (long)g_screenOpenTraceStage);
+                                            send(s, resp, (int)strlen(resp), 0);
+                                            hookLog("UIWORK: sync reason=screenpendingsync seq=%ld mode=%ld done stage=%ld result=%lu",
+                                                    (long)seq, (long)pendingMode, (long)g_screenOpenTraceStage,
+                                                    (unsigned long)dispatchResult);
+                                        } else {
+                                            char resp[160];
+                                            err = GetLastError();
+                                            snprintf(resp, sizeof(resp),
+                                                     "RESP:screenpendingsync timeout err=%lu mode=%ld stage=%ld\n",
+                                                     (unsigned long)err, (long)pendingMode, (long)g_screenOpenTraceStage);
+                                            send(s, resp, (int)strlen(resp), 0);
+                                            hookLog("UIWORK: sync reason=screenpendingsync seq=%ld mode=%ld timeout err=%lu stage=%ld",
+                                                    (long)seq, (long)pendingMode, (unsigned long)err,
+                                                    (long)g_screenOpenTraceStage);
+                                        }
+                                    } else {
+                                        postPendingUiWork("screenpending");
+                                        {
+                                            char resp[128];
+                                            snprintf(resp, sizeof(resp),
+                                                     "RESP:screenpending armed mode=%ld\n",
+                                                     (long)pendingMode);
+                                            send(s, resp, (int)strlen(resp), 0);
+                                        }
+                                    }
+                                    hookLog("TCP cmd: %s mode=%ld",
+                                            pendingSync ? "screenpendingsync" : "screenpending",
+                                            (long)pendingMode);
+
+                                } else if (strncmp(buf, "screenopen", 10) == 0 ||
+                                           strncmp(buf, "screencombo", 11) == 0 ||
+                                           strncmp(buf, "screenapply", 11) == 0 ||
+                                           strncmp(buf, "screencommitsync", 16) == 0 ||
+                                           strncmp(buf, "screencommit", 12) == 0 ||
+                                           strncmp(buf, "screencommitgdd", 15) == 0) {
+                                    char name[64];
+                                    DWORD screenAddr = 0;
+                                    LONG autoPumpCount = 0;
+                                    int combo = (strncmp(buf, "screencombo", 11) == 0);
+                                    int apply = (strncmp(buf, "screenapply", 11) == 0);
+                                    int commitSync = (strncmp(buf, "screencommitsync", 16) == 0);
+                                    int commit = (strncmp(buf, "screencommit", 12) == 0);
+                                    int commitGdd = (strncmp(buf, "screencommitgdd", 15) == 0);
+                                    const char *cmdName = combo
+                                        ? "screencombo"
+                                        : (commitSync
+                                           ? "screencommitsync"
+                                           : (commitGdd
+                                              ? "screencommitgdd"
+                                              : (commit
+                                                 ? "screencommit"
+                                                 : (apply ? "screenapply" : "screenopen"))));
+                                    const char *argBase = commitGdd
+                                        ? (buf + 15)
+                                        : (commitSync
+                                           ? (buf + 16)
+                                           : (commit ? (buf + 12) : ((combo || apply) ? (buf + 11) : (buf + 10))));
+
+                                    memset(name, 0, sizeof(name));
+                                    if (sscanf(argBase, "%63s", name) == 1)
+                                        screenAddr = namedScreenAddress(name);
+                                    {
+                                        char *pumpPos = strstr(argBase, "pump");
+                                        if (pumpPos) {
+                                            LONG parsedPump = 0;
+                                            if (sscanf(pumpPos + 4, "%ld", &parsedPump) == 1 && parsedPump > 0)
+                                                autoPumpCount = clampMenuPumpCount(parsedPump);
+                                        }
+                                    }
+
+                                    if (!screenAddr) {
+                                        const char *resp = combo
+                                            ? "RESP:screencombo unknown screen\n"
+                                            : ((commit || commitSync || commitGdd)
+                                               ? "RESP:screencommit unknown screen\n"
+                                               : (apply
+                                               ? "RESP:screenapply unknown screen\n"
+                                               : "RESP:screenopen unknown screen\n"));
+                                        send(s, resp, (int)strlen(resp), 0);
+                                        hookLog("TCP cmd: %s unknown [%s]", cmdName, buf);
+                                    } else {
+                                        g_screenOpenPendingAddr = screenAddr;
+                                        g_screenOpenPendingMode = combo ? 2 : ((commit || commitSync || commitGdd) ? 4 : (apply ? 3 : 1));
+                                        g_screenOpenAutoPumpCount = autoPumpCount;
+                                        if (g_mouseEventHandle) SetEvent(g_mouseEventHandle);
+                                        if (commitSync) {
+                                            DWORD_PTR dispatchResult = 0;
+                                            LONG seq = InterlockedIncrement(&g_pendingUiDispatchSeq);
+                                            DWORD err = 0;
+
+                                            g_screenOpenTraceStage = 1;
+                                            if (!g_gameHwnd) {
+                                                send(s, "RESP:screencommitsync nohwnd\n", 29, 0);
+                                                hookLog("UIWORK: sync reason=%s FAILED no hwnd", cmdName);
+                                            } else if (SendMessageTimeoutA(g_gameHwnd, WM_APP_PENDING_UI, (WPARAM)seq, 0,
+                                                                          SMTO_ABORTIFHUNG | SMTO_BLOCK,
+                                                                          5000, &dispatchResult)) {
+                                                char resp[128];
+                                                snprintf(resp, sizeof(resp),
+                                                         "RESP:%s done stage=%ld\n",
+                                                         cmdName, (long)g_screenOpenTraceStage);
+                                                send(s, resp, (int)strlen(resp), 0);
+                                                hookLog("UIWORK: sync reason=%s seq=%ld done stage=%ld result=%lu",
+                                                        cmdName, (long)seq, (long)g_screenOpenTraceStage,
+                                                        (unsigned long)dispatchResult);
+                                            } else {
+                                                char resp[160];
+                                                err = GetLastError();
+                                                snprintf(resp, sizeof(resp),
+                                                         "RESP:%s timeout err=%lu stage=%ld\n",
+                                                         cmdName, (unsigned long)err, (long)g_screenOpenTraceStage);
+                                                send(s, resp, (int)strlen(resp), 0);
+                                                hookLog("UIWORK: sync reason=%s seq=%ld timeout err=%lu stage=%ld",
+                                                        cmdName, (long)seq, (unsigned long)err,
+                                                        (long)g_screenOpenTraceStage);
+                                            }
+                                        } else {
+                                            if (!commitGdd)
+                                                postPendingUiWork(cmdName);
+                                            {
+                                                char resp[128];
+                                                snprintf(resp, sizeof(resp),
+                                                         "RESP:%s armed name=%s addr=0x%08X pump=%ld\n",
+                                                         cmdName,
+                                                         name, (unsigned)screenAddr, (long)autoPumpCount);
+                                                send(s, resp, (int)strlen(resp), 0);
+                                            }
+                                        }
+                                        hookLog("TCP cmd: %s name=%s addr=0x%08X pump=%ld post=%s",
+                                                cmdName,
+                                                name,
+                                                (unsigned)screenAddr,
+                                                (long)autoPumpCount,
+                                                commitSync ? "sync" : (commitGdd ? "gdd" : "ui"));
+                                    }
+
                                 } else if (strncmp(buf, "menupump", 8) == 0) {
                                     LONG pumpCount = 1;
 
@@ -3472,6 +5297,7 @@ static DWORD WINAPI wakeThreadProc(LPVOID param) {
                                     g_menuPumpCount = clampMenuPumpCount(pumpCount);
                                     g_menuPumpPending = 1;
                                     if (g_mouseEventHandle) SetEvent(g_mouseEventHandle);
+                                    postPendingUiWork("menupump");
                                     hookLog("TCP cmd: menupump count=%ld", (long)g_menuPumpCount);
                                     {
                                         char resp[96];
@@ -3492,6 +5318,7 @@ static DWORD WINAPI wakeThreadProc(LPVOID param) {
                                     LONG forceClear18 = strstr(buf, "clear18") ? 1 : 0;
                                     LONG forceClear2C = strstr(buf, "clear2c") ? 1 : 0;
                                     LONG arg5FromItem24 = strstr(buf, "a5item24") ? 1 : 0;
+                                    LONG autoFlush = strstr(buf, "flush") ? 1 : 0;
                                     int parsed = sscanf(buf, "menuwrap %63s %ld %ld %ld %ld",
                                                         targetName, &arg1, &arg2, &arg3, &arg5);
 
@@ -3514,9 +5341,10 @@ static DWORD WINAPI wakeThreadProc(LPVOID param) {
                                         g_menuWrapForceClear18 = forceClear18;
                                         g_menuWrapForceClear2C = forceClear2C;
                                         g_menuWrapArg5FromItem24 = arg5FromItem24;
+                                        g_menuWrapAutoFlush = autoFlush;
                                         g_menuWrapPending = 1;
                                         if (g_mouseEventHandle) SetEvent(g_mouseEventHandle);
-                                        hookLog("TCP cmd: menuwrap target=%s a1=%ld a2=%ld a3=%ld a5=%ld payload=%ld clear18=%ld clear2c=%ld a5item24=%ld",
+                                        hookLog("TCP cmd: menuwrap target=%s a1=%ld a2=%ld a3=%ld a5=%ld payload=%ld clear18=%ld clear2c=%ld a5item24=%ld flush=%ld",
                                                 menuTargetName(target),
                                                 (long)arg1,
                                                 (long)arg2,
@@ -3525,11 +5353,12 @@ static DWORD WINAPI wakeThreadProc(LPVOID param) {
                                                 (long)usePayload,
                                                 (long)forceClear18,
                                                 (long)forceClear2C,
-                                                (long)arg5FromItem24);
+                                                (long)arg5FromItem24,
+                                                (long)autoFlush);
                                         {
                                             char resp[192];
                                             snprintf(resp, sizeof(resp),
-                                                "RESP:menuwrap armed target=%s a1=%ld a2=%ld a3=%ld a5=%ld payload=%ld clear18=%ld clear2c=%ld a5item24=%ld\n",
+                                                "RESP:menuwrap armed target=%s a1=%ld a2=%ld a3=%ld a5=%ld payload=%ld clear18=%ld clear2c=%ld a5item24=%ld flush=%ld\n",
                                                 menuTargetName(target),
                                                 (long)arg1,
                                                 (long)arg2,
@@ -3538,7 +5367,83 @@ static DWORD WINAPI wakeThreadProc(LPVOID param) {
                                                 (long)usePayload,
                                                 (long)forceClear18,
                                                 (long)forceClear2C,
-                                                (long)arg5FromItem24);
+                                                (long)arg5FromItem24,
+                                                (long)autoFlush);
+                                            send(s, resp, (int)strlen(resp), 0);
+                                        }
+                                    }
+
+                                } else if (strncmp(buf, "menuitemkey", 11) == 0) {
+                                    char targetName[64] = {0};
+                                    LONG target = MENU_TARGET_NONE;
+                                    LONG arg1 = 0;
+                                    LONG arg2 = 0;
+                                    LONG arg3 = 0;
+                                    LONG autoFlush = strstr(buf, "flush") ? 1 : 0;
+                                    int parsed = sscanf(buf, "menuitemkey %63s %ld %ld %ld",
+                                                        targetName, &arg1, &arg2, &arg3);
+
+                                    if (_stricmp(targetName, "singleplayer") == 0 ||
+                                        _stricmp(targetName, "single-player") == 0) {
+                                        target = MENU_TARGET_SINGLE_PLAYER;
+                                    }
+
+                                    if (target == MENU_TARGET_NONE || parsed < 4) {
+                                        const char *resp = "RESP:menuitemkey invalid target/args\n";
+                                        send(s, resp, (int)strlen(resp), 0);
+                                        hookLog("TCP cmd: menuitemkey invalid [%s]", buf);
+                                    } else {
+                                        g_menuItemKeyTarget = target;
+                                        g_menuItemKeyArg1 = arg1;
+                                        g_menuItemKeyArg2 = arg2;
+                                        g_menuItemKeyArg3 = arg3;
+                                        g_menuItemKeyAutoFlush = autoFlush;
+                                        g_menuItemKeyPending = 1;
+                                        if (g_mouseEventHandle) SetEvent(g_mouseEventHandle);
+                                        hookLog("TCP cmd: menuitemkey target=%s a1=%ld a2=%ld a3=%ld flush=%ld",
+                                                menuTargetName(target),
+                                                (long)arg1,
+                                                (long)arg2,
+                                                (long)arg3,
+                                                (long)autoFlush);
+                                        {
+                                            char resp[192];
+                                            snprintf(resp, sizeof(resp),
+                                                "RESP:menuitemkey armed target=%s a1=%ld a2=%ld a3=%ld flush=%ld\n",
+                                                menuTargetName(target),
+                                                (long)arg1,
+                                                (long)arg2,
+                                                (long)arg3,
+                                                (long)autoFlush);
+                                            send(s, resp, (int)strlen(resp), 0);
+                                        }
+                                    }
+
+                                } else if (strncmp(buf, "menuflush", 9) == 0) {
+                                    char targetName[64] = {0};
+                                    LONG target = MENU_TARGET_NONE;
+                                    int parsed = sscanf(buf, "menuflush %63s", targetName);
+
+                                    if (_stricmp(targetName, "singleplayer") == 0 ||
+                                        _stricmp(targetName, "single-player") == 0) {
+                                        target = MENU_TARGET_SINGLE_PLAYER;
+                                    }
+
+                                    if (target == MENU_TARGET_NONE || parsed < 1) {
+                                        const char *resp = "RESP:menuflush invalid target\n";
+                                        send(s, resp, (int)strlen(resp), 0);
+                                        hookLog("TCP cmd: menuflush invalid [%s]", buf);
+                                    } else {
+                                        g_menuItemFlushTarget = target;
+                                        g_menuItemFlushPending = 1;
+                                        if (g_mouseEventHandle) SetEvent(g_mouseEventHandle);
+                                        hookLog("TCP cmd: menuflush target=%s",
+                                                menuTargetName(target));
+                                        {
+                                            char resp[128];
+                                            snprintf(resp, sizeof(resp),
+                                                "RESP:menuflush armed target=%s\n",
+                                                menuTargetName(target));
                                             send(s, resp, (int)strlen(resp), 0);
                                         }
                                     }
@@ -3869,14 +5774,14 @@ static DWORD WINAPI wakeThreadProc(LPVOID param) {
                                     pos += snprintf(out+pos, sizeof(out)-pos, " (%d found)\n", found);
                                     send(s, out, pos, 0);
                                 } else if (strncmp(buf, "fulllog", 7) == 0) {
-                                    /* Return last 8KB of hook log */
+                                    /* Return last 32KB of hook log */
                                     FILE *lf = fopen("dinput-hook.log", "r");
                                     if (lf) {
                                         fseek(lf, 0, SEEK_END);
                                         long sz = ftell(lf);
-                                        long start = sz > 8192 ? sz - 8192 : 0;
+                                        long start = sz > 32768 ? sz - 32768 : 0;
                                         fseek(lf, start, SEEK_SET);
-                                        char logbuf[8300];
+                                        char logbuf[33024];
                                         int nread = (int)fread(logbuf, 1, sizeof(logbuf)-1, lf);
                                         logbuf[nread] = 0;
                                         fclose(lf);
@@ -3884,14 +5789,14 @@ static DWORD WINAPI wakeThreadProc(LPVOID param) {
                                         hookLog("TCP: sent %d bytes of fulllog", nread);
                                     }
                                 } else if (strncmp(buf, "log", 3) == 0) {
-                                    /* Return last 2KB of hook log */
+                                    /* Return last 8KB of hook log */
                                     FILE *lf = fopen("dinput-hook.log", "r");
                                     if (lf) {
                                         fseek(lf, 0, SEEK_END);
                                         long sz = ftell(lf);
-                                        long start = sz > 2048 ? sz - 2048 : 0;
+                                        long start = sz > 8192 ? sz - 8192 : 0;
                                         fseek(lf, start, SEEK_SET);
-                                        char logbuf[2100];
+                                        char logbuf[8304];
                                         int nread = (int)fread(logbuf, 1, sizeof(logbuf)-1, lf);
                                         logbuf[nread] = 0;
                                         fclose(lf);
@@ -4455,11 +6360,21 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
     switch (fdwReason) {
     case DLL_PROCESS_ATTACH:
         DisableThreadLibraryCalls(hinstDLL);
+        if (g_logFile) {
+            fclose(g_logFile);
+            g_logFile = NULL;
+        }
+        g_logFile = fopen("dinput-hook.log", "w");
         hookLog("=== dinput-hook.dll loaded into process ===");
         break;
 
     case DLL_PROCESS_DETACH:
         hookLog("=== dinput-hook.dll unloading ===");
+        disarmMenuWatchpoint("detach");
+        if (g_menuWatchVehHandle) {
+            RemoveVectoredExceptionHandler(g_menuWatchVehHandle);
+            g_menuWatchVehHandle = NULL;
+        }
         /* Stop wake thread */
         if (g_wakeThread) {
             InterlockedExchange(&g_wakeThreadStop, 1);
