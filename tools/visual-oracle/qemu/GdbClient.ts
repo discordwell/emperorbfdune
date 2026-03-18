@@ -34,8 +34,11 @@ export class GdbClient {
   async connect(host: string, port: number): Promise<void> {
     return new Promise((resolve, reject) => {
       this.socket = new net.Socket();
-      this.socket.connect(port, host, () => resolve());
-      this.socket.on('error', reject);
+      this.socket.connect(port, host, () => {
+        this.socket!.removeListener('error', reject);
+        resolve();
+      });
+      this.socket.once('error', reject);
     });
   }
 
@@ -127,9 +130,7 @@ export class GdbClient {
 
   /** Write a 32-bit little-endian value to guest memory. */
   async writeDword(addr: number, val: number): Promise<boolean> {
-    const hex = val.toString(16).padStart(8, '0');
-    const le = hex[6] + hex[7] + hex[4] + hex[5] + hex[2] + hex[3] + hex[0] + hex[1];
-    const resp = await this.send(`M${addr.toString(16)},4:${le}`);
+    const resp = await this.send(`M${addr.toString(16)},4:${this.toLEHex(val)}`);
     return resp === 'OK';
   }
 

@@ -115,6 +115,63 @@ describe('GdbClient', () => {
       const ok = await gdb.writeDword(0x818930, 0xDEADBEEF);
       expect(ok).toBe(false);
     });
+
+    it('handles values with bit 31 set (> 0x7FFFFFFF)', async () => {
+      currentSocket.write.mockImplementationOnce((data: string) => {
+        // 0xFFFFFFFF in LE = ffffffff
+        expect(data).toContain('M818930,4:ffffffff');
+        setTimeout(() => currentSocket.emit('data', Buffer.from(gdbReply('OK'))), 5);
+      });
+      const ok = await gdb.writeDword(0x818930, 0xFFFFFFFF);
+      expect(ok).toBe(true);
+    });
+
+    it('handles 0xCAFEBABE correctly', async () => {
+      currentSocket.write.mockImplementationOnce((data: string) => {
+        // 0xCAFEBABE → LE: be ba fe ca
+        expect(data).toContain('M818934,4:bebafeca');
+        setTimeout(() => currentSocket.emit('data', Buffer.from(gdbReply('OK'))), 5);
+      });
+      const ok = await gdb.writeDword(0x818934, 0xCAFEBABE);
+      expect(ok).toBe(true);
+    });
+  });
+
+  describe('writeBytes', () => {
+    it('writes raw hex bytes to address', async () => {
+      currentSocket.write.mockImplementationOnce((data: string) => {
+        expect(data).toContain('M818900,5:31c0c20400');
+        setTimeout(() => currentSocket.emit('data', Buffer.from(gdbReply('OK'))), 5);
+      });
+      const ok = await gdb.writeBytes(0x818900, '31c0c20400');
+      expect(ok).toBe(true);
+    });
+  });
+
+  describe('readBytes', () => {
+    it('reads raw hex bytes from address', async () => {
+      autoReply('c7058930');
+      const result = await gdb.readBytes(0x8189c0, 4);
+      expect(result).toBe('c7058930');
+    });
+  });
+
+  describe('interrupt', () => {
+    it('sends break character and waits for stop reply', async () => {
+      currentSocket.write.mockImplementationOnce((data: string) => {
+        expect(data).toBe('\x03');
+        setTimeout(() => currentSocket.emit('data', Buffer.from(gdbReply('T02'))), 5);
+      });
+      const resp = await gdb.interrupt(5000);
+      expect(resp).toBe('T02');
+    });
+  });
+
+  describe('continueAsync', () => {
+    it('sends continue without waiting for reply', () => {
+      gdb.continueAsync();
+      expect(currentSocket.write).toHaveBeenCalledWith(`$c#${checksum('c')}`);
+    });
   });
 
   describe('setBreakpoint / removeBreakpoint', () => {
