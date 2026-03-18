@@ -168,7 +168,7 @@ export class QemuController {
     this.qmpSocket?.write(JSON.stringify(obj) + '\n');
   }
 
-  private async qmpCommand(execute: string, args?: Record<string, unknown>): Promise<unknown> {
+  async qmpCommand(execute: string, args?: Record<string, unknown>): Promise<unknown> {
     if (!this.qmpReady) throw new Error('QMP not ready');
 
     return new Promise((resolve, reject) => {

@@ -14,7 +14,7 @@
 
 import path from 'node:path';
 import fs from 'node:fs';
-import * as net from 'node:net';
+import { GdbClient } from './GdbClient.js';
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../..');
 let QemuController: any;
@@ -28,149 +28,6 @@ async function loadDeps() {
   QemuController = qmod.QemuController;
 }
 function sleep(ms: number): Promise<void> { return new Promise((r) => setTimeout(r, ms)); }
-
-class GdbClient {
-  private socket: net.Socket | null = null;
-  async connect(host: string, port: number): Promise<void> {
-    return new Promise((resolve, reject) => {
-      this.socket = new net.Socket();
-      this.socket.connect(port, host, () => resolve());
-      this.socket.on('error', reject);
-    });
-  }
-  private checksum(s: string): string {
-    let sum = 0;
-    for (let i = 0; i < s.length; i++) sum += s.charCodeAt(i);
-    return (sum & 0xFF).toString(16).padStart(2, '0');
-  }
-  async send(cmd: string, timeout = 5000): Promise<string> {
-    return new Promise((resolve) => {
-      if (!this.socket) { resolve(''); return; }
-      let buf = '';
-      const handler = (chunk: Buffer) => {
-        buf += chunk.toString();
-        const m = buf.match(/\$([^#]*)#[0-9a-fA-F]{2}/);
-        if (m) { this.socket!.removeListener('data', handler); resolve(m[1]); }
-      };
-      this.socket.on('data', handler);
-      this.socket.write(`$${cmd}#${this.checksum(cmd)}`);
-      setTimeout(() => { this.socket?.removeListener('data', handler); resolve(buf); }, timeout);
-    });
-  }
-  async continueAndWait(timeout = 120000): Promise<string> {
-    return new Promise((resolve) => {
-      if (!this.socket) { resolve(''); return; }
-      let buf = '';
-      const handler = (chunk: Buffer) => {
-        buf += chunk.toString();
-        const m = buf.match(/\$([TSW][0-9a-fA-F]{2}[^#]*)#[0-9a-fA-F]{2}/);
-        if (m) { this.socket!.removeListener('data', handler); resolve(m[1]); }
-      };
-      this.socket.on('data', handler);
-      this.socket.write(`$c#${this.checksum('c')}`);
-      setTimeout(() => { this.socket?.removeListener('data', handler); resolve(buf); }, timeout);
-    });
-  }
-  async singleStep(timeout = 10000): Promise<string> {
-    return new Promise((resolve) => {
-      if (!this.socket) { resolve(''); return; }
-      let buf = '';
-      const handler = (chunk: Buffer) => {
-        buf += chunk.toString();
-        const m = buf.match(/\$([TSW][0-9a-fA-F]{2}[^#]*)#[0-9a-fA-F]{2}/);
-        if (m) { this.socket!.removeListener('data', handler); resolve(m[1]); }
-      };
-      this.socket.on('data', handler);
-      this.socket.write(`$s#${this.checksum('s')}`);
-      setTimeout(() => { this.socket?.removeListener('data', handler); resolve(buf); }, timeout);
-    });
-  }
-  continueAsync(): void {
-    this.socket?.write(`$c#${this.checksum('c')}`);
-  }
-  async interrupt(timeout = 15000): Promise<string> {
-    return new Promise((resolve) => {
-      if (!this.socket) { resolve(''); return; }
-      let buf = '';
-      const handler = (chunk: Buffer) => {
-        buf += chunk.toString();
-        const m = buf.match(/\$([TSW][0-9a-fA-F]{2}[^#]*)#[0-9a-fA-F]{2}/);
-        if (m) { this.socket!.removeListener('data', handler); resolve(m[1]); }
-      };
-      this.socket.on('data', handler);
-      this.socket.write('\x03');
-      setTimeout(() => { this.socket?.removeListener('data', handler); resolve(buf); }, timeout);
-    });
-  }
-  async readDword(addr: number): Promise<number> {
-    const resp = await this.send(`m${addr.toString(16)},4`);
-    if (resp.startsWith('E') || resp.length < 8) return -1;
-    const bytes = resp.match(/.{2}/g)!;
-    return parseInt(bytes[3] + bytes[2] + bytes[1] + bytes[0], 16);
-  }
-  async writeDword(addr: number, val: number): Promise<boolean> {
-    const hex = val.toString(16).padStart(8, '0');
-    const le = hex[6] + hex[7] + hex[4] + hex[5] + hex[2] + hex[3] + hex[0] + hex[1];
-    const resp = await this.send(`M${addr.toString(16)},4:${le}`);
-    return resp === 'OK';
-  }
-  async writeBytes(addr: number, hexBytes: string): Promise<boolean> {
-    const resp = await this.send(`M${addr.toString(16)},${(hexBytes.length / 2).toString(16)}:${hexBytes}`);
-    return resp === 'OK';
-  }
-  async readBytes(addr: number, len: number): Promise<string> {
-    return this.send(`m${addr.toString(16)},${len.toString(16)}`);
-  }
-  async readRegisters(): Promise<string> { return this.send('g'); }
-  async writeRegister(regNum: number, hexValue: string): Promise<boolean> {
-    const resp = await this.send(`P${regNum.toString(16)}=${hexValue}`);
-    return resp === 'OK';
-  }
-  async setBreakpoint(addr: number): Promise<boolean> {
-    const resp = await this.send(`Z0,${addr.toString(16)},1`);
-    return resp === 'OK';
-  }
-  async removeBreakpoint(addr: number): Promise<boolean> {
-    const resp = await this.send(`z0,${addr.toString(16)},1`);
-    return resp === 'OK';
-  }
-  async setHwBreakpoint(addr: number): Promise<boolean> {
-    const resp = await this.send(`Z1,${addr.toString(16)},1`);
-    return resp === 'OK';
-  }
-  async removeHwBreakpoint(addr: number): Promise<boolean> {
-    const resp = await this.send(`z1,${addr.toString(16)},1`);
-    return resp === 'OK';
-  }
-  parseRegisters(hex: string): Record<string, number> {
-    const regs: Record<string, number> = {};
-    const names = ['eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi', 'eip', 'eflags'];
-    for (let i = 0; i < names.length; i++) {
-      const offset = i * 8;
-      const leHex = hex.substring(offset, offset + 8);
-      if (!leHex || leHex.length < 8) continue;
-      const bytes = leHex.match(/.{2}/g)!;
-      regs[names[i]] = parseInt(bytes[3] + bytes[2] + bytes[1] + bytes[0], 16);
-    }
-    return regs;
-  }
-  toLEHex(val: number): string {
-    const hex = (val >>> 0).toString(16).padStart(8, '0');
-    return hex[6] + hex[7] + hex[4] + hex[5] + hex[2] + hex[3] + hex[0] + hex[1];
-  }
-  async readString(addr: number, maxLen = 64): Promise<string> {
-    const hex = await this.readBytes(addr, maxLen);
-    if (hex.startsWith('E')) return '(error)';
-    const buf = Buffer.from(hex, 'hex');
-    const end = buf.indexOf(0);
-    return buf.subarray(0, end === -1 ? maxLen : end).toString('ascii');
-  }
-  async detach(): Promise<void> {
-    try { await this.send('D'); } catch {}
-    this.socket?.destroy();
-    this.socket = null;
-  }
-}
 
 const RA = 0x4D3718;
 const RA5 = RA + 5;
@@ -209,6 +66,13 @@ function movEax(sc: number[], val: number): void { sc.push(0xB8, ...dwordLE(val)
 function callEax(sc: number[]): void { sc.push(0xFF, 0xD0); }
 /** mov dword [addr], imm32 */
 function movToMem(sc: number[], addr: number, val: number): void { sc.push(0xC7, 0x05, ...dwordLE(addr), ...dwordLE(val)); }
+
+/** Read a dword or throw with a descriptive message. */
+async function readDwordOrThrow(gdb: GdbClient, addr: number, label: string): Promise<number> {
+  const val = await gdb.readDword(addr);
+  if (val === null) throw new Error(`Failed to read ${label} at 0x${addr.toString(16)}`);
+  return val;
+}
 
 async function main() {
   await loadDeps();
@@ -250,22 +114,27 @@ async function main() {
     console.log('In game context');
 
     // Resolve USER32 imports
-    const eLfanew = await gdb.readDword(0x400000 + 0x3C);
-    const importRVA = await gdb.readDword(0x400000 + eLfanew + 24 + 96 + 8);
+    const eLfanew = await readDwordOrThrow(gdb, 0x400000 + 0x3C, 'e_lfanew');
+    const importRVA = await readDwordOrThrow(gdb, 0x400000 + eLfanew + 24 + 96 + 8, 'import directory RVA');
     const importVA = 0x400000 + importRVA;
     let getMessageA = 0, dispatchMessageA = 0, translateMessage = 0;
     for (let i = 0; i < 30; i++) {
       const d = importVA + i * 20;
-      const o = await gdb.readDword(d); const n = await gdb.readDword(d + 12); const f = await gdb.readDword(d + 16);
-      if (n === 0 && f === 0) break;
+      const o = await gdb.readDword(d);
+      const n = await gdb.readDword(d + 12);
+      const f = await gdb.readDword(d + 16);
+      if (n === null || f === null || (n === 0 && f === 0)) break;
+      if (o === null) continue;
       const dll = await gdb.readString(0x400000 + n);
       if (dll.toLowerCase().includes('user32')) {
         const ia = 0x400000 + f; const it = 0x400000 + o;
         for (let j = 0; j < 200; j++) {
           const ie = await gdb.readDword(it + j * 4);
-          if (ie === 0) break; if ((ie >>> 31) === 1) continue;
+          if (ie === null || ie === 0) break;
+          if ((ie >>> 31) === 1) continue;
           const fn = await gdb.readString(0x400000 + ie + 2);
           const rv = await gdb.readDword(ia + j * 4);
+          if (rv === null) continue;
           if (fn === 'GetMessageA') getMessageA = rv;
           if (fn === 'DispatchMessageA') dispatchMessageA = rv;
           if (fn === 'TranslateMessage') translateMessage = rv;
@@ -321,7 +190,7 @@ async function main() {
 
     // selectFn
     console.log('\n=== selectFn ===');
-    const screenAddr = await gdb.readDword(0x818718);
+    const screenAddr = await readDwordOrThrow(gdb, 0x818718, 'screen manager');
     await gdb.writeDword(screenAddr + 0x18, 0);
     await gdb.writeDword(0x817C0C, screenAddr);
     const sa = regs1.esp - 0x1000;
@@ -366,7 +235,7 @@ async function main() {
           continue;
         }
         const exitCode = await gdb.readDword(regs.esp + 4);
-        console.log(`[${attempt}] GAME ExitProcess code=0x${(exitCode>>>0).toString(16)} [${elapsed}s]`);
+        console.log(`[${attempt}] GAME ExitProcess code=0x${((exitCode ?? 0)>>>0).toString(16)} [${elapsed}s]`);
         hitType = 'exit';
         break;
       } else {
@@ -403,7 +272,7 @@ async function main() {
     // Single-step: DEADBEEF write
     await gdb.singleStep();
     const bc1 = await gdb.readDword(BREADCRUMB_ADDR);
-    console.log(`After DEADBEEF step: bc1=0x${(bc1>>>0).toString(16)}`);
+    console.log(`After DEADBEEF step: bc1=0x${((bc1 ?? 0)>>>0).toString(16)}`);
 
     if (bc1 !== 0xDEADBEEF) {
       console.log('DEADBEEF write failed!');
@@ -429,11 +298,11 @@ async function main() {
     if (openEip === CAFE_BP_ADDR) {
       // CAFEBABE BP fired — all calls completed!
       const bc2 = await gdb.readDword(BREADCRUMB_ADDR + 4);
-      console.log(`bc2=0x${(bc2>>>0).toString(16)}`);
+      console.log(`bc2=0x${((bc2 ?? 0)>>>0).toString(16)}`);
 
       // Read current screen pointer — did it change?
       const newScreen = await gdb.readDword(APP_ADDR);
-      console.log(`Screen after openScreen: 0x${(newScreen>>>0).toString(16)}`);
+      console.log(`Screen after openScreen: 0x${((newScreen ?? 0)>>>0).toString(16)}`);
 
       console.log('\n*** ALL openScreen CALLS COMPLETED! ***');
 
@@ -466,17 +335,11 @@ async function main() {
 
       if (gc.startsWith('E')) {
         console.log('Process likely dead (can\'t read game memory)');
-        // Try reading from a known kernel address to confirm we're just in wrong context
-        console.log('Setting SW BP in game code to force context switch...');
-        // Use the game's main loop address or a frequently-hit location
-        // Actually, if the process is dead, no game code BP will fire
-        // Let's just check breadcrumbs
       } else {
         // In game context — check what went wrong
         const curBc1 = await gdb.readDword(BREADCRUMB_ADDR);
         const curBc2 = await gdb.readDword(BREADCRUMB_ADDR + 4);
-        const curEip = openEip;
-        console.log(`State: bc1=0x${(curBc1>>>0).toString(16)} bc2=0x${(curBc2>>>0).toString(16)} EIP=0x${curEip.toString(16)}`);
+        console.log(`State: bc1=0x${((curBc1 ?? 0)>>>0).toString(16)} bc2=0x${((curBc2 ?? 0)>>>0).toString(16)} EIP=0x${openEip.toString(16)}`);
 
         // Single-step a few times to see where we are
         for (let i = 0; i < 5; i++) {
