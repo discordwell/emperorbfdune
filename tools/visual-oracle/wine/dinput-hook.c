@@ -281,6 +281,9 @@ static volatile int g_forceY = 0;
  * Returns VK_LBUTTON as pressed during injection BTN_DOWN/BTN_HOLD phases. */
 static volatile LONG g_gasCallCount = 0;
 
+/* Pending callmode: game mode handler address to call from GetDeviceData (game thread) */
+static volatile DWORD g_pendingCallmode = 0;
+
 /* VK code diagnostics: track which VK codes the game polls */
 #define GAS_VK_SLOTS 16
 static volatile int g_gasVkCodes[GAS_VK_SLOTS];
@@ -4685,6 +4688,17 @@ static HRESULT WINAPI hookedMouseGetDeviceData(
         processPendingUiWork("gdd-direct");
     }
 
+    /* Call pending mode handler from game thread context */
+    if (g_pendingCallmode) {
+        typedef void (__stdcall *ModeHandler_t)(int);
+        DWORD addr = g_pendingCallmode;
+        g_pendingCallmode = 0;
+        hookLog("GDD: calling mode handler at 0x%08X from game thread", (unsigned)addr);
+        ModeHandler_t fn = (ModeHandler_t)(uintptr_t)addr;
+        fn(0);
+        hookLog("GDD: mode handler 0x%08X returned", (unsigned)addr);
+    }
+
     /* Signal event handle to keep game polling */
     if (g_mouseEventHandle) SetEvent(g_mouseEventHandle);
 
@@ -6531,6 +6545,108 @@ static DWORD WINAPI wakeThreadProc(LPVOID param) {
                                     }
                                     pos += snprintf(out+pos, sizeof(out)-pos, "\n");
                                     send(s, out, pos, 0);
+                                } else if (strncmp(buf, "campaigninit", 12) == 0) {
+                                    /* Initialize campaign state if NULL.
+                                     * Allocates RWX memory, creates fake vtable with ret-0 stubs,
+                                     * initializes campaign state object, sets [0x808CDC].
+                                     * Usage: campaigninit [house] [difficulty]
+                                     *   house: 0=Atreides, 1=Ordos, 2=Harkonnen (default 0)
+                                     *   difficulty: 0=Easy, 1=Normal, 2=Hard (default 1) */
+                                    int house = 0, diff = 1;
+                                    sscanf(buf + 12, "%d %d", &house, &diff);
+
+                                    volatile DWORD *pState = (volatile DWORD *)0x808CDC;
+                                    if (*pState != 0) {
+                                        char resp[128];
+                                        snprintf(resp, sizeof(resp),
+                                            "RESP:campaigninit already=0x%08X\n", (unsigned)*pState);
+                                        send(s, resp, (int)strlen(resp), 0);
+                                    } else {
+                                        /* Allocate 0x2000 bytes RWX for state + fake vtable + stubs */
+                                        void *mem = VirtualAlloc(NULL, 0x2000,
+                                            MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+                                        if (!mem) {
+                                            send(s, "RESP:campaigninit VirtualAlloc failed\n", 38, 0);
+                                        } else {
+                                            memset(mem, 0, 0x2000);
+                                            BYTE *base = (BYTE *)mem;
+
+                                            /* ret-0 stub at base+0x1000: xor eax,eax; ret */
+                                            base[0x1000] = 0x31; base[0x1001] = 0xC0;
+                                            base[0x1002] = 0xC3;
+                                            /* ret-4 stub at base+0x1010: xor eax,eax; ret 4 */
+                                            base[0x1010] = 0x31; base[0x1011] = 0xC0;
+                                            base[0x1012] = 0xC2; base[0x1013] = 0x04; base[0x1014] = 0x00;
+                                            /* ret-8 stub at base+0x1020: xor eax,eax; ret 8 */
+                                            base[0x1020] = 0x31; base[0x1021] = 0xC0;
+                                            base[0x1022] = 0xC2; base[0x1023] = 0x08; base[0x1024] = 0x00;
+
+                                            /* Fake vtable at base+0x1100: 64 entries all pointing to ret-0 */
+                                            DWORD *fakeVt = (DWORD *)(base + 0x1100);
+                                            DWORD retStub = (DWORD)(base + 0x1000);
+                                            for (int i = 0; i < 64; i++) fakeVt[i] = retStub;
+
+                                            /* State object at base+0x0000 */
+                                            DWORD *state = (DWORD *)base;
+                                            state[0] = (DWORD)(base + 0x1100);  /* vtable → fake vtable */
+
+                                            /* Difficulty ptrs: Easy=0x5C7FD8, Normal=0x5C7FD0, Hard=0x5C7FC8 */
+                                            DWORD diffPtrs[3] = {0x5C7FD8, 0x5C7FD0, 0x5C7FC8};
+                                            if (diff < 0 || diff > 2) diff = 1;
+                                            *(DWORD *)(base + 0xD38) = diffPtrs[diff];
+
+                                            /* House index at +0x52C */
+                                            if (house < 0 || house > 2) house = 0;
+                                            *(DWORD *)(base + 0x52C) = house;
+
+                                            /* Initialize some fields that campaign code may read:
+                                             * +0x530 through +0x548: init to -999 (0xFFFFFC19) per RE */
+                                            for (int i = 0; i < 7; i++)
+                                                *(DWORD *)(base + 0x530 + i*4) = 0xFFFFFC19;
+                                            *(DWORD *)(base + 0x54C) = 0xFFFFFFFF; /* -1 */
+
+                                            /* Set global pointer */
+                                            *pState = (DWORD)base;
+
+                                            char resp[256];
+                                            snprintf(resp, sizeof(resp),
+                                                "RESP:campaigninit ok addr=0x%08X house=%d diff=%d vt=0x%08X\n",
+                                                (unsigned)(DWORD)base, house, diff,
+                                                (unsigned)(DWORD)(base + 0x1100));
+                                            send(s, resp, (int)strlen(resp), 0);
+                                            hookLog("TCP: campaigninit addr=0x%08X house=%d diff=%d",
+                                                    (unsigned)(DWORD)base, house, diff);
+                                        }
+                                    }
+
+                                } else if (strncmp(buf, "callmode ", 9) == 0) {
+                                    /* Call a game mode handler on the GAME THREAD.
+                                     * Sets g_pendingCallmode which is checked in GetDeviceData
+                                     * (game's main loop → correct thread context).
+                                     * Usage: callmode NormalCampaign */
+                                    DWORD fnAddr = 0;
+                                    char modeName[32] = {0};
+                                    sscanf(buf + 9, "%31s", modeName);
+                                    if (strcmp(modeName, "NormalCampaign") == 0) fnAddr = 0x4E5320;
+                                    else if (strcmp(modeName, "EasyCampaign") == 0) fnAddr = 0x4E52F0;
+                                    else if (strcmp(modeName, "HardCampaign") == 0) fnAddr = 0x4E5350;
+                                    else if (strcmp(modeName, "Single") == 0) fnAddr = 0x4E5090;
+                                    else if (strcmp(modeName, "Campaign") == 0) fnAddr = 0x4E52B0;
+
+                                    if (fnAddr) {
+                                        g_pendingCallmode = fnAddr;
+                                        hookLog("TCP: callmode %s armed (0x%08X)", modeName, (unsigned)fnAddr);
+                                        char resp[128];
+                                        snprintf(resp, sizeof(resp),
+                                            "RESP:callmode %s armed addr=0x%08X\n", modeName, (unsigned)fnAddr);
+                                        send(s, resp, (int)strlen(resp), 0);
+                                    } else {
+                                        char resp[128];
+                                        snprintf(resp, sizeof(resp),
+                                            "RESP:callmode unknown=%s\n", modeName);
+                                        send(s, resp, (int)strlen(resp), 0);
+                                    }
+
                                 } else if (strncmp(buf, "fulllog", 7) == 0) {
                                     /* Return last 32KB of hook log */
                                     FILE *lf = fopen("dinput-hook.log", "r");
@@ -6582,6 +6698,30 @@ static DWORD WINAPI wakeThreadProc(LPVOID param) {
 
     hookLog("Wake thread exiting");
     return 0;
+}
+
+/* Vectored Exception Handler: logs crash address to hook log */
+static LONG WINAPI crashVEH(EXCEPTION_POINTERS *ep) {
+    if (ep && ep->ExceptionRecord) {
+        DWORD code = ep->ExceptionRecord->ExceptionCode;
+        void *addr = ep->ExceptionRecord->ExceptionAddress;
+        if (code == 0xC0000005) { /* ACCESS_VIOLATION */
+            ULONG_PTR *info = ep->ExceptionRecord->ExceptionInformation;
+            hookLog("*** VEH ACCESS_VIOLATION at 0x%08X (EIP), %s addr 0x%08X",
+                    (unsigned)(uintptr_t)addr,
+                    info[0] ? "write" : "read",
+                    (unsigned)info[1]);
+            if (ep->ContextRecord) {
+                hookLog("*** VEH regs: EAX=0x%08X ECX=0x%08X EDX=0x%08X EBX=0x%08X ESP=0x%08X",
+                        (unsigned)ep->ContextRecord->Eax,
+                        (unsigned)ep->ContextRecord->Ecx,
+                        (unsigned)ep->ContextRecord->Edx,
+                        (unsigned)ep->ContextRecord->Ebx,
+                        (unsigned)ep->ContextRecord->Esp);
+            }
+        }
+    }
+    return EXCEPTION_CONTINUE_SEARCH; /* Let normal SEH handle it */
 }
 
 static void startWakeThread(void) {
@@ -7124,6 +7264,8 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
         }
         g_logFile = fopen("dinput-hook.log", "w");
         hookLog("=== dinput-hook.dll loaded into process ===");
+        AddVectoredExceptionHandler(1, crashVEH);
+        hookLog("Installed VEH crash handler");
         break;
 
     case DLL_PROCESS_DETACH:
