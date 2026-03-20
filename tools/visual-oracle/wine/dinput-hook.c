@@ -6832,6 +6832,38 @@ static LONG WINAPI crashVEH(EXCEPTION_POINTERS *ep) {
                     (unsigned)ep->ExceptionRecord->ExceptionInformation[1]);
         }
     }
+
+    /* Skip null-dereference instructions to keep the game alive.
+     * For faults at low addresses (<64KB) or DLL text (>0x70000000):
+     * advance EIP past the faulting instruction, zero EAX.
+     * This is a hack — the game state will be wrong, but it survives. */
+    if (ep && ep->ExceptionRecord && ep->ContextRecord &&
+        ep->ExceptionRecord->ExceptionCode == 0xC0000005) {
+        ULONG_PTR faultAddr = ep->ExceptionRecord->ExceptionInformation[1];
+        if (faultAddr < 0x10000 || faultAddr > 0x70000000) {
+            DWORD eip = ep->ContextRecord->Eip;
+            BYTE *code = (BYTE *)(uintptr_t)eip;
+            int skip = 0;
+            if (!IsBadReadPtr(code, 8)) {
+                BYTE modrm = code[1];
+                BYTE mod = modrm >> 6;
+                /* ModRM addressing: mod=01 → disp8 (3B), mod=10 → disp32 (6B), mod=00 → no disp (2B) */
+                if (mod == 1) skip = 3;       /* [reg+disp8] */
+                else if (mod == 2) skip = 6;  /* [reg+disp32] */
+                else if (mod == 0) skip = 2;  /* [reg] */
+                else skip = 2;                /* reg,reg — shouldn't fault */
+                /* Add prefix byte if present */
+                if (code[0] == 0x0F) skip++;  /* two-byte opcode prefix */
+            }
+            if (skip > 0 && skip <= 8) {
+                hookLog("VEH-SKIP: EIP=0x%08X +%d fault=0x%08X", (unsigned)eip, skip, (unsigned)faultAddr);
+                ep->ContextRecord->Eip += skip;
+                ep->ContextRecord->Eax = 0;
+                return EXCEPTION_CONTINUE_EXECUTION;
+            }
+        }
+    }
+
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
