@@ -614,3 +614,12 @@ CD disc data files:
 - pyBIG (GitHub): https://github.com/ClementJ18/pyBIG (BIG file library - for other Westwood games, NOT EBFD)
 - ModdingWiki: https://moddingwiki.shikadi.net/wiki/Category:Westwood_Studios_File_Formats (Westwood format docs)
 - XentaxWiki: http://wiki.xentax.com/index.php/Emperor_-_Battle_For_Dune_RFH (RFH format spec)
+
+### 2026-03-20T04:00UTC - Stub binkw32.dll + Container Crash Root Cause
+- **Built stub binkw32.dll** (51 exports, proper FakeBink handle) — prevents all Bink-specific crashes
+- **Disassembled selectFn (0x4B09E0)**: full call chain from selectFn → 0x5253D0 → 0x4D8560 → deferred message → 0x4D27A0 → 0x4D2DB0 → 0x4D3E60 (std::wstring container assign)
+- **Root cause of crash at 0x4D3FA0**: `std::wstring` container assignment function reads ESI from `[source_container + 0x14]` which contains 0x75A3B633 (Wine user32.dll internal address). This address was stored by Wine's WndProc/callback system into the game's screen manager container during runtime initialization. Zeroing the container doesn't help because the game rewrites it.
+- **The crash cascade** (7-9 ACCESS_VIOLATIONs) happens in the deferred message handler path, triggered by selectFn posting a screen transition message
+- **VEH-SKIP** catches all crashes and keeps the game alive, but the house selection logic doesn't complete (the crashing code IS the selection logic)
+- **Campaign map DID render briefly** in the test without VEH-SKIP (confirmed via screenshot) — the selectFn transition partially succeeds before crashing
+- **Stub binkw32.dll** is clean but doesn't fix this crash (it's not Bink-related)
