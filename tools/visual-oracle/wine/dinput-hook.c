@@ -6842,18 +6842,26 @@ static LONG WINAPI crashVEH(EXCEPTION_POINTERS *ep) {
         ULONG_PTR faultAddr = ep->ExceptionRecord->ExceptionInformation[1];
         if (faultAddr < 0x10000 || faultAddr > 0x70000000) {
             DWORD eip = ep->ContextRecord->Eip;
+
+            /* Special case: crash in the video processing loop at 0x4D3F96-0x4D3FAF.
+             * Instead of skipping one instruction (which re-crashes on next iteration),
+             * jump to the loop exit at 0x4D3FB1. */
+            if (eip >= 0x4D3F96 && eip <= 0x4D3FAF) {
+                hookLog("VEH-SKIP: LOOP EXIT EIP=0x%08X → 0x4D3FB1", (unsigned)eip);
+                ep->ContextRecord->Eip = 0x4D3FB1;
+                return EXCEPTION_CONTINUE_EXECUTION;
+            }
+
             BYTE *code = (BYTE *)(uintptr_t)eip;
             int skip = 0;
             if (!IsBadReadPtr(code, 8)) {
                 BYTE modrm = code[1];
                 BYTE mod = modrm >> 6;
-                /* ModRM addressing: mod=01 → disp8 (3B), mod=10 → disp32 (6B), mod=00 → no disp (2B) */
-                if (mod == 1) skip = 3;       /* [reg+disp8] */
-                else if (mod == 2) skip = 6;  /* [reg+disp32] */
-                else if (mod == 0) skip = 2;  /* [reg] */
-                else skip = 2;                /* reg,reg — shouldn't fault */
-                /* Add prefix byte if present */
-                if (code[0] == 0x0F) skip++;  /* two-byte opcode prefix */
+                if (mod == 1) skip = 3;
+                else if (mod == 2) skip = 6;
+                else if (mod == 0) skip = 2;
+                else skip = 2;
+                if (code[0] == 0x0F) skip++;
             }
             if (skip > 0 && skip <= 8) {
                 hookLog("VEH-SKIP: EIP=0x%08X +%d fault=0x%08X", (unsigned)eip, skip, (unsigned)faultAddr);
