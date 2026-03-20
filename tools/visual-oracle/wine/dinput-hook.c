@@ -6556,28 +6556,20 @@ static DWORD WINAPI wakeThreadProc(LPVOID param) {
                                             "RESP:campaigninit already=0x%08X\n", (unsigned)*pState);
                                         send(s, resp, (int)strlen(resp), 0);
                                     } else {
-                                        /* Allocate 0x2000 bytes RWX for state + fake vtable + stubs */
-                                        void *mem = VirtualAlloc(NULL, 0x2000,
-                                            MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+                                        /* HeapAlloc (not VirtualAlloc) so game heap ops don't crash */
+                                        void *mem = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, 0x2000);
                                         if (!mem) {
-                                            send(s, "RESP:campaigninit VirtualAlloc failed\n", 38, 0);
+                                            send(s, "RESP:campaigninit HeapAlloc failed\n", 35, 0);
                                         } else {
-                                            memset(mem, 0, 0x2000);
                                             BYTE *base = (BYTE *)mem;
 
-                                            /* ret-0 stub at base+0x1000: xor eax,eax; ret */
-                                            base[0x1000] = 0x31; base[0x1001] = 0xC0;
-                                            base[0x1002] = 0xC3;
-                                            /* ret-4 stub at base+0x1010: xor eax,eax; ret 4 */
-                                            base[0x1010] = 0x31; base[0x1011] = 0xC0;
-                                            base[0x1012] = 0xC2; base[0x1013] = 0x04; base[0x1014] = 0x00;
-                                            /* ret-8 stub at base+0x1020: xor eax,eax; ret 8 */
-                                            base[0x1020] = 0x31; base[0x1021] = 0xC0;
-                                            base[0x1022] = 0xC2; base[0x1023] = 0x08; base[0x1024] = 0x00;
+                                            /* Use Bink DLL stubs (already patched inline via pokevp)
+                                             * as vtable entries. The Bink ret-0 stub at 0x1000A2E0
+                                             * (patched to xor eax,eax; ret 4) is executable. */
+                                            DWORD retStub = 0x1000A2E0; /* patched Bink function = ret-0 */
 
-                                            /* Fake vtable at base+0x1100: 64 entries all pointing to ret-0 */
+                                            /* Fake vtable at base+0x1100: 64 entries → Bink ret-0 */
                                             DWORD *fakeVt = (DWORD *)(base + 0x1100);
-                                            DWORD retStub = (DWORD)(base + 0x1000);
                                             for (int i = 0; i < 64; i++) fakeVt[i] = retStub;
 
                                             /* State object at base+0x0000 */
@@ -6655,6 +6647,21 @@ static DWORD WINAPI wakeThreadProc(LPVOID param) {
                                     } else {
                                         send(s, "RESP:crashlog empty\n", 20, 0);
                                     }
+
+                                } else if (strncmp(buf, "fixscreenmgr", 12) == 0) {
+                                    /* Copy screen manager data from 0x818718 to 0x809830.
+                                     * All 674 mode handler calls use 0x809830 as ecx, but at
+                                     * runtime it's uninitialized. 0x818718 has the live data. */
+                                    volatile DWORD *src = (volatile DWORD *)0x818718;
+                                    volatile DWORD *dst = (volatile DWORD *)0x809830;
+                                    /* Copy 256 bytes (64 DWORDs) */
+                                    for (int i = 0; i < 64; i++) dst[i] = src[i];
+                                    hookLog("TCP: fixscreenmgr copied 256 bytes 0x818718 → 0x809830");
+                                    char resp[128];
+                                    snprintf(resp, sizeof(resp),
+                                        "RESP:fixscreenmgr done src[0]=0x%08X dst[0]=0x%08X\n",
+                                        (unsigned)src[0], (unsigned)dst[0]);
+                                    send(s, resp, (int)strlen(resp), 0);
 
                                 } else if (strncmp(buf, "openscreen ", 11) == 0) {
                                     /* Open a screen by name using the RUNTIME screen manager (0x818718).
