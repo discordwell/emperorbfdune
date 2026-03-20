@@ -1008,6 +1008,8 @@ typedef void (__attribute__((thiscall)) *MenuItemFlush_t)(void *self);
 #define TITLE_SCREEN_VTABLE 0x005D35C4
 #define WM_APP_PENDING_UI   (WM_APP + 0x52)
 #define TIMER_ID_NAV        0xD1CE
+#define TIMER_ID_CALLMODE   0xD1D0
+static VOID CALLBACK timerCallmodeCallback(HWND, UINT, UINT_PTR, DWORD);
 
 /* SetTimer-based navigation: fires TIMERPROC from game's DispatchMessage,
  * outside any DInput COM context. Avoids crashes from GDD-direct and
@@ -4346,6 +4348,9 @@ static HRESULT WINAPI hookedMouseGetDeviceData(
         }
     }
 
+    /* Callmode is now dispatched via SetTimer (see callmode TCP command).
+     * g_pendingCallmode is set by TCP, timer callback calls the function. */
+
     if (g_injState == INJ_IDLE || g_injState == INJ_COMPLETE)
         return hr;
     if (!rgdod || !pdwInOut || cbObjectData < DINPUT7_OBJECTDATA_SIZE)
@@ -4686,17 +4691,6 @@ static HRESULT WINAPI hookedMouseGetDeviceData(
     if (g_screenEntryPending) {
         hookLog("GDD: processing screenEntryPending from GetDeviceData hook");
         processPendingUiWork("gdd-direct");
-    }
-
-    /* Call pending mode handler from game thread context */
-    if (g_pendingCallmode) {
-        typedef void (__stdcall *ModeHandler_t)(int);
-        DWORD addr = g_pendingCallmode;
-        g_pendingCallmode = 0;
-        hookLog("GDD: calling mode handler at 0x%08X from game thread", (unsigned)addr);
-        ModeHandler_t fn = (ModeHandler_t)(uintptr_t)addr;
-        fn(0);
-        hookLog("GDD: mode handler 0x%08X returned", (unsigned)addr);
     }
 
     /* Signal event handle to keep game polling */
@@ -6633,9 +6627,10 @@ static DWORD WINAPI wakeThreadProc(LPVOID param) {
                                     else if (strcmp(modeName, "Single") == 0) fnAddr = 0x4E5090;
                                     else if (strcmp(modeName, "Campaign") == 0) fnAddr = 0x4E52B0;
 
-                                    if (fnAddr) {
+                                    if (fnAddr && g_gameHwnd) {
                                         g_pendingCallmode = fnAddr;
-                                        hookLog("TCP: callmode %s armed (0x%08X)", modeName, (unsigned)fnAddr);
+                                        SetTimer(g_gameHwnd, TIMER_ID_CALLMODE, 50, timerCallmodeCallback);
+                                        hookLog("TCP: callmode %s armed via timer (0x%08X)", modeName, (unsigned)fnAddr);
                                         char resp[128];
                                         snprintf(resp, sizeof(resp),
                                             "RESP:callmode %s armed addr=0x%08X\n", modeName, (unsigned)fnAddr);
@@ -6644,6 +6639,69 @@ static DWORD WINAPI wakeThreadProc(LPVOID param) {
                                         char resp[128];
                                         snprintf(resp, sizeof(resp),
                                             "RESP:callmode unknown=%s\n", modeName);
+                                        send(s, resp, (int)strlen(resp), 0);
+                                    }
+
+                                } else if (strncmp(buf, "crashlog", 8) == 0) {
+                                    /* Read dinput-crash.log from previous/current crash */
+                                    FILE *cf = fopen("dinput-crash.log", "r");
+                                    if (cf) {
+                                        char cbuf[4096];
+                                        int n = (int)fread(cbuf, 1, sizeof(cbuf)-1, cf);
+                                        cbuf[n] = 0;
+                                        fclose(cf);
+                                        send(s, cbuf, n, 0);
+                                        send(s, "\n", 1, 0);
+                                    } else {
+                                        send(s, "RESP:crashlog empty\n", 20, 0);
+                                    }
+
+                                } else if (strncmp(buf, "openscreen ", 11) == 0) {
+                                    /* Open a screen by name using the RUNTIME screen manager (0x818718).
+                                     * The mode handlers use 0x809830 which is uninitialized.
+                                     * This command uses the known-working 0x818718 address.
+                                     * Usage: openscreen House
+                                     *        openscreen Campaign */
+                                    char name[64] = {0};
+                                    sscanf(buf + 11, "%63s", name);
+
+                                    /* Find the game's interned string address */
+                                    DWORD gameStr = namedScreenAddress(name);
+                                    if (!gameStr) {
+                                        char resp[128];
+                                        snprintf(resp, sizeof(resp), "RESP:openscreen unknown=%s\n", name);
+                                        send(s, resp, (int)strlen(resp), 0);
+                                    } else {
+                                        /* Schedule openScreen call on game thread */
+                                        typedef void (__attribute__((thiscall)) *OpenScreen_t)(
+                                            void *self, void *nameStr, int activate);
+                                        OpenScreen_t openScreenFn = (OpenScreen_t)(uintptr_t)0x4D8580;
+                                        void *screenMgr = (void *)0x818718;  /* RUNTIME address */
+
+                                        hookLog("TCP: openscreen name=%s gameStr=0x%08X mgr=0x818718",
+                                                name, (unsigned)gameStr);
+
+                                        /* Call directly from TCP thread — openScreen might enter
+                                         * a blocking event loop, so we can't use timer dispatch. */
+                                        {
+                                            FILE *cf = fopen("dinput-crash.log", "a");
+                                            if (cf) {
+                                                fprintf(cf, "CALLING openScreen(%s, 1) mgr=0x818718\n", name);
+                                                fflush(cf); fclose(cf);
+                                            }
+                                        }
+                                        openScreenFn(screenMgr, (void *)(uintptr_t)gameStr, 1);
+                                        {
+                                            FILE *cf = fopen("dinput-crash.log", "a");
+                                            if (cf) {
+                                                fprintf(cf, "RETURNED from openScreen(%s)\n", name);
+                                                fflush(cf); fclose(cf);
+                                            }
+                                        }
+
+                                        char resp[128];
+                                        snprintf(resp, sizeof(resp),
+                                            "RESP:openscreen %s done\n", name);
                                         send(s, resp, (int)strlen(resp), 0);
                                     }
 
@@ -6700,28 +6758,74 @@ static DWORD WINAPI wakeThreadProc(LPVOID param) {
     return 0;
 }
 
-/* Vectored Exception Handler: logs crash address to hook log */
+/* Timer callback for callmode: fires from game's DispatchMessage (clean context) */
+#define TIMER_ID_CALLMODE 0xD1D0
+static VOID CALLBACK timerCallmodeCallback(HWND hwnd, UINT msg, UINT_PTR id, DWORD time) {
+    typedef void (__stdcall *ModeHandler_t)(int);
+    DWORD addr = g_pendingCallmode;
+    g_pendingCallmode = 0;
+    KillTimer(hwnd, TIMER_ID_CALLMODE);
+
+    if (!addr) return;
+
+    {
+        FILE *cf = fopen("dinput-crash.log", "a");
+        if (cf) {
+            fprintf(cf, "CALLING mode 0x%08X from TIMER (DispatchMessage context)\n", (unsigned)addr);
+            fprintf(cf, "  [0x808CDC]=0x%08X\n", (unsigned)*(volatile DWORD*)0x808CDC);
+            fflush(cf); fclose(cf);
+        }
+    }
+    hookLog("TIMER: calling mode handler 0x%08X", (unsigned)addr);
+    ModeHandler_t fn = (ModeHandler_t)(uintptr_t)addr;
+    fn(0);
+    {
+        FILE *cf = fopen("dinput-crash.log", "a");
+        if (cf) {
+            fprintf(cf, "RETURNED from mode 0x%08X\n", (unsigned)addr);
+            fflush(cf); fclose(cf);
+        }
+    }
+    hookLog("TIMER: mode handler 0x%08X returned", (unsigned)addr);
+}
+
+/* Vectored Exception Handler: writes crash data to separate file */
 static LONG WINAPI crashVEH(EXCEPTION_POINTERS *ep) {
     if (ep && ep->ExceptionRecord) {
         DWORD code = ep->ExceptionRecord->ExceptionCode;
-        void *addr = ep->ExceptionRecord->ExceptionAddress;
         if (code == 0xC0000005) { /* ACCESS_VIOLATION */
-            ULONG_PTR *info = ep->ExceptionRecord->ExceptionInformation;
-            hookLog("*** VEH ACCESS_VIOLATION at 0x%08X (EIP), %s addr 0x%08X",
-                    (unsigned)(uintptr_t)addr,
-                    info[0] ? "write" : "read",
-                    (unsigned)info[1]);
-            if (ep->ContextRecord) {
-                hookLog("*** VEH regs: EAX=0x%08X ECX=0x%08X EDX=0x%08X EBX=0x%08X ESP=0x%08X",
-                        (unsigned)ep->ContextRecord->Eax,
-                        (unsigned)ep->ContextRecord->Ecx,
-                        (unsigned)ep->ContextRecord->Edx,
-                        (unsigned)ep->ContextRecord->Ebx,
-                        (unsigned)ep->ContextRecord->Esp);
+            /* Write to a SEPARATE crash file that survives process death */
+            FILE *cf = fopen("dinput-crash.log", "a");
+            if (cf) {
+                void *addr = ep->ExceptionRecord->ExceptionAddress;
+                ULONG_PTR *info = ep->ExceptionRecord->ExceptionInformation;
+                fprintf(cf, "ACCESS_VIOLATION EIP=0x%08X %s=0x%08X\n",
+                        (unsigned)(uintptr_t)addr,
+                        info[0] ? "WRITE" : "READ",
+                        (unsigned)info[1]);
+                if (ep->ContextRecord) {
+                    fprintf(cf, "  EAX=0x%08X ECX=0x%08X EDX=0x%08X EBX=0x%08X\n",
+                            (unsigned)ep->ContextRecord->Eax,
+                            (unsigned)ep->ContextRecord->Ecx,
+                            (unsigned)ep->ContextRecord->Edx,
+                            (unsigned)ep->ContextRecord->Ebx);
+                    fprintf(cf, "  ESP=0x%08X EBP=0x%08X ESI=0x%08X EDI=0x%08X\n",
+                            (unsigned)ep->ContextRecord->Esp,
+                            (unsigned)ep->ContextRecord->Ebp,
+                            (unsigned)ep->ContextRecord->Esi,
+                            (unsigned)ep->ContextRecord->Edi);
+                }
+                fflush(cf);
+                fclose(cf);
             }
+            /* Also try hookLog in case it works */
+            hookLog("*** VEH ACCESS_VIOLATION EIP=0x%08X %s=0x%08X",
+                    (unsigned)(uintptr_t)ep->ExceptionRecord->ExceptionAddress,
+                    ep->ExceptionRecord->ExceptionInformation[0] ? "WRITE" : "READ",
+                    (unsigned)ep->ExceptionRecord->ExceptionInformation[1]);
         }
     }
-    return EXCEPTION_CONTINUE_SEARCH; /* Let normal SEH handle it */
+    return EXCEPTION_CONTINUE_SEARCH;
 }
 
 static void startWakeThread(void) {
