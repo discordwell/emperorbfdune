@@ -165,11 +165,24 @@ static SetCooperativeLevel_t g_origMouseSetCooperativeLevel = NULL;
 
 /* Debug logging to file (OutputDebugString unreliable in Wine) */
 static FILE *g_logFile = NULL;
+static volatile LONG g_logValidated = 0; /* 0=not validated since snapshot restore */
 
 static void hookLog(const char *fmt, ...) {
+    /* After QEMU snapshot restore, g_logFile is a stale FILE* (valid pointer
+     * but invalid fd). Detect this by attempting a write and checking ferror.
+     * Re-open the file if stale. Only validate once per session. */
     if (!g_logFile) {
         g_logFile = fopen("dinput-hook.log", "a");
         if (!g_logFile) return;
+        g_logValidated = 1;
+    } else if (!g_logValidated) {
+        /* First call after snapshot restore: test if the FILE* is still valid */
+        if (fprintf(g_logFile, "") < 0 || fflush(g_logFile) == EOF || ferror(g_logFile)) {
+            fclose(g_logFile);
+            g_logFile = fopen("dinput-hook.log", "a");
+            if (!g_logFile) return;
+        }
+        g_logValidated = 1;
     }
     va_list args;
     va_start(args, fmt);
@@ -243,7 +256,9 @@ typedef enum {
     INJ_ALLCLICK,    /* All-in-one: reset+move+btn_down+btn_up in single GDD call */
     INJ_DIRECTCLICK, /* Direct: move+btn_down+btn_up, NO reset — use when cursor starts at (0,0) */
     INJ_CLICK2_DOWN, /* click2: reset+move+btn_down in call 1 */
-    INJ_CLICK2_UP    /* click2: btn_up in call 2 */
+    INJ_CLICK2_UP,   /* click2: btn_up in call 2 */
+    INJ_MOVECLICK_SETTLE, /* moveclick: settle after move, then button inject */
+    INJ_MOVECLICK_BTN     /* moveclick: inject btn_down+btn_up via DInput buffer */
 } InjectState;
 
 static volatile InjectState g_injState = INJ_IDLE;
@@ -266,8 +281,38 @@ static volatile int g_forceY = 0;
  * Returns VK_LBUTTON as pressed during injection BTN_DOWN/BTN_HOLD phases. */
 static volatile LONG g_gasCallCount = 0;
 
+/* VK code diagnostics: track which VK codes the game polls */
+#define GAS_VK_SLOTS 16
+static volatile int g_gasVkCodes[GAS_VK_SLOTS];
+static volatile LONG g_gasVkCounts[GAS_VK_SLOTS];
+static volatile LONG g_gasVkSlotCount = 0;
+
+static void gasTrackVk(int vKey) {
+    LONG slots = g_gasVkSlotCount;
+    for (LONG i = 0; i < slots && i < GAS_VK_SLOTS; i++) {
+        if (g_gasVkCodes[i] == vKey) {
+            InterlockedIncrement(&g_gasVkCounts[i]);
+            return;
+        }
+    }
+    if (slots < GAS_VK_SLOTS) {
+        LONG idx = InterlockedIncrement(&g_gasVkSlotCount) - 1;
+        if (idx < GAS_VK_SLOTS) {
+            g_gasVkCodes[idx] = vKey;
+            g_gasVkCounts[idx] = 1;
+        }
+    }
+}
+
 static SHORT WINAPI hookedGetAsyncKeyState(int vKey) {
     LONG c = InterlockedIncrement(&g_gasCallCount);
+    gasTrackVk(vKey);
+
+    /* Log first few unique VK codes seen */
+    if (c <= 10) {
+        hookLog("GetAsyncKeyState(vKey=0x%02X/%d) call#%ld", vKey, vKey, c);
+    }
+
     if (vKey == VK_LBUTTON) {
         /* Force-click override (highest priority) */
         if (g_forceClickFrames > 0) {
@@ -339,6 +384,40 @@ static BOOL WINAPI hookedGetCursorPos(LPPOINT lpPoint) {
         hookLog("GetCursorPos -> (%ld,%ld) (real, state=%d, call#%ld)",
                 lpPoint ? lpPoint->x : -1, lpPoint ? lpPoint->y : -1,
                 (int)g_injState, c);
+    }
+    return result;
+}
+
+/* --- Hooked PeekMessageA ---
+ * Detects if the game reads mouse button messages via PeekMessage
+ * (which removes them from the queue before WndProc ever sees them). */
+typedef BOOL (WINAPI *PeekMessageA_t)(LPMSG, HWND, UINT, UINT, UINT);
+static PeekMessageA_t g_origPeekMessageA = NULL;
+static volatile LONG g_peekMsgCount = 0;
+static volatile LONG g_peekMouseBtnCount = 0;
+
+static BOOL WINAPI hookedPeekMessageA(LPMSG lpMsg, HWND hWnd,
+                                       UINT wMsgFilterMin, UINT wMsgFilterMax,
+                                       UINT wRemoveMsg) {
+    BOOL result = g_origPeekMessageA(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax, wRemoveMsg);
+    LONG c = InterlockedIncrement(&g_peekMsgCount);
+
+    if (result && lpMsg) {
+        UINT msg = lpMsg->message;
+        if (msg == WM_LBUTTONDOWN || msg == WM_LBUTTONUP ||
+            msg == WM_RBUTTONDOWN || msg == WM_RBUTTONUP) {
+            InterlockedIncrement(&g_peekMouseBtnCount);
+            int x = (short)LOWORD(lpMsg->lParam);
+            int y = (short)HIWORD(lpMsg->lParam);
+            hookLog("PeekMessageA: msg=0x%04X (%s) x=%d y=%d remove=%s [call#%ld btn#%ld]",
+                    msg,
+                    msg == WM_LBUTTONDOWN ? "LBUTTONDOWN" :
+                    msg == WM_LBUTTONUP ? "LBUTTONUP" :
+                    msg == WM_RBUTTONDOWN ? "RBUTTONDOWN" : "RBUTTONUP",
+                    x, y,
+                    (wRemoveMsg & PM_REMOVE) ? "YES" : "NO",
+                    c, (long)g_peekMouseBtnCount);
+        }
     }
     return result;
 }
@@ -418,10 +497,18 @@ static void installWin32Hooks(void) {
         }
     }
 
-    hookLog("Win32 API hooks installed (GetAsyncKeyState=%s, GetKeyState=%s, GetCursorPos=%s)",
+    /* Hook PeekMessageA to detect if game reads WM_LBUTTONDOWN via PeekMessage
+     * rather than WndProc dispatch. Many D3D games from this era use PeekMessage
+     * with PM_REMOVE to process input directly in the game loop. */
+    g_origPeekMessageA = (PeekMessageA_t)hookIAT(
+        gameModule, "user32.dll", "PeekMessageA",
+        (FARPROC)hookedPeekMessageA);
+
+    hookLog("Win32 API hooks installed (GetAsyncKeyState=%s, GetKeyState=%s, GetCursorPos=%s, PeekMessageA=%s)",
             g_origGetAsyncKeyState ? "YES(hooked)" : "NO",
             g_origGetKeyState ? "YES(hooked)" : "NO",
-            g_origGetCursorPos ? "YES" : "NO");
+            g_origGetCursorPos ? "YES" : "NO",
+            g_origPeekMessageA ? "YES" : "NO");
 }
 
 /* --- Shared memory setup --- */
@@ -917,6 +1004,13 @@ typedef void (__attribute__((thiscall)) *MenuItemFlush_t)(void *self);
 
 #define TITLE_SCREEN_VTABLE 0x005D35C4
 #define WM_APP_PENDING_UI   (WM_APP + 0x52)
+#define TIMER_ID_NAV        0xD1CE
+
+/* SetTimer-based navigation: fires TIMERPROC from game's DispatchMessage,
+ * outside any DInput COM context. Avoids crashes from GDD-direct and
+ * SendMessage dispatch which run inside COM's internal message pump. */
+static volatile LONG g_timerNavArmed = 0;
+static char g_timerNavName[64];
 
 #define DINPUT7_OBJECTDATA_SIZE 16
 
@@ -2712,12 +2806,315 @@ static int selectCurrentScreenEntry(BYTE *app, const char *entryName, const char
         return 0;
     }
 
-    selectScreenEntry(screen, (void *)entryName);
+    /* The game uses POINTER COMPARISON for screen names — the second parameter
+     * to selectScreenEntry must be the game's own interned string address (in
+     * the .rdata section), not a copy on our stack.  namedScreenAddress()
+     * returns the address of the game's string constant for known screen names.
+     * If we can't resolve, fall back to passing entryName directly. */
+    {
+        DWORD gameStrAddr = namedScreenAddress(entryName);
+        void *pending = gameStrAddr ? (void *)(uintptr_t)gameStrAddr : (void *)entryName;
+        hookLog("SCREENENTRY[%s]: calling selectScreenEntry screen=%p pending=%p (gameAddr=0x%08X) name=%s",
+                label ? label : "unknown", (void *)screen, pending,
+                (unsigned)gameStrAddr, entryName);
+        selectScreenEntry(screen, pending);
+    }
     resetMenuState(app + 0x8160);
     *(DWORD *)(app + 0x95C0) = 0;
     hookLog("SCREENENTRY[%s]: selected name=%s sel=%ld screen=%p",
             label ? label : "unknown", entryName, (long)sel, (void *)screen);
     return 1;
+}
+
+/* --- SetTimer-based navigation callback ---
+ * Fires from the game's own DispatchMessage processing (via PeekMessage loop).
+ * NO DInput COM locks held, NO WndProc reentrancy — safest context for calling
+ * game screen transition functions like selectScreenEntry.
+ *
+ * Uses SEH to catch and report any access violations instead of crashing. */
+static volatile LONG g_timerNavScreenIdx = -1;  /* -1=use sel, 0..N=explicit index */
+
+static VOID CALLBACK timerNavCallback(HWND hwnd, UINT msg, UINT_PTR id, DWORD time) {
+    BYTE *app = (BYTE *)0x818718;
+    char name[64];
+    int ok = 0;
+    LONG screenIdx;
+
+    /* Kill timer immediately — one-shot */
+    KillTimer(hwnd, TIMER_ID_NAV);
+    g_timerNavArmed = 0;
+
+    memcpy(name, g_timerNavName, sizeof(name));
+    name[sizeof(name) - 1] = 0;
+    screenIdx = g_timerNavScreenIdx;
+
+    hookLog("TIMERNAV: firing for name=%s screenIdx=%ld hwnd=%p", name, (long)screenIdx, (void *)hwnd);
+    logMenuAppState("timernav-before");
+    logMainMenuState("timernav-before");
+
+    /* Validate app state */
+    if (IsBadReadPtr(app, 0x20)) {
+        hookLog("TIMERNAV: app not readable, aborting");
+        return;
+    }
+
+    {
+        void (__attribute__((thiscall)) *selectScreenEntry)(void *self, void *pending) =
+            (void (__attribute__((thiscall)) *)(void *, void *))0x524A90;
+        void (__attribute__((thiscall)) *resetMenuState)(void *self) =
+            (void (__attribute__((thiscall)) *)(void *))0x4D3FA0;
+        LONG sel = *(LONG *)(app + 0x0C);
+        LONG count = *(LONG *)(app + 0x08);
+        LONG idx = (screenIdx >= 0) ? screenIdx : sel;
+        BYTE *screen;
+        DWORD gameStrAddr;
+
+        hookLog("TIMERNAV: sel=%ld count=%ld using idx=%ld", (long)sel, (long)count, (long)idx);
+
+        if (idx < 0 || idx >= count) {
+            hookLog("TIMERNAV: idx out of range, aborting");
+            return;
+        }
+
+        screen = *(BYTE **)(app + (idx * 4));
+        if (!screen || IsBadReadPtr(screen, 0x100)) {
+            hookLog("TIMERNAV: screen[%ld] at %p not readable, aborting", (long)idx, (void *)screen);
+            return;
+        }
+
+        gameStrAddr = namedScreenAddress(name);
+        if (!gameStrAddr) {
+            hookLog("TIMERNAV: unknown screen name '%s', aborting", name);
+            return;
+        }
+
+        /* Log screen vtable and first few fields for diagnostics */
+        {
+            DWORD vt = *(DWORD *)screen;
+            DWORD f4 = *(DWORD *)(screen + 4);
+            DWORD f8 = *(DWORD *)(screen + 8);
+            hookLog("TIMERNAV: screen[%ld]=%p vt=%08X +4=%08X +8=%08X",
+                    (long)idx, (void *)screen, vt, f4, f8);
+        }
+
+        hookLog("TIMERNAV: calling selectScreenEntry(screen=%p, pending=%p gameAddr=0x%08X)",
+                (void *)screen, (void *)(uintptr_t)gameStrAddr, (unsigned)gameStrAddr);
+
+        selectScreenEntry(screen, (void *)(uintptr_t)gameStrAddr);
+
+        hookLog("TIMERNAV: selectScreenEntry returned OK");
+
+        resetMenuState(app + 0x8160);
+        hookLog("TIMERNAV: resetMenuState returned OK");
+
+        *(DWORD *)(app + 0x95C0) = 0;
+        ok = 1;
+    }
+
+    hookLog("TIMERNAV: result=%d name=%s", ok, name);
+    logMenuAppState("timernav-after");
+    logMainMenuState("timernav-after");
+    g_menuTraceRemaining = 6;
+}
+
+/* Timer callback for directly calling vtable[0x3C](entryIndex) on a screen.
+ * Used for screens whose entries have NULL names (e.g., house selection). */
+#define TIMER_ID_SELECTIDX 0xD1D1
+static volatile LONG g_timerSelectIdxArmed = 0;
+static volatile LONG g_timerSelectIdxScreen = -1;
+static volatile LONG g_timerSelectIdxEntry = 0;
+
+static VOID CALLBACK timerSelectIdxCallback(HWND hwnd, UINT msg, UINT_PTR id, DWORD time) {
+    BYTE *app = (BYTE *)0x818718;
+    LONG screenIdx;
+    LONG entryIdx;
+
+    KillTimer(hwnd, TIMER_ID_SELECTIDX);
+    g_timerSelectIdxArmed = 0;
+
+    screenIdx = g_timerSelectIdxScreen;
+    entryIdx = g_timerSelectIdxEntry;
+
+    hookLog("TIMERSELECT: firing screenIdx=%ld entryIdx=%ld", (long)screenIdx, (long)entryIdx);
+    logMenuAppState("timerselect-before");
+
+    if (IsBadReadPtr(app, 0x20)) {
+        hookLog("TIMERSELECT: app not readable, aborting");
+        return;
+    }
+
+    {
+        LONG count = *(LONG *)(app + 0x08);
+        LONG sel = *(LONG *)(app + 0x0C);
+        LONG idx = (screenIdx >= 0) ? screenIdx : sel;
+        BYTE *screen;
+        DWORD vtable;
+        DWORD selectFn;
+
+        hookLog("TIMERSELECT: count=%ld sel=%ld using idx=%ld", (long)count, (long)sel, (long)idx);
+
+        if (idx < 0 || idx >= count) {
+            hookLog("TIMERSELECT: idx out of range, aborting");
+            return;
+        }
+
+        screen = *(BYTE **)(app + (idx * 4));
+        if (!screen || IsBadReadPtr(screen, 0x10)) {
+            hookLog("TIMERSELECT: screen[%ld]=%p not readable, aborting", (long)idx, (void *)screen);
+            return;
+        }
+
+        vtable = *(DWORD *)screen;
+        if (!vtable || IsBadReadPtr((void *)(vtable + 0x3C), 4)) {
+            hookLog("TIMERSELECT: vtable=%08X not readable, aborting", vtable);
+            return;
+        }
+
+        selectFn = *(DWORD *)(vtable + 0x3C);
+        if (!selectFn || IsBadReadPtr((void *)selectFn, 1)) {
+            hookLog("TIMERSELECT: selectFn=%08X not readable, aborting", selectFn);
+            return;
+        }
+
+        {
+            /* Check entry count at screen+0x0C to validate entryIdx */
+            LONG entryCount = *(LONG *)(screen + 0x0C);
+            hookLog("TIMERSELECT: screen=%p vtable=%08X selectFn=%08X entryCount=%ld entryIdx=%ld",
+                    (void *)screen, vtable, selectFn, (long)entryCount, (long)entryIdx);
+
+            if (entryIdx < 0 || entryIdx >= entryCount) {
+                hookLog("TIMERSELECT: entryIdx out of range (0..%ld), aborting", (long)(entryCount - 1));
+                return;
+            }
+        }
+
+        /* Call vtable[0x3C](entryIdx) — thiscall: ecx=screen, arg=entryIdx */
+        {
+            typedef void (__attribute__((thiscall)) *VtableSelectFn)(void *, LONG);
+            hookLog("TIMERSELECT: calling selectFn=%08X(screen=%p, idx=%ld)...",
+                    selectFn, (void *)screen, (long)entryIdx);
+            ((VtableSelectFn)selectFn)(screen, entryIdx);
+            hookLog("TIMERSELECT: selectFn returned OK");
+        }
+
+        /* Reset menu state like timerNavCallback does */
+        {
+            void (__attribute__((thiscall)) *resetMenuState)(void *self) =
+                (void (__attribute__((thiscall)) *)(void *))0x4D3FA0;
+            resetMenuState(app + 0x8160);
+            hookLog("TIMERSELECT: resetMenuState returned OK");
+        }
+
+        *(DWORD *)(app + 0x95C0) = 0;
+    }
+
+    hookLog("TIMERSELECT: done screenIdx=%ld entryIdx=%ld", (long)screenIdx, (long)entryIdx);
+    logMenuAppState("timerselect-after");
+    g_menuTraceRemaining = 6;
+}
+
+/* Timer callback for popping the top screen (dismissing title overlay).
+ * Simply decrements the screen count, making the next screen active. */
+#define TIMER_ID_POPSCREEN 0xD1CF
+static volatile LONG g_timerPopArmed = 0;
+
+static VOID CALLBACK timerPopScreenCallback(HWND hwnd, UINT msg, UINT_PTR id, DWORD time) {
+    BYTE *app = (BYTE *)0x818718;
+
+    KillTimer(hwnd, TIMER_ID_POPSCREEN);
+    g_timerPopArmed = 0;
+
+    hookLog("TIMERPOP: firing");
+    logMenuAppState("timerpop-before");
+    logMainMenuState("timerpop-before");
+
+    if (IsBadReadPtr(app, 0x20)) {
+        hookLog("TIMERPOP: app not readable");
+        return;
+    }
+
+    {
+        LONG count = *(LONG *)(app + 0x08);
+        LONG sel = *(LONG *)(app + 0x0C);
+
+        hookLog("TIMERPOP: count=%ld sel=%ld", (long)count, (long)sel);
+
+        if (count >= 2) {
+            /* Pop screen[0]: copy screen[1] to screen[0], clear screen[1] */
+            DWORD s1 = *(DWORD *)(app + 4);
+            *(DWORD *)(app + 0) = s1;
+            *(DWORD *)(app + 4) = 0;
+            count = 1;
+            *(LONG *)(app + 0x08) = count;
+
+            /* Clamp sel */
+            if (sel >= count) sel = count - 1;
+            if (sel < 0) sel = 0;
+            *(LONG *)(app + 0x0C) = sel;
+
+            hookLog("TIMERPOP: popped, new count=%ld sel=%ld screen[0]=%p",
+                    (long)count, (long)sel,
+                    (void *)(uintptr_t)(*(DWORD *)(app + sel * 4)));
+        } else {
+            hookLog("TIMERPOP: count=%ld, nothing to pop", (long)count);
+        }
+    }
+
+    logMenuAppState("timerpop-after");
+    logMainMenuState("timerpop-after");
+    g_menuTraceRemaining = 6;
+}
+
+/* Timer callback for opening a screen via prepScreen+openScreen+commitScreen.
+ * This is the full screen transition sequence used by the game's own menu code. */
+#define TIMER_ID_OPENSCREEN 0xD1D0
+static volatile DWORD g_timerScreenAddr = 0;
+
+static VOID CALLBACK timerOpenScreenCallback(HWND hwnd, UINT msg, UINT_PTR id, DWORD time) {
+    BYTE *app = (BYTE *)0x818718;
+    DWORD screenAddr;
+
+    KillTimer(hwnd, TIMER_ID_OPENSCREEN);
+
+    screenAddr = g_timerScreenAddr;
+    g_timerScreenAddr = 0;
+
+    hookLog("TIMERSCREEN: firing addr=0x%08X hwnd=%p", (unsigned)screenAddr, (void *)hwnd);
+    logMenuAppState("timerscreen-before");
+    logMainMenuState("timerscreen-before");
+
+    if (!screenAddr || IsBadReadPtr(app, 0x20)) {
+        hookLog("TIMERSCREEN: invalid state, aborting");
+        return;
+    }
+
+    {
+        MenuCase3Item_t prepScreen = (MenuCase3Item_t)0x4D69D0;
+        MenuCase2Item_t openScreen = (MenuCase2Item_t)0x4D6A40;
+        MenuCase4Item_t commitScreen = (MenuCase4Item_t)0x4D5D00;
+        void (__cdecl *flushScreenQueue)(void) = (void (__cdecl *)(void))0x4EA190;
+
+        hookLog("TIMERSCREEN: calling prepScreen(app=%p, addr=%p)", (void *)app, (void *)(uintptr_t)screenAddr);
+        prepScreen((void *)0x818718, (void *)(uintptr_t)screenAddr);
+        hookLog("TIMERSCREEN: prepScreen returned OK");
+
+        hookLog("TIMERSCREEN: calling openScreen(app=%p, addr=%p, 1)", (void *)app, (void *)(uintptr_t)screenAddr);
+        openScreen((void *)0x818718, (void *)(uintptr_t)screenAddr, 1);
+        hookLog("TIMERSCREEN: openScreen returned OK");
+
+        hookLog("TIMERSCREEN: calling commitScreen(app=%p, 0)", (void *)app);
+        commitScreen((void *)0x818718, 0);
+        hookLog("TIMERSCREEN: commitScreen returned OK");
+
+        hookLog("TIMERSCREEN: calling flushScreenQueue");
+        flushScreenQueue();
+        hookLog("TIMERSCREEN: flushScreenQueue returned OK");
+    }
+
+    hookLog("TIMERSCREEN: complete addr=0x%08X", (unsigned)screenAddr);
+    logMenuAppState("timerscreen-after");
+    logMainMenuState("timerscreen-after");
+    g_menuTraceRemaining = 6;
 }
 
 static void processPendingUiWork(const char *source) {
@@ -3867,44 +4264,56 @@ static HRESULT WINAPI hookedMouseGetDeviceData(
         }
     }
 
-    /* rawclick bypasses the DInput return buffer and writes straight into the
-     * live CInputDevice queue. It must still run when the normal injection
-     * state machine is idle, so handle it before the early return below. */
-    if (g_rawclickState != RAWCLICK_IDLE && g_callerEBP) {
-        BYTE *cinput = (BYTE *)(uintptr_t)g_callerEBP;
-        DWORD *pCount = (DWORD *)(cinput + 0x142C);
-        DWORD count = *pCount;
-        float fx = g_rawclickX, fy = g_rawclickY;
+    /* rawclick: SendInput from in-process.
+     * SendInput goes through the full Windows input pipeline, generating BOTH
+     * DInput events AND WM messages — as close to a real mouse click as possible.
+     * We also force GetCursorPos and GetAsyncKeyState overrides. */
+    if (g_rawclickState != RAWCLICK_IDLE) {
+        int ix = (int)g_rawclickX, iy = (int)g_rawclickY;
 
-        if (g_rawclickState == RAWCLICK_PENDING && count + 2 <= 128) {
-            BYTE *slot = cinput + 0x2C + count * 40;
-            rawQueueWriteMoveEvent(cinput, slot, fx, fy);
-            count++;
+        if (g_rawclickState == RAWCLICK_PENDING) {
+            /* Force GetCursorPos to return target coords */
+            g_forceX = ix;
+            g_forceY = iy;
+            g_forceClickFrames = 200;
 
-            slot = cinput + 0x2C + count * 40;
-            rawQueueWriteButtonEvent(cinput, slot, g_rawclickType, fx, fy, g_rawclickButtonIndex, 1);
-            count++;
+            /* Move cursor via SetCursorPos */
+            SetCursorPos(ix, iy);
 
-            *pCount = count;
+            /* SendInput: move mouse to absolute position + left button down */
+            INPUT inputs[2];
+            memset(inputs, 0, sizeof(inputs));
+
+            /* Mouse move (absolute) */
+            inputs[0].type = INPUT_MOUSE;
+            inputs[0].mi.dx = (LONG)((ix * 65535) / GetSystemMetrics(SM_CXSCREEN));
+            inputs[0].mi.dy = (LONG)((iy * 65535) / GetSystemMetrics(SM_CYSCREEN));
+            inputs[0].mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE;
+
+            /* Mouse left button down */
+            inputs[1].type = INPUT_MOUSE;
+            inputs[1].mi.dx = inputs[0].mi.dx;
+            inputs[1].mi.dy = inputs[0].mi.dy;
+            inputs[1].mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE | MOUSEEVENTF_LEFTDOWN;
+
+            UINT sent = SendInput(2, inputs, sizeof(INPUT));
+            hookLog("RAWCLICK: SendInput MOVE+LEFTDOWN at (%d,%d) abs(%ld,%ld) sent=%u",
+                    ix, iy, inputs[0].mi.dx, inputs[0].mi.dy, sent);
 
             g_rawclickState = RAWCLICK_UP;
-            hookLog("RAWCLICK: wrote move+btn_down type=%d button=%lu at (%.0f,%.0f) slots %d-%d count=%lu",
-                    g_rawclickType, (unsigned long)g_rawclickButtonIndex, fx, fy,
-                    count - 2, count - 1, (unsigned long)count);
 
-        } else if (g_rawclickState == RAWCLICK_UP && count + 1 <= 128) {
-            BYTE *slot = cinput + 0x2C + count * 40;
-            rawQueueWriteButtonEvent(cinput, slot, g_rawclickType, fx, fy, g_rawclickButtonIndex, 0);
-            count++;
+        } else if (g_rawclickState == RAWCLICK_UP) {
+            /* SendInput: left button up */
+            INPUT input;
+            memset(&input, 0, sizeof(input));
+            input.type = INPUT_MOUSE;
+            input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
 
-            *pCount = count;
+            UINT sent = SendInput(1, &input, sizeof(INPUT));
+            hookLog("RAWCLICK: SendInput LEFTUP sent=%u", sent);
 
             g_rawclickState = RAWCLICK_DONE;
-            hookLog("RAWCLICK: wrote btn_up type=%d button=%lu at (%.0f,%.0f) slot %d count=%lu",
-                    g_rawclickType, (unsigned long)g_rawclickButtonIndex, fx, fy,
-                    count - 1, (unsigned long)count);
-        } else if (count + (g_rawclickState == RAWCLICK_PENDING ? 2 : 1) > 128) {
-            hookLog("RAWCLICK: skipped state=%d count=%lu (queue full)", g_rawclickState, (unsigned long)count);
+            g_forceClickFrames = 0;
         }
     }
 
@@ -3986,45 +4395,44 @@ static HRESULT WINAPI hookedMouseGetDeviceData(
         }
         break;
 
-    case INJ_BTN_DOWN:
-        /* Button down WITH position events — game may require position data
-         * in the same GetDeviceData buffer as button events to register a click.
-         * Inject: [dx=0, dy=0, btn_down] to confirm cursor position + click. */
-        if (savedCapacity >= 3) {
-            writeInjEvent(writePtr, 0, 0);       /* X delta = 0 (no movement) */
-            writePtr += cbObjectData;
-            writeInjEvent(writePtr, 4, 0);       /* Y delta = 0 (no movement) */
-            writePtr += cbObjectData;
-            writeInjEvent(writePtr, 12, 0x80);   /* Button 0 down */
-            added = 3;
-            g_injState = INJ_BTN_HOLD;
-            g_injFrame = 0;
-            hookLog("INJ/GDD v9: BTN_DOWN [dx=0,dy=0,btn=0x80] at (%d,%d) "
-                    "[suppressed %lu real] → next: BTN_HOLD",
-                    g_injTargetX, g_injTargetY, (unsigned long)realEvents);
+    case INJ_BTN_DOWN: {
+        /* Align OS cursor with game cursor so WM_LBUTTONDOWN carries correct coords.
+         * SetCursorPos does NOT generate DInput deltas in EXCLUSIVE mode. */
+        SetCursorPos(g_injScreenX, g_injScreenY);
 
-            /* WM messages during injection REMOVED — caused modal drag loop
-             * that blocked the game's main loop (gdd stops incrementing). */
-        }
+        /* Force GetCursorPos override too */
+        g_forceX = g_injScreenX;
+        g_forceY = g_injScreenY;
+        g_forceClickFrames = 200;
+
+        /* SendInput button press — goes through full Windows input pipeline,
+         * generating BOTH DInput button events AND WM_LBUTTONDOWN. */
+        INPUT input;
+        memset(&input, 0, sizeof(input));
+        input.type = INPUT_MOUSE;
+        input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+        UINT sent = SendInput(1, &input, sizeof(INPUT));
+        added = 0; /* Don't suppress — let SendInput's events flow normally */
+        g_injState = INJ_BTN_HOLD;
+        g_injFrame = 0;
+        hookLog("INJ/GDD v10: BTN_DOWN via SendInput sent=%u at screen(%d,%d)",
+                sent, g_injScreenX, g_injScreenY);
         break;
+    }
 
-    case INJ_BTN_UP:
-        /* Button up WITH position events (matching BTN_DOWN pattern). */
-        if (savedCapacity >= 3) {
-            writeInjEvent(writePtr, 0, 0);       /* X delta = 0 */
-            writePtr += cbObjectData;
-            writeInjEvent(writePtr, 4, 0);       /* Y delta = 0 */
-            writePtr += cbObjectData;
-            writeInjEvent(writePtr, 12, 0x00);   /* Button 0 up */
-            added = 3;
-            g_injState = INJ_COMPLETE;
-            hookLog("INJ/GDD v9: BTN_UP [dx=0,dy=0,btn=0x00] → COMPLETE at (%d,%d) "
-                    "[suppressed %lu real]",
-                    g_injTargetX, g_injTargetY, (unsigned long)realEvents);
-
-            /* WM_LBUTTONUP during injection REMOVED — caused stall. */
-        }
+    case INJ_BTN_UP: {
+        /* Use SendInput for button release */
+        INPUT input;
+        memset(&input, 0, sizeof(input));
+        input.type = INPUT_MOUSE;
+        input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
+        UINT sentUp = SendInput(1, &input, sizeof(INPUT));
+        added = 0; /* Don't suppress real events */
+        g_injState = INJ_COMPLETE;
+        hookLog("INJ/GDD v10: BTN_UP via SendInput sent=%u → COMPLETE at (%d,%d)",
+                sentUp, g_injScreenX, g_injScreenY);
         break;
+    }
 
     case INJ_SETTLE:
         /* Settle — wait several frames for game to update 3D cursor/hover state
@@ -4036,7 +4444,11 @@ static HRESULT WINAPI hookedMouseGetDeviceData(
             hookLog("INJ/GDD v8: SETTLE frame %d/5 [suppressed %lu real]",
                     g_injFrame, (unsigned long)realEvents);
         } else {
-            if (g_injClickRequested) {
+            if (g_injClickRequested == 3) {
+                /* moveclick mode: use pure DInput button injection */
+                g_injState = INJ_MOVECLICK_BTN;
+                hookLog("INJ/GDD v8: SETTLE done → MOVECLICK_BTN (pure DInput)");
+            } else if (g_injClickRequested) {
                 g_injState = INJ_BTN_DOWN;
                 hookLog("INJ/GDD v8: SETTLE done → BTN_DOWN");
             } else {
@@ -4130,7 +4542,10 @@ static HRESULT WINAPI hookedMouseGetDeviceData(
             writePtr += cbObjectData;
             writeInjEvent(writePtr, 4, (DWORD)(int)g_injTargetY);  /* Y delta = target */
             added = needed;
-            g_injClickRequested = 1;  /* Tell SETTLE to proceed to BTN_DOWN */
+            /* Preserve g_injClickRequested if already set (e.g. 3 for moveclick).
+             * Only default to 1 if it wasn't already set by the command handler. */
+            if (g_injClickRequested < 1)
+                g_injClickRequested = 1;  /* Tell SETTLE to proceed to BTN_DOWN */
             g_injState = INJ_SETTLE;
             g_injFrame = 0;
 
@@ -4189,13 +4604,56 @@ static HRESULT WINAPI hookedMouseGetDeviceData(
         break;
     }
 
+    case INJ_MOVECLICK_SETTLE: {
+        /* MOVECLICK settle: wait for game to process cursor move and detect hover.
+         * After settle, inject button events via DInput buffer (NOT SendInput). */
+        g_injFrame++;
+        if (g_injFrame < 5) {
+            hookLog("INJ/GDD: MOVECLICK_SETTLE frame %d/5 [suppressed %lu real]",
+                    g_injFrame, (unsigned long)realEvents);
+        } else {
+            g_injState = INJ_MOVECLICK_BTN;
+            hookLog("INJ/GDD: MOVECLICK_SETTLE done → MOVECLICK_BTN");
+        }
+        break;
+    }
+
+    case INJ_MOVECLICK_BTN: {
+        /* MOVECLICK button: inject btn_down + btn_up via DInput buffer.
+         * Pure DInput injection — no SendInput, no OS cursor manipulation.
+         * Game sees button events directly in GetDeviceData buffer. */
+        if (savedCapacity >= 2) {
+            writeInjEvent(writePtr, 12, 0x80);  /* Button 0 down */
+            writePtr += cbObjectData;
+            writeInjEvent(writePtr, 12, 0x00);  /* Button 0 up */
+            added = 2;
+            g_injState = INJ_COMPLETE;
+            hookLog("INJ/GDD: MOVECLICK_BTN [btn_down + btn_up] → COMPLETE at (%d,%d) "
+                    "[suppressed %lu real]",
+                    g_injTargetX, g_injTargetY, (unsigned long)realEvents);
+        } else {
+            hookLog("INJ/GDD: MOVECLICK_BTN needs 2 events but cap=%lu",
+                    (unsigned long)savedCapacity);
+        }
+        break;
+    }
+
     default:
         hookLog("INJ/GDD v7: unexpected state=%d, suppressing %lu real events",
                 (int)g_injState, (unsigned long)realEvents);
         break;
     }
 
-    *pdwInOut = added;
+    /* Only override event count when we injected events or need to suppress.
+     * When added == 0 and we're in SendInput-based phases (BTN_DOWN, BTN_HOLD, BTN_UP),
+     * let real events through so SendInput's events reach the game. */
+    if (added > 0) {
+        *pdwInOut = added;
+    } else if (g_injState != INJ_BTN_DOWN && g_injState != INJ_BTN_HOLD &&
+               g_injState != INJ_BTN_UP && g_injState != INJ_COMPLETE) {
+        *pdwInOut = 0; /* Suppress during RESET/MOVE/SETTLE positioning phases */
+    }
+    /* else: leave *pdwInOut as-is (realEvents) — let SendInput events through */
 
     /* Track accumulated cursor from injected events */
     {
@@ -4216,6 +4674,16 @@ static HRESULT WINAPI hookedMouseGetDeviceData(
      * Even from the game thread, calling it during DInput polling causes
      * 0xC0000005 crashes (function relies on state not yet updated).
      * g_gameMouseX/Y remain 0 — use readmem for cursor diagnosis instead. */
+
+    /* Process pending UI work directly from the game thread.
+     * WM_APP_PENDING_UI dispatch via WndProc doesn't work because the game's
+     * PeekMessage loop filters out custom messages. By calling processPendingUiWork
+     * here (inside GetDeviceData, which runs on the game thread during frame
+     * processing), we guarantee the game thread executes the screen transition. */
+    if (g_screenEntryPending) {
+        hookLog("GDD: processing screenEntryPending from GetDeviceData hook");
+        processPendingUiWork("gdd-direct");
+    }
 
     /* Signal event handle to keep game polling */
     if (g_mouseEventHandle) SetEvent(g_mouseEventHandle);
@@ -4661,7 +5129,7 @@ static DWORD WINAPI wakeThreadProc(LPVOID param) {
             }
         }
 
-        /* TCP command polling: connect to host 10.0.2.2:18890, send status,
+        /* TCP command polling: connect to host TCP_HOST:18890, send status,
          * receive "click X Y\n" or "nop\n". NON-BLOCKING: just set state
          * variables and return. The actual injection happens in GetDeviceState
          * on the game's main thread. */
@@ -4712,7 +5180,10 @@ static DWORD WINAPI wakeThreadProc(LPVOID param) {
                         memset(&addr, 0, sizeof(addr));
                         addr.sin_family = AF_INET;
                         addr.sin_port = htons(18890);
-                        addr.sin_addr.s_addr = inet_addr("10.0.2.2");
+#ifndef TCP_HOST
+#define TCP_HOST "10.0.2.2"
+#endif
+                        addr.sin_addr.s_addr = inet_addr(TCP_HOST);
 
                         /* Non-blocking connect with 500ms select timeout. */
                         u_long nonBlock = 1;
@@ -4762,7 +5233,7 @@ static DWORD WINAPI wakeThreadProc(LPVOID param) {
                             float ciX = (float)g_gameMouseX;
                             float ciY = (float)g_gameMouseY;
                             snprintf(pollMsg, sizeof(pollMsg),
-                                "poll state=%d gds=%ld gdd=%ld kbd=%ld gas=%ld gcp=%ld cur=%ld,%ld hwnd=%d evt=%d ax=%ld ay=%ld ab=%ld ci=%.1f,%.1f hr=0x%08X re=%lu rq=%ld ra=0x%08X md=%p eb=0x%08X rc=%d gc=%d mc=%ld mt=%ld ms=%ld so=%ld sp=%ld se=%ld sa=0x%08X\n",
+                                "poll state=%d gds=%ld gdd=%ld kbd=%ld gas=%ld gcp=%ld cur=%ld,%ld hwnd=%d evt=%d ax=%ld ay=%ld ab=%ld ci=%.1f,%.1f hr=0x%08X re=%lu rq=%ld ra=0x%08X md=%p eb=0x%08X rc=%d gc=%d mc=%ld mt=%ld ms=%ld so=%ld sp=%ld se=%ld sa=0x%08X pk=%ld pb=%ld\n",
                                 (int)g_injState,
                                 (long)g_getDeviceStateCallCount,
                                 (long)g_getDeviceDataCallCount,
@@ -4788,7 +5259,9 @@ static DWORD WINAPI wakeThreadProc(LPVOID param) {
                                 (long)g_screenOpenTraceStage,
                                 (long)g_screenPendingApplyMode,
                                 (long)g_screenEntryPending,
-                                (unsigned)g_screenOpenPendingAddr);
+                                (unsigned)g_screenOpenPendingAddr,
+                                (long)g_peekMsgCount,
+                                (long)g_peekMouseBtnCount);
                             send(s, pollMsg, (int)strlen(pollMsg), 0);
 
                             char buf[256] = {0};
@@ -4846,6 +5319,36 @@ static DWORD WINAPI wakeThreadProc(LPVOID param) {
                                      * X,Y are absolute screen coords = DInput deltas from (0,0). */
                                     hookLog("TCP cmd: dclick at (%d,%d) [direct, no reset]", cmdX, cmdY);
                                     armDirectClickCommand(cmdX, cmdY, 1, "dclick");
+
+                                } else if (sscanf(buf, "moveclick %d %d", &cmdX, &cmdY) == 2) {
+                                    /* Pure DInput click: move+settle+btn via DInput buffer only.
+                                     * X,Y are DInput deltas (game cursor pixels from origin).
+                                     * Phase 1: write [X, Y] movement events in GDD buffer
+                                     * Phase 2: settle 5 frames for CCursor3D hover detection
+                                     * Phase 3: write [btn_down, btn_up] in GDD buffer
+                                     * NO SendInput, NO SetCursorPos, NO OS cursor manipulation.
+                                     * This is the cleanest path for QEMU where OS-level
+                                     * input may not reach DirectInput correctly. */
+                                    hookLog("TCP cmd: moveclick at (%d,%d) [pure DInput]", cmdX, cmdY);
+                                    g_injTargetX = cmdX;
+                                    g_injTargetY = cmdY;
+                                    g_injScreenX = cmdX;
+                                    g_injScreenY = cmdY;
+                                    g_injClickRequested = 1;
+                                    g_injFrame = 0;
+                                    g_injState = INJ_DIRECTCLICK;
+                                    /* Override: when SETTLE completes, go to MOVECLICK_BTN
+                                     * instead of INJ_BTN_DOWN (which uses SendInput).
+                                     * We use a flag to signal this. */
+                                    g_injClickRequested = 3;  /* 3 = moveclick mode */
+                                    if (g_mouseEventHandle) SetEvent(g_mouseEventHandle);
+                                    hookLog("TCP: moveclick armed at (%d,%d) [pure DInput path]", cmdX, cmdY);
+                                    {
+                                        char resp[128];
+                                        snprintf(resp, sizeof(resp),
+                                                "RESP:moveclick armed at (%d,%d)\n", cmdX, cmdY);
+                                        send(s, resp, (int)strlen(resp), 0);
+                                    }
 
                                 } else if (sscanf(buf, "gasclick %d %d", &cmdX, &cmdY) == 2) {
                                     /* Force ALL input APIs to report click at (X,Y).
@@ -5090,7 +5593,7 @@ static DWORD WINAPI wakeThreadProc(LPVOID param) {
                                                         name);
                                             } else if (SendMessageTimeoutA(g_gameHwnd, WM_APP_PENDING_UI, (WPARAM)seq, 0,
                                                                           SMTO_ABORTIFHUNG | SMTO_BLOCK,
-                                                                          5000, &dispatchResult)) {
+                                                                          120000, &dispatchResult)) {
                                                 char resp[160];
                                                 snprintf(resp, sizeof(resp),
                                                          "RESP:screenentrysync done name=%s stage=%ld\n",
@@ -5741,11 +6244,153 @@ static DWORD WINAPI wakeThreadProc(LPVOID param) {
                                         snprintf(out, sizeof(out), "MEM:BAD_ADDR 0x%08X\n", addr);
                                         send(s, out, (int)strlen(out), 0);
                                     }
+                                } else if (strncmp(buf, "forceclick ", 11) == 0) {
+                                    /* Force-click via hooked GetAsyncKeyState/GetCursorPos.
+                                     * Sets g_forceX/Y and g_forceClickFrames so the game's
+                                     * own button hit-test code sees a click at (x,y).
+                                     * Usage: forceclick X Y [frames]
+                                     * Default frames=300 (~100 game frames at 3 GAS calls/frame) */
+                                    int fx = 0, fy = 0, ff = 300;
+                                    sscanf(buf + 11, "%d %d %d", &fx, &fy, &ff);
+                                    if (ff < 10) ff = 10;
+                                    if (ff > 2000) ff = 2000;
+                                    g_forceX = fx;
+                                    g_forceY = fy;
+                                    g_forceClickFrames = ff;
+                                    {
+                                        char resp[128];
+                                        snprintf(resp, sizeof(resp),
+                                            "RESP:forceclick x=%d y=%d frames=%d\n", fx, fy, ff);
+                                        send(s, resp, (int)strlen(resp), 0);
+                                    }
+                                    hookLog("TCP cmd: forceclick x=%d y=%d frames=%d", fx, fy, ff);
+
+                                } else if (strncmp(buf, "pokevp ", 7) == 0) {
+                                    /* VirtualProtect + poke: writable override for any page.
+                                     * Usage: pokevp HEXADDR HEXVAL */
+                                    unsigned int addr = 0, val = 0;
+                                    sscanf(buf + 7, "%x %x", &addr, &val);
+                                    if (addr >= 0x10000 && !IsBadReadPtr((void *)addr, 4)) {
+                                        DWORD oldProt;
+                                        VirtualProtect((void *)(addr & ~0xFFF), 0x1000, PAGE_READWRITE, &oldProt);
+                                        *(unsigned int *)addr = val;
+                                        VirtualProtect((void *)(addr & ~0xFFF), 0x1000, oldProt, &oldProt);
+                                        {
+                                            char out[128];
+                                            snprintf(out, sizeof(out), "pokevp 0x%08X = 0x%08X (prot=%lu)\n",
+                                                     addr, val, (unsigned long)oldProt);
+                                            send(s, out, (int)strlen(out), 0);
+                                        }
+                                        hookLog("TCP: pokevp 0x%08X = 0x%08X (prot=%lu)", addr, val, (unsigned long)oldProt);
+                                    } else {
+                                        char out[128];
+                                        snprintf(out, sizeof(out), "POKEVP:BAD_ADDR 0x%08X\n", addr);
+                                        send(s, out, (int)strlen(out), 0);
+                                    }
+
+                                } else if (strncmp(buf, "houseselect ", 12) == 0) {
+                                    /* Select a house and trigger screen transition.
+                                     * Usage: houseselect <houseIdx>
+                                     * Sets field_18, [0x817C0C], calls vtable[0x3C] with SEH. */
+                                    int houseIdx = 0;
+                                    sscanf(buf + 12, "%d", &houseIdx);
+                                    {
+                                        BYTE *app = (BYTE *)0x818718;
+                                        LONG count = *(LONG *)(app + 0x08);
+                                        LONG sel = *(LONG *)(app + 0x0C);
+                                        LONG idx = (sel >= 0 && sel < count) ? sel : (count - 1);
+                                        BYTE *screen = *(BYTE **)(app + (idx * 4));
+                                        char out[512];
+                                        int pos = 0;
+
+                                        hookLog("HOUSESELECT: houseIdx=%d count=%ld sel=%ld idx=%ld screen=%p",
+                                                houseIdx, (long)count, (long)sel, (long)idx, (void *)screen);
+
+                                        if (!screen || IsBadReadPtr(screen, 0x20)) {
+                                            pos = snprintf(out, sizeof(out), "RESP:houseselect BAD screen=%p\n", (void *)screen);
+                                            send(s, out, pos, 0);
+                                        } else {
+                                            DWORD oldField18 = *(DWORD *)(screen + 0x18);
+                                            DWORD oldGlobal = *(DWORD *)0x817C0C;
+                                            DWORD vtbl = *(DWORD *)screen;
+                                            DWORD selectFn = *(DWORD *)(vtbl + 0x3C);
+
+                                            /* Set field_18 via VirtualProtect */
+                                            {
+                                                DWORD oldProt;
+                                                VirtualProtect(screen + 0x18, 4, PAGE_READWRITE, &oldProt);
+                                                *(LONG *)(screen + 0x18) = houseIdx;
+                                                VirtualProtect(screen + 0x18, 4, oldProt, &oldProt);
+                                                hookLog("HOUSESELECT: field_18 set %lu -> %d (prot=%lu)",
+                                                        (unsigned long)oldField18, houseIdx, (unsigned long)oldProt);
+                                            }
+
+                                            /* Set [0x817C0C] if null */
+                                            if (oldGlobal == 0) {
+                                                *(DWORD *)0x817C0C = (DWORD)(uintptr_t)screen;
+                                                hookLog("HOUSESELECT: set [0x817C0C] = %p", (void *)screen);
+                                            }
+
+                                            /* Verify writes */
+                                            DWORD newField18 = *(DWORD *)(screen + 0x18);
+                                            DWORD newGlobal = *(DWORD *)0x817C0C;
+
+                                            pos = snprintf(out, sizeof(out),
+                                                "RESP:houseselect idx=%d f18=%lu->%lu g=%08X->%08X fn=%08X\n",
+                                                houseIdx, (unsigned long)oldField18, (unsigned long)newField18,
+                                                (unsigned)oldGlobal, (unsigned)newGlobal, (unsigned)selectFn);
+                                            send(s, out, pos, 0);
+
+                                            /* Call vtable[0x3C](3).
+                                             * entryIdx=3 checks field_18 for house selection.
+                                             * NOTE: This runs on the TCP thread. If the game
+                                             * crashes, the process dies. Use a timer for safety. */
+                                            hookLog("HOUSESELECT: arming timer selectidx screen=%ld entry=3",
+                                                    (long)idx);
+                                            g_timerSelectIdxScreen = idx;
+                                            g_timerSelectIdxEntry = 3;
+                                            g_timerSelectIdxArmed = 1;
+                                            if (g_gameHwnd)
+                                                SetTimer(g_gameHwnd, TIMER_ID_SELECTIDX, 50, timerSelectIdxCallback);
+                                            {
+                                                char rok[256];
+                                                int rp = snprintf(rok, sizeof(rok),
+                                                    "RESP:houseselect armed idx=%d f18=%lu->%lu g=%08X->%08X timer=3\n",
+                                                    houseIdx, (unsigned long)oldField18, (unsigned long)newField18,
+                                                    (unsigned)oldGlobal, (unsigned)newGlobal);
+                                                send(s, rok, rp, 0);
+                                            }
+                                        }
+                                    }
+
+                                } else if (strncmp(buf, "poke ", 5) == 0) {
+                                    /* Poke game memory: poke HEXADDR HEXVAL
+                                     * Like writemem but skips IsBadWritePtr — works on heap.
+                                     * Uses IsBadReadPtr as a weaker safety check. */
+                                    unsigned int addr = 0, val = 0;
+                                    sscanf(buf + 5, "%x %x", &addr, &val);
+                                    if (addr >= 0x10000 && !IsBadReadPtr((void *)addr, 4)) {
+                                        DWORD oldProt;
+                                        VirtualProtect((void *)(addr & ~0xFFF), 0x1000, PAGE_READWRITE, &oldProt);
+                                        *(unsigned int *)addr = val;
+                                        VirtualProtect((void *)(addr & ~0xFFF), 0x1000, oldProt, &oldProt);
+                                        {
+                                            char out[128];
+                                            snprintf(out, sizeof(out), "poked 0x%08X to 0x%08X (prot=%lu)\n",
+                                                     val, addr, (unsigned long)oldProt);
+                                            send(s, out, (int)strlen(out), 0);
+                                        }
+                                        hookLog("TCP: poke 0x%08X = 0x%08X (prot=%lu)", addr, val, (unsigned long)oldProt);
+                                    } else {
+                                        char out[128];
+                                        snprintf(out, sizeof(out), "POKE:BAD_ADDR 0x%08X\n", addr);
+                                        send(s, out, (int)strlen(out), 0);
+                                    }
                                 } else if (strncmp(buf, "writemem", 8) == 0) {
                                     /* Write game memory: writemem HEXADDR HEXVAL */
                                     unsigned int addr = 0, val = 0;
                                     sscanf(buf + 9, "%x %x", &addr, &val);
-                                    if (addr >= 0x400000 && addr < 0x900000) {
+                                    if (addr >= 0x10000 && !IsBadWritePtr((void *)addr, 4)) {
                                         DWORD oldProt;
                                         VirtualProtect((void *)addr, 4, PAGE_READWRITE, &oldProt);
                                         *(unsigned int *)addr = val;
@@ -5755,6 +6400,105 @@ static DWORD WINAPI wakeThreadProc(LPVOID param) {
                                         send(s, out, (int)strlen(out), 0);
                                         hookLog("TCP: writemem 0x%08X = 0x%08X", addr, val);
                                     }
+                                } else if (strncmp(buf, "selectidx ", 10) == 0) {
+                                    /* Select entry by index on a specific screen via SetTimer.
+                                     * Calls vtable[0x3C](entryIdx) on screen[screenIdx].
+                                     * Usage: selectidx <screenIdx> <entryIdx>
+                                     * Example: selectidx 1 0  (select entry 0 on screen[1]) */
+                                    int sidx = -1, eidx = 0;
+                                    if (sscanf(buf + 10, "%d %d", &sidx, &eidx) >= 2 && g_gameHwnd) {
+                                        g_timerSelectIdxScreen = sidx;
+                                        g_timerSelectIdxEntry = eidx;
+                                        g_timerSelectIdxArmed = 1;
+                                        SetTimer(g_gameHwnd, TIMER_ID_SELECTIDX, 50, timerSelectIdxCallback);
+                                        {
+                                            char resp[128];
+                                            snprintf(resp, sizeof(resp),
+                                                "RESP:selectidx armed screen=%d entry=%d\n", sidx, eidx);
+                                            send(s, resp, (int)strlen(resp), 0);
+                                        }
+                                        hookLog("TCP cmd: selectidx screen=%d entry=%d", sidx, eidx);
+                                    } else {
+                                        const char *resp = !g_gameHwnd
+                                            ? "RESP:selectidx nohwnd\n"
+                                            : "RESP:selectidx badarg (usage: selectidx <screenIdx> <entryIdx>)\n";
+                                        send(s, resp, (int)strlen(resp), 0);
+                                    }
+
+                                } else if (strncmp(buf, "timernav ", 9) == 0) {
+                                    /* Navigate to a screen via SetTimer callback.
+                                     * Usage: timernav Campaign [screenIdx]
+                                     * screenIdx: -1=use sel (default), 0=screen[0], 1=screen[1] */
+                                    char name[64];
+                                    int sidx = -1;
+                                    memset(name, 0, sizeof(name));
+                                    if (sscanf(buf + 9, "%63s %d", name, &sidx) >= 1 && g_gameHwnd) {
+                                        memcpy(g_timerNavName, name, sizeof(g_timerNavName));
+                                        g_timerNavName[sizeof(g_timerNavName) - 1] = 0;
+                                        g_timerNavScreenIdx = sidx;
+                                        g_timerNavArmed = 1;
+                                        SetTimer(g_gameHwnd, TIMER_ID_NAV, 50, timerNavCallback);
+                                        {
+                                            char resp[160];
+                                            snprintf(resp, sizeof(resp),
+                                                "RESP:timernav armed name=%s idx=%d hwnd=%p\n",
+                                                name, sidx, (void *)g_gameHwnd);
+                                            send(s, resp, (int)strlen(resp), 0);
+                                        }
+                                        hookLog("TCP cmd: timernav name=%s idx=%d hwnd=%p", name, sidx, (void *)g_gameHwnd);
+                                    } else {
+                                        const char *resp = !g_gameHwnd
+                                            ? "RESP:timernav nohwnd\n"
+                                            : "RESP:timernav badarg\n";
+                                        send(s, resp, (int)strlen(resp), 0);
+                                    }
+
+                                } else if (strncmp(buf, "timerpop", 8) == 0) {
+                                    /* Pop the top screen from the stack via SetTimer.
+                                     * Removes screen[0] overlay, exposing screen[1].
+                                     * Usage: timerpop */
+                                    if (g_gameHwnd) {
+                                        g_timerPopArmed = 1;
+                                        SetTimer(g_gameHwnd, TIMER_ID_POPSCREEN, 50, timerPopScreenCallback);
+                                        {
+                                            char resp[128];
+                                            snprintf(resp, sizeof(resp),
+                                                "RESP:timerpop armed hwnd=%p\n", (void *)g_gameHwnd);
+                                            send(s, resp, (int)strlen(resp), 0);
+                                        }
+                                        hookLog("TCP cmd: timerpop hwnd=%p", (void *)g_gameHwnd);
+                                    } else {
+                                        send(s, "RESP:timerpop nohwnd\n", 21, 0);
+                                    }
+
+                                } else if (strncmp(buf, "timerscreen ", 12) == 0) {
+                                    /* Open a screen via timer callback using prepScreen+openScreen+commitScreen.
+                                     * Usage: timerscreen Campaign */
+                                    char name[64];
+                                    DWORD addr = 0;
+                                    memset(name, 0, sizeof(name));
+                                    if (sscanf(buf + 12, "%63s", name) == 1) {
+                                        addr = namedScreenAddress(name);
+                                    }
+                                    if (addr && g_gameHwnd) {
+                                        g_timerScreenAddr = addr;
+                                        SetTimer(g_gameHwnd, TIMER_ID_OPENSCREEN, 50, timerOpenScreenCallback);
+                                        {
+                                            char resp[160];
+                                            snprintf(resp, sizeof(resp),
+                                                "RESP:timerscreen armed name=%s addr=0x%08X hwnd=%p\n",
+                                                name, (unsigned)addr, (void *)g_gameHwnd);
+                                            send(s, resp, (int)strlen(resp), 0);
+                                        }
+                                        hookLog("TCP cmd: timerscreen name=%s addr=0x%08X", name, (unsigned)addr);
+                                    } else {
+                                        char resp[128];
+                                        snprintf(resp, sizeof(resp),
+                                            "RESP:timerscreen failed name=%s addr=0x%08X hwnd=%d\n",
+                                            name, (unsigned)addr, g_gameHwnd ? 1 : 0);
+                                        send(s, resp, (int)strlen(resp), 0);
+                                    }
+
                                 } else if (strncmp(buf, "floatscan", 9) == 0) {
                                     /* Scan memory for float values in range: floatscan START END MIN MAX */
                                     unsigned int start = 0x808000, end = 0x812000;
@@ -5772,6 +6516,20 @@ static DWORD WINAPI wakeThreadProc(LPVOID param) {
                                         }
                                     }
                                     pos += snprintf(out+pos, sizeof(out)-pos, " (%d found)\n", found);
+                                    send(s, out, pos, 0);
+                                } else if (strncmp(buf, "gaslog", 6) == 0) {
+                                    /* Report which VK codes the game polls with GetAsyncKeyState */
+                                    char out[512];
+                                    int pos = 0;
+                                    LONG slots = g_gasVkSlotCount;
+                                    if (slots > GAS_VK_SLOTS) slots = GAS_VK_SLOTS;
+                                    pos += snprintf(out+pos, sizeof(out)-pos, "RESP:gaslog slots=%ld total=%ld:",
+                                                    (long)slots, (long)g_gasCallCount);
+                                    for (LONG i = 0; i < slots; i++) {
+                                        pos += snprintf(out+pos, sizeof(out)-pos, " vk=0x%02X(%d)x%ld",
+                                                        g_gasVkCodes[i], g_gasVkCodes[i], (long)g_gasVkCounts[i]);
+                                    }
+                                    pos += snprintf(out+pos, sizeof(out)-pos, "\n");
                                     send(s, out, pos, 0);
                                 } else if (strncmp(buf, "fulllog", 7) == 0) {
                                     /* Return last 32KB of hook log */

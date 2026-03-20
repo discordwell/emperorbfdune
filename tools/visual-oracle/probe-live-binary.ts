@@ -196,6 +196,12 @@ async function main() {
       await sleep(1000);
     }
 
+    for (const keyChord of args.sendKeys) {
+      console.log(`[probe] send key: ${keyChord.join('+')}`);
+      await controller.sendKey(keyChord);
+      await sleep(args.sendKeyWaitMs);
+    }
+
     for (const runCommand of args.runCommands) {
       console.log(`[probe] run dialog: ${runCommand}`);
       await openRunDialog(controller);
@@ -219,12 +225,6 @@ async function main() {
     if (args.deployMode) {
       server.commandsEnabled = true;
       console.log(`[probe] deploy mode: commands now enabled`);
-    }
-
-    for (const keyChord of args.sendKeys) {
-      console.log(`[probe] send key: ${keyChord.join('+')}`);
-      await controller.sendKey(keyChord);
-      await sleep(args.sendKeyWaitMs);
     }
 
     if (args.qmpMoveX !== null && args.qmpMoveY !== null) {
