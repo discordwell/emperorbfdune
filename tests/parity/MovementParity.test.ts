@@ -3,10 +3,10 @@
  * Verifies movement formulas from MovementSystem.ts against rules.txt.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
-import { getRealRules } from './rulesOracle';
+import { describeWithRules, getRealRules } from './rulesOracle';
 import type { GameRules } from '../../src/config/RulesParser';
 
-describe('MovementParity — movement formula verification', () => {
+describeWithRules('MovementParity — movement formula verification', () => {
   let rules: GameRules;
 
   beforeAll(() => {

@@ -5,9 +5,9 @@
  * Catches Bug 1: campaign-only heroes spawning in skirmish.
  */
 import { describe, it, expect } from 'vitest';
-import { getRealRules, getAiSpecialUnits, MAIN_FACTIONS } from './rulesOracle';
+import { describeWithRules, getRealRules, getAiSpecialUnits, MAIN_FACTIONS } from './rulesOracle';
 
-describe('SpawnParity — FreshGameSpawn filters', () => {
+describeWithRules('SpawnParity — FreshGameSpawn filters', () => {
   const rules = getRealRules();
   const aiSpecial = getAiSpecialUnits(rules);
 

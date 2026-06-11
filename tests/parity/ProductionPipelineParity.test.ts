@@ -3,11 +3,11 @@
  * Expands existing ProductionParity.test.ts with formula-level tests.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
-import { getRealRules, MAIN_FACTIONS } from './rulesOracle';
+import { describeWithRules, getRealRules, MAIN_FACTIONS } from './rulesOracle';
 import { GameConstants, loadConstants } from '../../src/utils/Constants';
 import type { GameRules } from '../../src/config/RulesParser';
 
-describe('ProductionPipelineParity — production formula verification', () => {
+describeWithRules('ProductionPipelineParity — production formula verification', () => {
   let rules: GameRules;
 
   beforeAll(() => {

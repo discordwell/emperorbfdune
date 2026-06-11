@@ -4,20 +4,16 @@
  * The linchpin test — catches all General section issues.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
-import fs from 'fs';
-import path from 'path';
 import { parseRawIni, rawNum, type RawSection } from '../../scripts/parity/rawIniParser';
 import { GameConstants, loadConstants } from '../../src/utils/Constants';
-import { getRealRules } from './rulesOracle';
+import { describeWithRules, loadRawRulesText, getRealRules } from './rulesOracle';
 
-describe('GeneralConstantsParity — [General] section verification', () => {
+describeWithRules('GeneralConstantsParity — [General] section verification', () => {
   let raw: RawSection;
 
   beforeAll(() => {
     // Load via independent raw parser
-    const rulesText = fs.readFileSync(
-      path.resolve(__dirname, '../../extracted/MODEL0001/rules.txt'), 'utf-8'
-    );
+    const rulesText = loadRawRulesText();
     const ini = parseRawIni(rulesText);
     raw = ini.sections.get('General')!;
     expect(raw, '[General] section must exist in rules.txt').toBeDefined();

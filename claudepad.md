@@ -2,6 +2,16 @@
 
 ## Session Summaries
 
+### 2026-06-11T01:00UTC - Maintenance: Suite Passes on Clean Checkouts + Repo Hygiene
+- **Root cause of every-night nightly CI failures found**: full `vitest run` requires gitignored `extracted/MODEL0001/rules.txt` (proprietary game data, never in CI). 17 parity files crashed at collection/beforeAll, 10 GameFidelity tests failed. This is why the cron was red until disabled.
+- **Fix**: new `describeWithRules(name, factory)` in `tests/parity/rulesOracle.ts` — skips suite AND suppresses factory when data absent (vitest executes skipIf'd describe bodies at collection, so factory suppression is required, verified on vitest 4.0.18). All 17 parity files + 3 GameFidelity describes converted. `REAL_RULES_REQUIRE=1` turns silent skip into hard fail (mirrors TOK_REFERENCE_REQUIRE `=1` convention — plain truthiness would make `=0` enable it).
+- **Centralized rules.txt access**: exported `RULES_PATH`, `loadRawRulesText()`; killed ~10 duplicated path literals; GameFidelity now uses cached `getRealRules()` instead of re-parsing 224KB rules.txt per beforeEach (verified no test mutates the shared rules object).
+- **tsx added to devDependencies**: `parity:source(:strict)` + 3 visual-oracle scripts referenced tsx but it was never declared — broken on clean install. Now: 13,400 fields, 0 mismatches, 1 documented divergence. Script exits 1 with clear message when data missing (both modes).
+- **Hygiene**: removed accidentally-committed `C:\Users\User\screen.ppm` (1.4MB — filename invalid on Windows, broke `git checkout` there) and 3.2MB root screenshot; gitignore: `*.ppm`, `/Screenshot*.png`, `/C\:*` (root-anchored).
+- **Bug fix in src/index.ts**: fetched `Rules.txt` but on-disk file is `rules.txt` — 404 on case-sensitive filesystems (Linux); worked only on APFS.
+- Verified: with data 798/798 pass; without data 448 pass/17 files skipped/exit 0; REQUIRE=1 fails exit 1, REQUIRE=0 skips.
+- **Option noted for operator**: rules.txt is 219KB text; force-adding it (like the 229 committed .tok files) would make parity tests CI-gating everywhere. IP call — not taken unilaterally.
+
 ### 2026-03-19T21:00UTC - Campaign Navigation: Root Cause Found + Path Forward
 - **Root cause confirmed**: `selectScreenEntry("Campaign")` crashes because the Campaign mode handler (0x4E52B0/0x4E5320) dereferences `[0x808CDC]` (campaign state pointer) which is NULL on the title screen. The campaign state object is only created when entering campaign mode through the game's normal UI flow.
 - **Proof**: `selectScreenEntry("Options")` works perfectly — game stays alive, `so=185`. Campaign is the ONLY entry that crashes.
@@ -225,45 +235,6 @@
 - Fix: Escort follow logic overrides current move when target moves away (was only following when idle)
 - Fix: Defenders excluded from idle rally (was pulling defenders away from base)
 - Fix: Blast damage skips unowned entities (was treating neutral entities as player 0 friendlies)
-
-### 2026-02-20T11:00UTC - 9 Bug Fixes: Worm Spawns, Rendering, Dispose, Fog
-- Fix: Worm spawn chance scaled by 100-tick check interval (was 100x too rare, worms never spawned)
-- Fix: eatUnit guards against already-dead units (prevents double death events)
-- Fix: Sand particles wrap in both directions (was one-way, particles vanished when panning)
-- Fix: Sand particles removed from scene on dispose (was leaking in scene graph)
-- Fix: Team color tinting uses pre-cloned materials from ModelManager (was double-cloning)
-- Fix: Null guard on currentWorld in shield visuals
-- Fix: Sidebar dispose() cleans up keyboard listener
-- Fix: MinimapRenderer dispose() cleans up event listeners
-- Fix: Fog array bounds check treats OOB tiles as unexplored (was rendering as visible)
-- Commit: 46af2cd
-
-### 2026-02-20T10:00UTC - 6 Bug Fixes: Leech, Ordos Heal, Campaign, Audio
-- Fix: Leech double-spawn on target kill (handleUnitDeath already spawns, updateLeech was spawning again)
-- Fix: Ordos units double healing (faction bonus + canSelfRepair both healing 1%/2s → now skips canSelfRepair units in faction bonus)
-- Fix: Phase 3 victory-without-capture missing lose check (only warning was checked, lose threshold ignored)
-- Fix: Orphaned HTMLAudioElement during rapid crossfade (previous fading element never paused)
-- Fix: Crossfade volume pop on unmute (fadingOutElement jumped to full volume mid-fade)
-- Fix: Ambient wind on unmute before game (windEverStarted flag prevents premature wind start)
-
-### 2026-02-20T20:00UTC - 28 Bug Fixes in 5 Commits: Entity ID Recycling, Combat, AI, UI
-- Commits: 0954376, b1d774a, a4e2b4f, 09ffc64, 782784e
-- Major theme: Entity ID recycling guards across all systems (bitECS reuses IDs)
-- CombatSystem: death check before slowdown, power clamp, escort follow, blast ownership
-- EventBus: try/catch + snapshot listeners prevent exception propagation
-- AIPlayer: ConYard-anchored base, inverted difficulty fix, defender rally skip
-- HarvestSystem: bloom damage constant fix (200), refinery ID validation
-- MovementSystem: comprehensive unregisterEntity() cleanup
-- ProductionSystem: queue progress clamp
-- FogOfWar: reinitialize tickCounter match
-- SelectionPanel: dead entity removal, sell timer clear
-- InputManager: dispose(), consumeKey(), named handlers
-- EffectsManager: worm visual position init
-- SandwormSystem: hunting target hasComponent guard
-- UnitRenderer: move interrupts fire anim, clearDyingObjects()
-- Sidebar: Starport tab reset on expiry
-- Constants: SPICE_BLOOM_DAMAGE updated 10->200
-- spawnUnit/spawnBuilding: zero stale AttackTarget/Velocity/Combat fields
 
 
 

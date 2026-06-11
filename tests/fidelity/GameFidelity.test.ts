@@ -7,9 +7,6 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createWorld, addEntity, addComponent } from 'bitecs';
-import * as fs from 'node:fs';
-import * as path from 'node:path';
-
 // ECS components and queries
 import {
   Position, Velocity, Speed, MoveTarget, Rotation, Health,
@@ -21,7 +18,8 @@ import {
 import { FormationSystem } from '../../src/simulation/FormationSystem';
 
 // Config / parsing
-import { parseRules, type GameRules } from '../../src/config/RulesParser';
+import type { GameRules } from '../../src/config/RulesParser';
+import { describeWithRules, getRealRules } from '../parity/rulesOracle';
 import {
   type BulletDef, type TurretDef,
   ImpactType, classifyImpactType,
@@ -218,13 +216,11 @@ describe('2. Formation Movement', () => {
 // 3. Rules.txt Field Parsing (RulesParser)
 // ========================================================================
 
-describe('3. Rules.txt Field Parsing', () => {
+describeWithRules('3. Rules.txt Field Parsing', () => {
   let rules: GameRules;
 
   beforeEach(() => {
-    const rulesPath = path.resolve(__dirname, '../../extracted/MODEL0001/rules.txt');
-    const text = fs.readFileSync(rulesPath, 'utf-8');
-    rules = parseRules(text);
+    rules = getRealRules();
   });
 
   it('parses CrateGift on known units', () => {
@@ -860,11 +856,9 @@ describe('13. Fog of War', () => {
 // Integration: Rules.txt parsed values flow into Constants
 // ========================================================================
 
-describe('Integration: Rules.txt -> Constants pipeline', () => {
+describeWithRules('Integration: Rules.txt -> Constants pipeline', () => {
   it('loadSpiceMoundConfig populates from real rules.txt [SpiceMound] section', () => {
-    const rulesPath = path.resolve(__dirname, '../../extracted/MODEL0001/rules.txt');
-    const text = fs.readFileSync(rulesPath, 'utf-8');
-    const rules = parseRules(text);
+    const rules = getRealRules();
 
     // Load the real spice mound config
     loadSpiceMoundConfig(rules.spiceMound);
@@ -952,11 +946,9 @@ describe('Integration: Formation speed cap applied to movement', () => {
 // Integration: Weapon classification from real rules.txt data
 // ========================================================================
 
-describe('Integration: Weapon classification from parsed rules.txt', () => {
+describeWithRules('Integration: Weapon classification from parsed rules.txt', () => {
   it('classifies real bullet defs from rules.txt correctly', () => {
-    const rulesPath = path.resolve(__dirname, '../../extracted/MODEL0001/rules.txt');
-    const text = fs.readFileSync(rulesPath, 'utf-8');
-    const rules = parseRules(text);
+    const rules = getRealRules();
 
     // Check a few known bullet types
     let testedSomething = false;

@@ -5,9 +5,9 @@
  * Catches Bug 2: campaign generals/engineers visible in sidebar.
  */
 import { describe, it, expect } from 'vitest';
-import { getRealRules, getAiSpecialUnits, MAIN_FACTIONS } from './rulesOracle';
+import { describeWithRules, getRealRules, getAiSpecialUnits, MAIN_FACTIONS } from './rulesOracle';
 
-describe('SidebarParity — renderUnitItems filter', () => {
+describeWithRules('SidebarParity — renderUnitItems filter', () => {
   const rules = getRealRules();
   const aiSpecial = getAiSpecialUnits(rules);
 

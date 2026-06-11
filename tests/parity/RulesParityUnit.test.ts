@@ -3,9 +3,9 @@
  * from Rules.txt are parsed correctly.
  */
 import { describe, it, expect } from 'vitest';
-import { getRealRules, getAiSpecialUnits, ALL_FACTIONS } from './rulesOracle';
+import { describeWithRules, getRealRules, getAiSpecialUnits, ALL_FACTIONS } from './rulesOracle';
 
-describe('RulesParityUnit — unit stat verification', () => {
+describeWithRules('RulesParityUnit — unit stat verification', () => {
   const rules = getRealRules();
   const aiSpecial = getAiSpecialUnits(rules);
 

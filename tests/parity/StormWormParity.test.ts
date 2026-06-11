@@ -3,19 +3,15 @@
  * Verifies sandstorm and sandworm constants from rules.txt.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
-import fs from 'fs';
-import path from 'path';
 import { parseRawIni, rawNum, type RawSection } from '../../scripts/parity/rawIniParser';
 import { GameConstants, loadConstants } from '../../src/utils/Constants';
-import { getRealRules } from './rulesOracle';
+import { describeWithRules, loadRawRulesText, getRealRules } from './rulesOracle';
 
-describe('StormWormParity — storm and worm constant verification', () => {
+describeWithRules('StormWormParity — storm and worm constant verification', () => {
   let raw: RawSection;
 
   beforeAll(() => {
-    const rulesText = fs.readFileSync(
-      path.resolve(__dirname, '../../extracted/MODEL0001/rules.txt'), 'utf-8'
-    );
+    const rulesText = loadRawRulesText();
     const ini = parseRawIni(rulesText);
     raw = ini.sections.get('General')!;
 

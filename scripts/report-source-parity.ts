@@ -104,6 +104,13 @@ function generateMarkdown(report: ParityReport): string {
 // Main
 const strict = process.argv.includes('--strict');
 
+if (!fs.existsSync(RULES_PATH)) {
+  console.error(`rules.txt not found at ${RULES_PATH}`);
+  console.error('The extracted/ directory holds proprietary game data and is not in git.');
+  console.error('Extract the game assets first — this report cannot run without them.');
+  process.exit(1);
+}
+
 console.log('Loading rules.txt...');
 const rulesText = fs.readFileSync(RULES_PATH, 'utf-8');
 

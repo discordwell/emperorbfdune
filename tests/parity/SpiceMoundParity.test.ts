@@ -3,20 +3,16 @@
  * Verifies all 8 SpiceMound constants + derived values.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
-import fs from 'fs';
-import path from 'path';
 import { parseRawIni, rawNum, type RawSection } from '../../scripts/parity/rawIniParser';
 import { GameConstants, loadSpiceMoundConfig } from '../../src/utils/Constants';
 import { TILE_SIZE } from '../../src/utils/MathUtils';
-import { getRealRules } from './rulesOracle';
+import { describeWithRules, loadRawRulesText, getRealRules } from './rulesOracle';
 
-describe('SpiceMoundParity — [SpiceMound] section verification', () => {
+describeWithRules('SpiceMoundParity — [SpiceMound] section verification', () => {
   let raw: RawSection;
 
   beforeAll(() => {
-    const rulesText = fs.readFileSync(
-      path.resolve(__dirname, '../../extracted/MODEL0001/rules.txt'), 'utf-8'
-    );
+    const rulesText = loadRawRulesText();
     const ini = parseRawIni(rulesText);
     raw = ini.sections.get('SpiceMound')!;
     expect(raw, '[SpiceMound] section must exist').toBeDefined();

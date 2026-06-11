@@ -3,11 +3,11 @@
  * Verifies harvest economy formulas against rules.txt values.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
-import { getRealRules } from './rulesOracle';
+import { describeWithRules, getRealRules } from './rulesOracle';
 import { GameConstants, loadConstants } from '../../src/utils/Constants';
 import type { GameRules } from '../../src/config/RulesParser';
 
-describe('HarvestParity — harvest economy verification', () => {
+describeWithRules('HarvestParity — harvest economy verification', () => {
   let rules: GameRules;
 
   beforeAll(() => {

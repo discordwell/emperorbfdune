@@ -69,7 +69,9 @@ async function main() {
 
   // Load rules and art ini in parallel
   const [rulesResponse, artResponse] = await Promise.all([
-    fetch('/extracted/MODEL0001/Rules.txt'),
+    // lowercase to match the extracted file's on-disk name — case-sensitive
+    // filesystems (Linux) 404 on 'Rules.txt'
+    fetch('/extracted/MODEL0001/rules.txt'),
     fetch('/extracted/MODEL0001/ArtIni.txt'),
   ]);
   const [rulesText, artText] = await Promise.all([rulesResponse.text(), artResponse.text()]);

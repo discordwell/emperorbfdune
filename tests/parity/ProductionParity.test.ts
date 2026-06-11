@@ -6,11 +6,11 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ProductionSystem } from '../../src/simulation/ProductionSystem';
-import { getRealRules, getAiSpecialUnits, MAIN_FACTIONS } from './rulesOracle';
+import { describeWithRules, getRealRules, getAiSpecialUnits, MAIN_FACTIONS } from './rulesOracle';
 import { MockHarvestSystem } from './mockHarvestSystem';
 import { EventBus } from '../../src/core/EventBus';
 
-describe('ProductionParity — aiSpecial units are unbuildable', () => {
+describeWithRules('ProductionParity — aiSpecial units are unbuildable', () => {
   const rules = getRealRules();
   const aiSpecial = getAiSpecialUnits(rules);
 

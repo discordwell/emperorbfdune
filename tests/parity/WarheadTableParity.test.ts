@@ -4,22 +4,18 @@
  * Like Zachathon's 9x5 table — every warhead/armor combination checked.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
-import fs from 'fs';
-import path from 'path';
 import { parseRawIni, type RawSection } from '../../scripts/parity/rawIniParser';
-import { getRealRules } from './rulesOracle';
+import { describeWithRules, loadRawRulesText, getRealRules } from './rulesOracle';
 import { ARMOUR_TYPES } from '../../src/config/WeaponDefs';
 import type { GameRules } from '../../src/config/RulesParser';
 
-describe('WarheadTableParity — warhead x armor matrix', () => {
+describeWithRules('WarheadTableParity — warhead x armor matrix', () => {
   let rules: GameRules;
   let rawSections: Map<string, RawSection>;
 
   beforeAll(() => {
     rules = getRealRules();
-    const rulesText = fs.readFileSync(
-      path.resolve(__dirname, '../../extracted/MODEL0001/rules.txt'), 'utf-8'
-    );
+    const rulesText = loadRawRulesText();
     rawSections = parseRawIni(rulesText).sections;
   });
 

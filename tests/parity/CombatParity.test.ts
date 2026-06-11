@@ -3,11 +3,11 @@
  * Verifies the full damage pipeline formulas from CombatSystem.ts against rules.txt values.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
-import { getRealRules } from './rulesOracle';
+import { describeWithRules, getRealRules } from './rulesOracle';
 import { GameConstants, loadConstants } from '../../src/utils/Constants';
 import type { GameRules } from '../../src/config/RulesParser';
 
-describe('CombatParity — damage pipeline formulas', () => {
+describeWithRules('CombatParity — damage pipeline formulas', () => {
   let rules: GameRules;
 
   beforeAll(() => {

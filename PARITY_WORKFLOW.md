@@ -88,3 +88,21 @@ npm run parity:tests
 # All tests including parity
 npm test
 ```
+
+## Game Data Requirement
+
+All Layer 1 and Layer 2 checks read `extracted/MODEL0001/rules.txt`. The
+`extracted/` directory holds proprietary game data and is gitignored, so it
+only exists on machines where the game assets have been extracted — never in
+CI or fresh clones. When the file is absent:
+
+- Parity and fidelity test suites **skip** instead of failing, so `npm test`
+  passes on a clean checkout. Suites opt in by declaring themselves with
+  `describeWithRules(...)` from `tests/parity/rulesOracle.ts` — always use it
+  instead of a bare `describe` for anything reading rules.txt (vitest executes
+  describe bodies at collection time even when skipped, so ad-hoc guards are
+  easy to get wrong).
+- On machines where the data is *supposed* to exist, set `REAL_RULES_REQUIRE=1`
+  to turn the silent skip into a hard failure (mirrors `TOK_REFERENCE_REQUIRE`).
+- `npm run parity:source` / `parity:source:strict` exit 1 with an explanatory
+  message, since the report cannot be generated without the source data.

@@ -3,21 +3,17 @@
  * Verifies veterancy level data parsed from rules.txt.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
-import fs from 'fs';
-import path from 'path';
 import { parseRawIni, type RawSection } from '../../scripts/parity/rawIniParser';
-import { getRealRules } from './rulesOracle';
+import { describeWithRules, loadRawRulesText, getRealRules } from './rulesOracle';
 import type { GameRules } from '../../src/config/RulesParser';
 
-describe('VeterancyParity — veterancy level verification', () => {
+describeWithRules('VeterancyParity — veterancy level verification', () => {
   let rules: GameRules;
   let rawSections: Map<string, RawSection>;
 
   beforeAll(() => {
     rules = getRealRules();
-    const rulesText = fs.readFileSync(
-      path.resolve(__dirname, '../../extracted/MODEL0001/rules.txt'), 'utf-8'
-    );
+    const rulesText = loadRawRulesText();
     rawSections = parseRawIni(rulesText).sections;
   });
 

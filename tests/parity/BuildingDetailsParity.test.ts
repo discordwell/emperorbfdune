@@ -3,21 +3,17 @@
  * Deep building verification against rules.txt.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
-import fs from 'fs';
-import path from 'path';
 import { parseRawIni, rawNum, rawStr, rawBool, type RawSection } from '../../scripts/parity/rawIniParser';
-import { getRealRules, MAIN_FACTIONS } from './rulesOracle';
+import { describeWithRules, loadRawRulesText, getRealRules, MAIN_FACTIONS } from './rulesOracle';
 import type { GameRules } from '../../src/config/RulesParser';
 
-describe('BuildingDetailsParity — deep building verification', () => {
+describeWithRules('BuildingDetailsParity — deep building verification', () => {
   let rules: GameRules;
   let rawSections: Map<string, RawSection>;
 
   beforeAll(() => {
     rules = getRealRules();
-    const rulesText = fs.readFileSync(
-      path.resolve(__dirname, '../../extracted/MODEL0001/rules.txt'), 'utf-8'
-    );
+    const rulesText = loadRawRulesText();
     rawSections = parseRawIni(rulesText).sections;
   });
 

@@ -2,8 +2,8 @@
  * Weapon Parity Test — verifies weapon chain integrity from Rules.txt.
  * Every turretAttach → valid turret → valid bullet → valid warhead.
  */
-import { describe, it, expect } from 'vitest';
-import { getRealRules } from './rulesOracle';
+import { it, expect } from 'vitest';
+import { describeWithRules, getRealRules } from './rulesOracle';
 
 /** Case-insensitive lookup helper (Rules.txt has inconsistent casing) */
 function hasCI(map: Map<string, unknown>, key: string): boolean {
@@ -15,7 +15,7 @@ function hasCI(map: Map<string, unknown>, key: string): boolean {
   return false;
 }
 
-describe('WeaponParity — weapon chain integrity', () => {
+describeWithRules('WeaponParity — weapon chain integrity', () => {
   const rules = getRealRules();
 
   it('every unit turretAttach points to valid turret(s)', () => {
