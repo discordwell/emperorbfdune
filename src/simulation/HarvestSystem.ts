@@ -67,8 +67,10 @@ export class HarvestSystem implements GameSystem {
     this.terrain = terrain;
 
     // Harvesters flee when damaged (unless already returning/unloading)
-    // Only flee if health drops below 50% — a stray bullet shouldn't send them home
-    EventBus.on('unit:damaged', ({ entityId }) => {
+    // Only flee if health drops below 50% — a stray bullet shouldn't send them home.
+    // Listen to combat:hit (fired for ALL owners) rather than unit:damaged (which the
+    // CombatSystem only emits for the local player) — otherwise AI harvesters never flee.
+    EventBus.on('combat:hit', ({ entityId }) => {
       if (!this.knownHarvesters.has(entityId)) return;
       const state = Harvester.state[entityId];
       if (state === RETURNING || state === UNLOADING) return;

@@ -694,6 +694,7 @@ export class CombatSystem implements GameSystem {
     const targetOwner = Owner.playerId[targetEid];
     const attackerOwner = Owner.playerId[attackerEid];
     EventBus.emit('combat:hit', {
+      entityId: targetEid,
       x: Position.x[targetEid],
       z: Position.z[targetEid],
       damage,
