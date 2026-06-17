@@ -2,6 +2,17 @@
 
 ## Session Summaries
 
+### 2026-06-17T04:40UTC - Bugfixes: AI Harvester Flee + LockstepManager Determinism
+- **AI harvesters never fled when damaged** (active gameplay bug, every match). `HarvestSystem`'s flee-on-damage logic listened to `unit:damaged`, but `CombatSystem` only emits that event for the *local* player (`targetOwner === localPlayerId`). `knownHarvesters` tracks ALL harvesters (via `harvestQuery`), so the mechanic was always meant to be universal. Fix: flee listener now subscribes to `combat:hit` (emitted for every hit, all owners, from the exact same point in `applyDamageToEntity`). Added `entityId` to the `combat:hit` payload (`EventBus.ts`, `CombatSystem.ts:696`).
+  - **Semantic note**: `combat:hit` is not owner-gated, so a harvester caught in *friendly* AoE/splash now also flees (old `unit:damaged` excluded same-owner attacks). Arguably more correct; intentional. Spice-bloom AoE bypasses `applyDamageToEntity` so it still doesn't trigger flee.
+  - Tests: `tests/simulation/harvest.test.ts` (7) — AI flee, glancing-hit no-flee, local-player regression, non-harvester ignore, debounce, RETURNING-guard, end-to-end via `CombatSystem.update()`. Verified 3/5 original cases FAIL against the pre-fix listener.
+- **LockstepManager: three latent determinism bugs** (module built+ tested but not yet wired; `startRecording`/`ReplayPlayer.start` also never called). Fixed so it actually works when MP/replay is wired:
+  1. **Desync detection never fired**: hashes are attached when `localTick % 25 === 0` but scheduled `INPUT_DELAY` (3) ticks ahead, so they live on ticks `≡ 3 (mod 25)`; `checkDesync` gated on `tick % 25 === 0` — a disjoint set. Removed the modulo guard; now gates on local-hash presence. Also `!localInput?.hash` → `=== undefined` (hash of 0 is valid).
+  2. **Bootstrap deadlock**: local input always lands at `localTick+3`, so ticks 1..2 never got input and `tryAdvance()` stalled on tick 1 forever. Added `seedWarmup()` (constructor + `reset()`) to seed empty inputs for the warmup window.
+  3. **Leaky cleanup**: old-buffer purge used `else break` assuming sorted Map iteration, but Maps iterate in insertion order; an early future-tick buffer made it bail and leak everything behind it. Removed the `break`.
+  - Added `getBufferedTickCount()` diagnostic getter. Tests: `tests/net/LockstepManager.test.ts` (9, first `net/` coverage). Verified desync + cleanup tests FAIL against the buggy versions.
+- Suite: 814 pass / 58 files (was 798/56). Typecheck + production build clean. Committed to `main`, not pushed (orchestrator handles push).
+
 ### 2026-06-11T01:00UTC - Maintenance: Suite Passes on Clean Checkouts + Repo Hygiene
 - **Root cause of every-night nightly CI failures found**: full `vitest run` requires gitignored `extracted/MODEL0001/rules.txt` (proprietary game data, never in CI). 17 parity files crashed at collection/beforeAll, 10 GameFidelity tests failed. This is why the cron was red until disabled.
 - **Fix**: new `describeWithRules(name, factory)` in `tests/parity/rulesOracle.ts` — skips suite AND suppresses factory when data absent (vitest executes skipIf'd describe bodies at collection, so factory suppression is required, verified on vitest 4.0.18). All 17 parity files + 3 GameFidelity describes converted. `REAL_RULES_REQUIRE=1` turns silent skip into hard fail (mirrors TOK_REFERENCE_REQUIRE `=1` convention — plain truthiness would make `=0` enable it).

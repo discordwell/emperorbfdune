@@ -53,6 +53,23 @@ export class LockstepManager {
     this.session = session;
     this.events = events;
     this.totalPlayers = peerIds.length + 1;
+    this.seedWarmup();
+  }
+
+  /**
+   * Seed empty inputs for the warmup window (ticks 1..INPUT_DELAY-1).
+   * Local commands are always scheduled INPUT_DELAY ticks ahead, so the first
+   * tick any player can ever produce input for is INPUT_DELAY itself — leaving
+   * the earliest ticks with no input. Without seeding them, tryAdvance() would
+   * stall on tick 1 forever and the simulation could never start. No commands
+   * can legitimately exist for these ticks anyway, so empty inputs are correct.
+   */
+  private seedWarmup(): void {
+    const allIds = [this.localPlayerId, ...this.peerIds];
+    for (let t = 1; t < INPUT_DELAY; t++) {
+      const buffer = this.getOrCreateTickBuffer(t);
+      for (const id of allIds) buffer.set(id, { commands: [] });
+    }
   }
 
   /**
@@ -146,10 +163,12 @@ export class LockstepManager {
     this.events.onTickReady(tick, merged);
     this.confirmedTick = tick;
 
-    // Clean up old buffers
+    // Clean up old buffers. Map iteration is in insertion order, which is NOT
+    // necessarily ascending by tick — a peer's input for a future tick can be
+    // inserted before an older tick is confirmed — so we cannot `break` early
+    // or genuinely old buffers would leak. Deleting while iterating keys() is safe.
     for (const t of this.inputBuffer.keys()) {
       if (t < tick - 10) this.inputBuffer.delete(t);
-      else break;
     }
 
     return true;
@@ -166,10 +185,14 @@ export class LockstepManager {
   }
 
   private checkDesync(tick: number, buffer: Map<string, TickInput>): void {
-    if (tick % HASH_CHECK_INTERVAL !== 0) return;
-
+    // Hashes are attached in queueLocalInput when `localTick % HASH_CHECK_INTERVAL === 0`,
+    // but scheduled INPUT_DELAY ticks ahead — so they live on ticks where
+    // `tick % HASH_CHECK_INTERVAL === INPUT_DELAY`, never on multiples of the interval.
+    // Gating on `tick % HASH_CHECK_INTERVAL === 0` (the old check) therefore never lined
+    // up with a hash-bearing tick and silently disabled desync detection entirely.
+    // Instead, gate on the presence of a local hash: ticks without one bail out cheaply.
     const localInput = buffer.get(this.localPlayerId);
-    if (!localInput?.hash) return;
+    if (localInput?.hash === undefined) return;
 
     const remoteHashes = new Map<string, number>();
     let desync = false;
@@ -218,11 +241,17 @@ export class LockstepManager {
     return this.stalling;
   }
 
+  /** Number of ticks currently held in the input buffer (diagnostic). */
+  getBufferedTickCount(): number {
+    return this.inputBuffer.size;
+  }
+
   /** Reset for a new game */
   reset(): void {
     this.inputBuffer.clear();
     this.localTick = 0;
     this.confirmedTick = 0;
     this.stalling = false;
+    this.seedWarmup();
   }
 }
