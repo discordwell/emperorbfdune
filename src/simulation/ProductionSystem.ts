@@ -475,12 +475,14 @@ export class ProductionSystem {
         const shouldRepeat = this.repeatUnits.get(playerId)?.has(completedName) ?? false;
         queue.shift();
         EventBus.emit('production:complete', { unitType: completedName, owner: playerId, buildingId: 0, isBuilding: false });
-        // Defer repeat-requeue: the just-completed unit hasn't spawned yet, so
-        // canBuild's pop cap check would be off by one. Add +1 to account for it.
+        // production:complete is emitted synchronously, and its handler spawns the
+        // unit synchronously, so by now unitCountCallback already counts it. Use the
+        // same `count + queued < maxUnits` test as canBuild (line ~399); an extra +1
+        // here would double-count the just-spawned unit and stop one short of the cap.
         if (shouldRepeat && this.unitCountCallback) {
           const queuedUnits = (this.infantryQueues.get(playerId)?.length ?? 0)
                             + (this.vehicleQueues.get(playerId)?.length ?? 0);
-          if (this.unitCountCallback(playerId) + queuedUnits + 1 < this.maxUnits) {
+          if (this.unitCountCallback(playerId) + queuedUnits < this.maxUnits) {
             this.startProduction(playerId, completedName, false);
           }
         } else if (shouldRepeat) {
@@ -503,7 +505,7 @@ export class ProductionSystem {
         if (shouldRepeat && this.unitCountCallback) {
           const queuedUnits = (this.infantryQueues.get(playerId)?.length ?? 0)
                             + (this.vehicleQueues.get(playerId)?.length ?? 0);
-          if (this.unitCountCallback(playerId) + queuedUnits + 1 < this.maxUnits) {
+          if (this.unitCountCallback(playerId) + queuedUnits < this.maxUnits) {
             this.startProduction(playerId, completedName, false);
           }
         } else if (shouldRepeat) {

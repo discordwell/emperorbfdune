@@ -392,6 +392,29 @@ describe('ProductionSystem', () => {
       expect(production.toggleRepeat(0, 'ATLightInf')).toBe(false);
       expect(production.isOnRepeat(0, 'ATLightInf')).toBe(false);
     });
+
+    it('fills exactly to the population cap (no off-by-one)', () => {
+      // In the real game, production:complete is emitted synchronously and its
+      // handler spawns the unit synchronously, so the unit-count callback sees
+      // the new unit immediately. Model that: the callback returns a counter that
+      // the production:complete listener increments. The repeat-requeue gate used
+      // to add +1 on top of this already-counted unit, stopping one short of the
+      // cap (e.g. 2/3). With the fix it should fill exactly to the cap.
+      let liveUnits = 0;
+      production.setUnitCountCallback(() => liveUnits);
+      production.setMaxUnits(3);
+      EventBus.on('production:complete', ({ isBuilding }) => {
+        if (!isBuilding) liveUnits++;
+      });
+
+      production.toggleRepeat(0, 'ATLightInf');
+      production.startProduction(0, 'ATLightInf', false);
+
+      // ATLightInf build time is 100 ticks; run well past steady state.
+      for (let i = 0; i < 600; i++) production.update();
+
+      expect(liveUnits).toBe(3); // was 2 before the off-by-one fix
+    });
   });
 
   describe('building tracking', () => {

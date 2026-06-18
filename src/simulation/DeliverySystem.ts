@@ -36,7 +36,12 @@ const enum Phase {
 // Timing constants (in simulation ticks at 25 tps)
 const HOVER_TICKS = 15;     // ~0.6s hover before drop
 const DROP_TICKS = 10;      // ~0.4s drop animation time
-const CARRYALL_SPEED = 0.6; // World units per tick (faster than normal units)
+// Raw rules-style speed assigned to Speed.max; MovementSystem scales it by the
+// per-tick factor (0.04). The real Carryall flies at Speed=20, so 24 keeps the
+// delivery transport a touch faster than normal ground units (~16-24) instead of
+// the previous 0.6, which — once scaled — crawled ~33x too slow and made scripted
+// reinforcements take minutes to arrive.
+const CARRYALL_SPEED = 24;
 const ARRIVAL_THRESHOLD = 3.0;
 const FLIGHT_ALTITUDE = 5.0;
 

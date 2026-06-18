@@ -17,10 +17,21 @@ export function buildSaveData(ctx: GameContext): SaveData {
   const eidToIndex = new Map<number, number>();
   const { unitTypeNames, buildingTypeNames } = ctx.typeRegistry;
 
+  // Units currently riding a transport are parked off-map (-999) but are still
+  // live entities, so they appear in unitQuery. They are persisted via their
+  // transport's `passengerTypeIds` below and recreated on load — saving them
+  // again here would resurrect them as orphaned ghosts at (-999) AND duplicate
+  // them inside the APC. Collect them so we can skip them in the unit loop.
+  const passengerEids = new Set<number>();
+  for (const passengers of ctx.abilitySystem.getTransportPassengers().values()) {
+    for (const p of passengers) passengerEids.add(p);
+  }
+
   // Save all units
   const allUnits = unitQuery(w);
   for (const eid of allUnits) {
     if (Health.current[eid] <= 0) continue;
+    if (passengerEids.has(eid)) continue;
     eidToIndex.set(eid, entities.length);
     const se: import('./GameContext').SavedEntity = {
       x: Position.x[eid], z: Position.z[eid], y: Position.y[eid],

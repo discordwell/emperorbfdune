@@ -2,6 +2,23 @@
 
 ## Session Summaries
 
+### 2026-06-18T06:50UTC - Bugfixes: Carryall Delivery Speed, Transport Save/Load Dup, AI Scout Recycle, Repeat Pop-Cap
+- **Four genuine bugs** found via 4 parallel read-only bug-hunt agents (across Production/SaveLoad, Ability/Superweapon/Sandworm, Movement/Delivery/Destruction, AI/Combat), each independently verified by reverting the fix and watching the new test fail. Suite: **831 pass / 62 files** (was 823/59). Typecheck + production build clean. Adversarial read-only review of the final diff: no regressions.
+- **Carryall delivery flew ~33x too slow** (`DeliverySystem.ts`). `CARRYALL_SPEED = 0.6` was assigned to `Speed.max`, but `MovementSystem` scales velocity by `*0.04` per tick, so the carryall moved 0.024 u/tick vs a normal unit's ~0.8. The real Carryall is `Speed=20` in rules.txt. Scripted `.tok` reinforcements (CarryAllDelivery/Delivery/StarportDelivery) crawled across the map and effectively never arrived (units only spawn on arrival). Fix: `CARRYALL_SPEED = 24` (raw rules units, faster than ground units). New `tests/simulation/delivery.test.ts` drives a real MovementSystem and asserts the delivery completes within budget.
+- **Transport passengers duplicated + orphaned on save/load** (`SaveLoadSystem.ts` + `AbilitySystem` contract). Loaded passengers are parked at (-999) but stay live entities in `unitQuery`, so `buildSaveData` saved each one BOTH as a standalone off-map ghost AND as the APC's `passengerTypeIds`. On load the APC respawned fresh passengers while the -999 ghosts were also restored — permanent invisible units that count toward the cap. Fix: collect all transport-passenger eids and skip them in the standalone-unit save loop (they're recreated from the APC). New `tests/core/SaveLoadPassengers.test.ts`.
+- **AI hijacked recycled foreign units via scout tracking** (`AIPlayer.ts`). `scoutEntities` was pruned only on `Health<=0`, never re-validated by owner — unlike `defenders`/`specialEntities`. A dead scout's bitecs id can be recycled into another player's unit before the 100-tick `manageScouting` prune; the stale entry survived and `assignNextScoutTarget` issued move orders to the foreign unit (MovementSystem moves any entity with `MoveTarget.active===1` regardless of owner). Fix: add `Owner.playerId[eid] !== this.playerId` to the prune. New `tests/ai/AIPlayerScouting.test.ts` (first `tests/ai/` coverage).
+- **Repeat production stopped one short of the pop cap** (`ProductionSystem.ts`). The repeat-requeue gate added `+1` "to account for the not-yet-spawned unit" — but `production:complete` is emitted synchronously and its handler spawns the unit synchronously (`EventHandlers.ts:658`), so `unitCountCallback` already counts it. The `+1` double-counted → cap filled to 49/50. Fix: drop `+1` to match the `canBuild` check (`count + queued < maxUnits`). Strengthened `tests/simulation/production.test.ts` with an exact-fill-to-cap test.
+- **Process note**: this time review agents were run strictly read-only (per last session's note); none reverted source. Bug-hunt agents also surfaced lower-severity candidates intentionally deferred (large-building destruction recycle window in `BuildingDestructionSystem`; AI superweapon idle when enemy has no buildings; cosmetic `Math.random`/`setTimeout` in sim VFX) — left for a future pass.
+
+### 2026-06-17T23:15UTC - Bugfixes: Pathfinding Simplify, Formation Speed Cap, Harvester State Cleanup
+- **Four genuine single-player gameplay bugs** found via parallel bug-hunt agents, each verified by reverting the fix and watching the new test fail (recent-commit convention).
+- **`simplifyPath` left every other collinear waypoint** (`PathfindingSystem.ts` + the duplicate copy in `workers/pathfinder.worker.ts`). It compared raw displacement against the last *kept* point; once one collinear point was dropped, that anchor sat 2 steps back so magnitudes no longer matched and the next point was wrongly kept. A straight 11-tile run simplified to 6 points instead of 2; a pure diagonal to 4 instead of 2. Fix: compare `Math.sign` of step directions against the immediate predecessor `path[i-1]` (every reconstructed segment is a unit grid step, so axis-sign uniquely picks one of 8 headings). **Both copies synced** — production prefers the async worker, so fixing only the sync class would have left the browser path unchanged (caught in review).
+- **Formation speed cap went stale** (`FormationSystem.ts`). `slowestSpeed` was computed once at creation and never recomputed; when the bottleneck unit died/arrived/broke for combat, survivors stayed capped to the departed unit's speed for the rest of the move. Fix: `recomputeSlowest(group)` helper, called on create + every membership change that leaves the group alive (`removeFromFormation`, `update()` prune).
+- **Harvester `fleeing` not cleared on death** (`HarvestSystem.ts`). Death branch deleted `harvestTimers`/`airlifting` but not `fleeing`; the expiry loop only purges ids absent from `harvestQuery`, so a bitecs-recycled harvester id inherited a stale flee flag → sat idle (handleIdle short-circuits) and the debounce blocked it from fleeing for ≤250 ticks. Fix: `fleeing.delete(eid)` in the death branch (same class as the recent LockstepManager recycle fixes).
+- **Harvester teleport-unloaded when carryall lost mid-airlift** (`HarvestSystem.ts`). If a Hanger was destroyed during the ~2s airlift, the next tick skipped the airlift branch and fell through to `UNLOADING` (airlift had zeroed `MoveTarget.active`, so the "still moving" guard passed) — delivering spice from the harvester's in-air position. Fix: in `handleReturning`, if `airlifting.has(eid)` for a now-non-carryall owner, drop the airlift, reset `Position.y`, and `returnToRefinery()` to resume a ground return.
+- Tests: +1 pathfinding (corner-preservation) + strengthened 2 to exact counts; new `tests/simulation/formation.test.ts` (5); +3 harvest (recycle-flee, mid-airlift carryall loss, idle/flee). Suite: **823 pass / 59 files** (was 814/58). Typecheck + production build clean.
+- **Process note**: the code-review subagent (general-purpose, write-enabled) reverted `PathfindingSystem.ts`+`HarvestSystem.ts` to prove tests non-vacuous and left them reverted; had to re-apply. Run review agents read-only or in a worktree next time.
+
 ### 2026-06-17T04:40UTC - Bugfixes: AI Harvester Flee + LockstepManager Determinism
 - **AI harvesters never fled when damaged** (active gameplay bug, every match). `HarvestSystem`'s flee-on-damage logic listened to `unit:damaged`, but `CombatSystem` only emits that event for the *local* player (`targetOwner === localPlayerId`). `knownHarvesters` tracks ALL harvesters (via `harvestQuery`), so the mechanic was always meant to be universal. Fix: flee listener now subscribes to `combat:hit` (emitted for every hit, all owners, from the exact same point in `applyDamageToEntity`). Added `entityId` to the `combat:hit` payload (`EventBus.ts`, `CombatSystem.ts:696`).
   - **Semantic note**: `combat:hit` is not owner-gated, so a harvester caught in *friendly* AoE/splash now also flees (old `unit:damaged` excluded same-owner attacks). Arguably more correct; intentional. Spice-bloom AoE bypasses `applyDamageToEntity` so it still doesn't trigger flee.
@@ -222,32 +239,6 @@
 - Also from previous session: SelectionManager dispose() + text input guard, CommandManager unregisterEntity + dispose + text input guard
 - Full audit of all 59 .ts files in progress via 4 parallel sub-agents
 - Awaiting code review + commit
-
-### 2026-02-21T06:00UTC - 4 Bug Fixes: AI Save/Load, Entity Tracking, Ghost Spawns
-- Fix: AI placedBuildings empty after save/load — reconstructFromWorldState now rebuilds from ECS data with ConYard-anchored base
-- Fix: Ghost harvester spawning when Refinery destroyed during construction (deferred action lacked health check)
-- Fix: descendingUnits + repairingBuildings not cleaned on entity death (entity ID recycling risk)
-- Fix: repairingBuildings not cleaned on building sell
-- Cross-system audit completed: entity lifecycle, save/load round-trips, Map/Set cleanup patterns all verified
-- Commit: bb1171e
-
-### 2026-02-20T22:00UTC - 2 Bug Fixes + Full Codebase Audit Complete
-- Fix: killPassengers mutation-during-iteration (delete map entry BEFORE iterating, prevents ghost entities)
-- Fix: buildSaveData `world` vs `w` variable inconsistency (Shield component check used wrong scope)
-- Full audit of ALL 57 .ts files complete — no further bugs found
-- Commit: 1e6a2a8
-
-### 2026-02-20T12:00UTC - 8 Bug Fixes: CombatSystem, EventBus, AI Player
-- Fix: CombatSystem death check before slowdown/suppression (prevents stale state on entity ID recycling)
-- Fix: EventBus try/catch + snapshot listeners (one exception no longer blocks other listeners)
-- Fix: AI base position anchored to ConYard (was center-of-mass drift from expansion buildings)
-- Fix: AI difficulty formula inverted (was multiplying by difficulty making AI less aggressive at higher levels)
-- Fix: Power multiplier clamped to 0.1 minimum (was division-by-zero -> Infinity fire timer)
-- Fix: Escort follow logic overrides current move when target moves away (was only following when idle)
-- Fix: Defenders excluded from idle rally (was pulling defenders away from base)
-- Fix: Blast damage skips unowned entities (was treating neutral entities as player 0 friendlies)
-
-
 
 ## Key Findings
 

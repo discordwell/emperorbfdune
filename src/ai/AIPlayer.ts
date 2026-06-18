@@ -945,9 +945,15 @@ export class AIPlayer implements GameSystem {
   private manageScouting(world: World): void {
     this.initScoutQueue();
 
-    // Clean up dead scouts
+    // Clean up dead scouts. Also drop entries whose entity id is no longer owned
+    // by us: bitecs recycles entity ids, and a scout that dies can have its id
+    // reused by another player's freshly-built unit before this prune runs
+    // (manageScouting only runs every 100 ticks). Without the owner check the
+    // recycled foreign unit stays "registered" and assignNextScoutTarget would
+    // issue it move orders — hijacking another player's unit. Mirror the
+    // defender/specialEntities cleanup which already re-validates ownership.
     for (const eid of this.scoutEntities) {
-      if (Health.current[eid] <= 0) {
+      if (Health.current[eid] <= 0 || Owner.playerId[eid] !== this.playerId) {
         this.scoutEntities.delete(eid);
       }
     }
