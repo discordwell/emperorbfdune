@@ -13,13 +13,16 @@ import {
   Combat,
   Harvester,
   Health,
+  MoveTarget,
   Owner,
   Position,
 } from '../../src/core/ECS';
 
 // Harvester states (mirror the private constants in HarvestSystem)
+const IDLE = 0;
 const HARVESTING = 2;
 const RETURNING = 3;
+const UNLOADING = 4;
 
 type TestWorld = ReturnType<typeof createWorld>;
 
@@ -266,5 +269,98 @@ describe('HarvestSystem flee-on-damage', () => {
 
     expect(Health.current[harvester]).toBeLessThan(400); // actually took damage
     expect(Harvester.state[harvester]).toBe(RETURNING); // and fled
+  });
+
+  it('clears flee state on death so a recycled harvester id can flee again', () => {
+    const world = createWorld();
+    const harvest = new HarvestSystem(makeMockTerrain());
+    harvest.init(world);
+
+    const harvester = spawnHarvester(world, 1, 50, 50);
+    harvest.update(world, 0); // register
+
+    // Damage below 50% -> flee. The entity is now tracked in `fleeing`.
+    Harvester.state[harvester] = HARVESTING;
+    Health.current[harvester] = 400;
+    const hit = () =>
+      EventBus.emit('combat:hit', {
+        entityId: harvester,
+        x: 50,
+        z: 50,
+        damage: 100,
+        targetOwner: 1,
+        attackerOwner: 0,
+      });
+    hit();
+    expect(Harvester.state[harvester]).toBe(RETURNING);
+
+    // The harvester is destroyed. update() runs the death-cleanup branch, which
+    // must drop the stale flee entry (the flee timer is still ~250 ticks out).
+    Health.current[harvester] = 0;
+    harvest.update(world, 0);
+
+    // Simulate the id being recycled into a brand-new harvester: same entity id,
+    // alive again, back to harvesting. Without the death-branch cleanup, the
+    // stale flee entry survives (id never left harvestQuery) and the debounce
+    // would block this fresh harvester from ever fleeing.
+    Health.current[harvester] = 1000;
+    Harvester.state[harvester] = HARVESTING;
+    harvest.update(world, 0); // re-register the "new" harvester
+
+    Harvester.state[harvester] = HARVESTING;
+    Health.current[harvester] = 400; // damaged below 50% again
+    hit();
+
+    expect(Harvester.state[harvester]).toBe(RETURNING);
+  });
+
+  it('resumes a ground return when carryall support is lost mid-airlift', () => {
+    const world = createWorld();
+    const harvest = new HarvestSystem(makeMockTerrain());
+    harvest.init(world);
+
+    const harvester = spawnHarvester(world, 1, 50, 50);
+    Harvester.state[harvester] = RETURNING;
+    harvest.setCarryallAvailable(1, true);
+
+    // First tick: airlift begins — ground movement is stopped and the unit is
+    // tracked as airborne.
+    harvest.update(world, 0);
+    expect(harvest.getAirliftingEntities().has(harvester)).toBe(true);
+    expect(MoveTarget.active[harvester]).toBe(0);
+
+    // A couple more ticks of airlift: it rises off the ground.
+    harvest.update(world, 0);
+    harvest.update(world, 0);
+    expect(Position.y[harvester]).toBeGreaterThan(0.1);
+    expect(Harvester.state[harvester]).toBe(RETURNING);
+
+    // The owner's Hanger is destroyed mid-flight -> carryall support is revoked.
+    harvest.setCarryallAvailable(1, false);
+    harvest.update(world, 0);
+
+    // It must NOT teleport-unload from its in-air position. Instead it drops the
+    // airlift, returns to the ground, and resumes a normal ground return.
+    expect(Harvester.state[harvester]).not.toBe(UNLOADING);
+    expect(Harvester.state[harvester]).toBe(RETURNING);
+    expect(harvest.getAirliftingEntities().has(harvester)).toBe(false);
+    expect(Position.y[harvester]).toBeCloseTo(0.1, 5);
+    expect(MoveTarget.active[harvester]).toBe(1);
+  });
+
+  it('does not flee a harvester sitting idle below 50% until it is hit', () => {
+    // Guards the IDLE/flee interaction: handleIdle must not be short-circuited by
+    // a phantom flee flag (regression companion to the recycle-cleanup fix).
+    const world = createWorld();
+    const harvest = new HarvestSystem(makeMockTerrain());
+    harvest.init(world);
+
+    const harvester = spawnHarvester(world, 1, 50, 50);
+    Harvester.state[harvester] = IDLE;
+    Health.current[harvester] = 400;
+    harvest.update(world, 0);
+
+    // No hit emitted -> never marked fleeing -> stays eligible to act on IDLE.
+    expect(Harvester.state[harvester]).not.toBe(RETURNING);
   });
 });

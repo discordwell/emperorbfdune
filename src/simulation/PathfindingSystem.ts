@@ -205,15 +205,21 @@ export class PathfindingSystem {
     if (path.length <= 2) return path;
     const result = [path[0]];
     for (let i = 1; i < path.length - 1; i++) {
-      const prev = result[result.length - 1];
+      const prev = path[i - 1];
       const next = path[i + 1];
       const curr = path[i];
-      // Keep if direction changes
-      const dx1 = curr.x - prev.x;
-      const dz1 = curr.z - prev.z;
-      const dx2 = next.x - curr.x;
-      const dz2 = next.z - curr.z;
-      if (dx1 !== dx2 || dz1 !== dz2) {
+      // Keep a waypoint only when the heading changes. Compare normalized step
+      // directions (sign) rather than raw displacements: every reconstructed
+      // segment is a single grid step, so the sign of each axis uniquely
+      // identifies one of the 8 movement directions. Comparing raw displacement
+      // against the last *kept* point would break after the first collinear point
+      // is dropped (the kept point is then 2 steps back, so magnitudes no longer
+      // match) and leave every other collinear waypoint in the path.
+      const dir1x = Math.sign(curr.x - prev.x);
+      const dir1z = Math.sign(curr.z - prev.z);
+      const dir2x = Math.sign(next.x - curr.x);
+      const dir2z = Math.sign(next.z - curr.z);
+      if (dir1x !== dir2x || dir1z !== dir2z) {
         result.push(curr);
       }
     }

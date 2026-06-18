@@ -63,7 +63,11 @@ describe('PathfindingSystem', () => {
 
       const path = pf.findPath(0, 0, 5, 5);
       expect(path).not.toBeNull();
-      expect(path!.length).toBeGreaterThanOrEqual(2); // At least start and end
+      // A pure diagonal is one continuous heading — it must simplify to exactly
+      // the two endpoints, not retain redundant collinear waypoints.
+      expect(path!.length).toBe(2);
+      expect(path![0]).toEqual({ x: 1, z: 1 });
+      expect(path![1]).toEqual({ x: 11, z: 11 });
     });
   });
 
@@ -190,15 +194,39 @@ describe('PathfindingSystem', () => {
   });
 
   describe('path simplification', () => {
-    it('simplifies collinear points', () => {
+    it('collapses a straight horizontal run to its endpoints', () => {
       const terrain = new MockTerrain(16, 16);
       const pf = new PathfindingSystem(terrain as any);
 
-      // Straight horizontal path should be fewer points than raw tiles
+      // 11 raw collinear tiles must reduce to exactly start + end. The previous
+      // implementation compared displacement against the last *kept* point and
+      // left every other waypoint (6 points), so this guards that regression.
       const path = pf.findPath(0, 5, 10, 5);
       expect(path).not.toBeNull();
-      // Even if not perfectly simplified to 2, should be much less than 11 raw tiles
-      expect(path!.length).toBeLessThan(11);
+      expect(path!.length).toBe(2);
+      expect(path![0]).toEqual({ x: 1, z: 11 });
+      expect(path![1]).toEqual({ x: 21, z: 11 });
+    });
+
+    it('keeps the corner where heading changes (no over-simplification)', () => {
+      const terrain = new MockTerrain(20, 20);
+      const pf = new PathfindingSystem(terrain as any);
+
+      // An L-shaped detour around a wall must retain the turn. Block a vertical
+      // wall so the only route is right-then-down (or similar), forcing one bend.
+      for (let z = 0; z <= 6; z++) terrain.setTile(5, z, TerrainType.Cliff);
+
+      const path = pf.findPath(0, 0, 5, 8);
+      expect(path).not.toBeNull();
+      // Start, at least one corner, and end — and every retained point must be a
+      // genuine direction change (consecutive segments never share a heading).
+      expect(path!.length).toBeGreaterThanOrEqual(3);
+      for (let i = 1; i < path!.length - 1; i++) {
+        const a = path![i - 1], b = path![i], c = path![i + 1];
+        const d1x = Math.sign(b.x - a.x), d1z = Math.sign(b.z - a.z);
+        const d2x = Math.sign(c.x - b.x), d2z = Math.sign(c.z - b.z);
+        expect(d1x !== d2x || d1z !== d2z).toBe(true);
+      }
     });
   });
 

@@ -115,14 +115,18 @@ function simplifyPath(path: { x: number; z: number }[]): { x: number; z: number 
   if (path.length <= 2) return path;
   const result = [path[0]];
   for (let i = 1; i < path.length - 1; i++) {
-    const prev = result[result.length - 1];
+    // Keep a waypoint only when the heading changes. Compare normalized step
+    // directions (sign) against the immediate predecessor — comparing raw
+    // displacement against the last *kept* point leaves every other collinear
+    // waypoint once the first is dropped. Mirrors PathfindingSystem.simplifyPath.
+    const prev = path[i - 1];
     const next = path[i + 1];
     const curr = path[i];
-    const dx1 = curr.x - prev.x;
-    const dz1 = curr.z - prev.z;
-    const dx2 = next.x - curr.x;
-    const dz2 = next.z - curr.z;
-    if (dx1 !== dx2 || dz1 !== dz2) {
+    const dir1x = Math.sign(curr.x - prev.x);
+    const dir1z = Math.sign(curr.z - prev.z);
+    const dir2x = Math.sign(next.x - curr.x);
+    const dir2z = Math.sign(next.z - curr.z);
+    if (dir1x !== dir2x || dir1z !== dir2z) {
       result.push(curr);
     }
   }

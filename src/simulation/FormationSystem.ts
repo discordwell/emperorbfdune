@@ -47,24 +47,15 @@ export class FormationSystem {
       this.removeFromFormation(eid);
     }
 
-    // Calculate slowest speed in the group
-    let slowest = Infinity;
-    for (const eid of entityIds) {
-      const s = Speed.max[eid];
-      if (s > 0 && s < slowest) {
-        slowest = s;
-      }
-    }
-    // If we couldn't find a valid speed, don't cap
-    if (!isFinite(slowest) || slowest <= 0) slowest = 0;
-
     const group: FormationGroup = {
       id,
       members: [...entityIds],
-      slowestSpeed: slowest,
+      slowestSpeed: 0,
       targetX,
       targetZ,
     };
+    // Cap the formation to its slowest member so the group stays together.
+    this.recomputeSlowest(group);
 
     this.formations.set(id, group);
     for (const eid of entityIds) {
@@ -72,6 +63,22 @@ export class FormationSystem {
     }
 
     return id;
+  }
+
+  /**
+   * Recompute a group's speed cap from its current members. Called whenever
+   * membership changes so survivors are not held to a departed member's speed.
+   * Falls back to 0 (no cap) if no member has a valid speed.
+   */
+  private recomputeSlowest(group: FormationGroup): void {
+    let slowest = Infinity;
+    for (const eid of group.members) {
+      const s = Speed.max[eid];
+      if (s > 0 && s < slowest) {
+        slowest = s;
+      }
+    }
+    group.slowestSpeed = isFinite(slowest) && slowest > 0 ? slowest : 0;
   }
 
   /**
@@ -115,6 +122,9 @@ export class FormationSystem {
         this.entityFormation.delete(remaining);
       }
       this.formations.delete(fid);
+    } else if (idx >= 0) {
+      // A member left — the slowest unit may have been the one removed.
+      this.recomputeSlowest(group);
     }
   }
 
@@ -181,12 +191,18 @@ export class FormationSystem {
         }
       }
 
-      // Dissolve formation if 1 or fewer members remain
-      if (changed && group.members.length <= 1) {
-        for (const remaining of group.members) {
-          this.entityFormation.delete(remaining);
+      if (changed) {
+        if (group.members.length <= 1) {
+          // Dissolve formation if 1 or fewer members remain
+          for (const remaining of group.members) {
+            this.entityFormation.delete(remaining);
+          }
+          this.formations.delete(fid);
+        } else {
+          // Members were pruned (dead/combat/arrived) — the slowest may be gone,
+          // so survivors should no longer be capped to its speed.
+          this.recomputeSlowest(group);
         }
-        this.formations.delete(fid);
       }
     }
   }

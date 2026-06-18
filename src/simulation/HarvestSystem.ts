@@ -161,6 +161,10 @@ export class HarvestSystem implements GameSystem {
       if (Health.current[eid] <= 0) {
         this.harvestTimers.delete(eid);
         this.airlifting.delete(eid);
+        // Clear flee state too: the expiry loop only purges entries whose id has
+        // left harvestQuery, but bitecs recycles ids — a fresh harvester reusing
+        // this id would otherwise inherit a stale "fleeing" flag and sit idle.
+        this.fleeing.delete(eid);
         continue;
       }
 
@@ -642,6 +646,17 @@ export class HarvestSystem implements GameSystem {
       Position.y[eid] = 0.1;
       Harvester.state[eid] = UNLOADING;
       this.harvestTimers.set(eid, 0);
+      return;
+    }
+
+    // Lost carryall support mid-airlift (e.g. the Hanger was destroyed while the
+    // harvester was airborne). The airlift zeroed MoveTarget.active, so without
+    // this guard the unit would fall straight through to UNLOADING and deliver
+    // spice from its in-air position. Drop the airlift and resume a ground return.
+    if (this.airlifting.has(eid)) {
+      this.airlifting.delete(eid);
+      Position.y[eid] = 0.1;
+      this.returnToRefinery(eid); // re-issues a ground path (sets MoveTarget.active = 1)
       return;
     }
 
