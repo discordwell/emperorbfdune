@@ -48,7 +48,7 @@ export function registerEventHandlers(ctx: GameContext): void {
   });
 
   // Unit death handler
-  EventBus.on('unit:died', ({ entityId, deathType }) => {
+  EventBus.on('unit:died', ({ entityId, deathType, silent }) => {
     if (processedDeaths.has(entityId)) return;
     processedDeaths.add(entityId);
     const world = game.getWorld();
@@ -64,7 +64,7 @@ export function registerEventHandlers(ctx: GameContext): void {
     const deadDef = isBuilding
       ? gameRules.buildings.get(deadTypeName ?? '')
       : gameRules.units.get(deadTypeName ?? '');
-    if (deadDef?.countsForStats !== false) {
+    if (!silent && deadDef?.countsForStats !== false) {
       if (isBuilding) gameStats.recordBuildingLost(deadOwner);
       else gameStats.recordUnitLost(deadOwner);
     }
@@ -80,8 +80,10 @@ export function registerEventHandlers(ctx: GameContext): void {
     repairingBuildings.delete(entityId);
     abilitySystem.handleUnitDeath(entityId);
 
-    const deathColor = deadOwner === 0 ? '#ff6600' : '#ff2222';
-    minimapRenderer.flashPing(x, z, deathColor);
+    if (!silent) {
+      const deathColor = deadOwner === 0 ? '#ff6600' : '#ff2222';
+      minimapRenderer.flashPing(x, z, deathColor);
+    }
 
     if (isBuilding) {
       // --- Staged building destruction ---
@@ -131,6 +133,15 @@ export function registerEventHandlers(ctx: GameContext): void {
         }
       }
     } else {
+      // Silent consume (e.g. AI MCV -> ConYard): no death VFX/animation/stats,
+      // just remove the entity. Cleanup (combat/movement/ability) already ran above.
+      if (silent) {
+        ctx.deferAction(13, () => {
+          try { removeEntity(game.getWorld(), entityId); } catch {}
+        });
+        return;
+      }
+
       // --- Standard unit death (non-building) ---
       const isUnit = hasComponent(world, UnitType, entityId);
       const typeId = isUnit ? UnitType.id[entityId] : -1;
@@ -462,10 +473,14 @@ export function registerEventHandlers(ctx: GameContext): void {
     }
   });
 
-  // Track credits spent on production
-  EventBus.on('production:started', ({ unitType, owner }: { unitType: string; owner: number }) => {
-    const def = gameRules.units.get(unitType) ?? gameRules.buildings.get(unitType);
-    if (def) gameStats.recordCreditsSpent(owner, def.cost);
+  // Track credits spent on production. Record the difficulty-adjusted cost that
+  // is actually deducted (ProductionSystem.startProduction spends getAdjustedCost),
+  // not the raw rules cost — otherwise the stat is wrong on every non-normal
+  // difficulty. getAdjustedCost returns 0 for unresolved names (e.g. upgrades),
+  // preserving the prior "upgrades not counted" behaviour.
+  EventBus.on('production:started', ({ unitType, owner, isBuilding }) => {
+    const cost = productionSystem.getAdjustedCost(owner, unitType, isBuilding);
+    if (cost > 0) gameStats.recordCreditsSpent(owner, cost);
   });
 
   // Auto-spawn produced units
@@ -709,7 +724,9 @@ export function registerEventHandlers(ctx: GameContext): void {
           const deployX = aiBase.x + (simRng.random() - 0.5) * 10;
           const deployZ = aiBase.z + (simRng.random() - 0.5) * 10;
           Health.current[eid] = 0;
-          EventBus.emit('unit:died', { entityId: eid, killerEntity: -1 });
+          // Consume the MCV silently: it is converted into a ConYard, not killed,
+          // so it must not count as a unit loss or spawn death VFX at the AI base.
+          EventBus.emit('unit:died', { entityId: eid, killerEntity: -1, silent: true });
           const conYardEid = ctx.spawnBuilding(world, conYardName, owner, deployX, deployZ);
           if (conYardEid >= 0) {
             EventBus.emit('building:completed', { entityId: conYardEid, playerId: owner, typeName: conYardName });
@@ -721,7 +738,8 @@ export function registerEventHandlers(ctx: GameContext): void {
   });
 
   // Event queue listeners for death/worm/attack
-  EventBus.on('unit:died', ({ entityId }) => {
+  EventBus.on('unit:died', ({ entityId, silent }) => {
+    if (silent) return; // consumed/converted, not a real death event
     ctx.pushGameEvent(Position.x[entityId], Position.z[entityId], 'death');
   });
   EventBus.on('worm:emerge', ({ x, z }) => { ctx.pushGameEvent(x, z, 'worm'); });

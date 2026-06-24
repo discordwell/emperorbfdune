@@ -20,7 +20,9 @@ interface EventMap {
   'unit:attack': { attackerIds: number[]; targetId: number };
   'unit:attacked': { attackerEid: number; targetEid: number };
   'unit:spawned': { entityId: number; unitType: string; owner: number };
-  'unit:died': { entityId: number; killerEntity: number; deathType?: DeathType };
+  // `silent`: entity is being consumed/converted, not killed (e.g. AI MCV ->
+  // ConYard). Cleanup + removal still run, but no death stats, VFX, or pings.
+  'unit:died': { entityId: number; killerEntity: number; deathType?: DeathType; silent?: boolean };
   'unit:promoted': { entityId: number; rank: number };
   'building:placed': { entityId: number; buildingType: string; owner: number };
   'building:destroyed': { entityId: number; owner: number; x: number; z: number };

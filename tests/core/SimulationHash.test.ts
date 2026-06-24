@@ -1,5 +1,44 @@
 import { describe, it, expect } from 'vitest';
-import { SimulationHashTracker } from '../../src/core/SimulationHash';
+import { createWorld } from 'bitecs';
+import { SimulationHashTracker, computeSimulationHash } from '../../src/core/SimulationHash';
+import {
+  addComponent,
+  addEntity,
+  AttackTarget,
+  BuildingType,
+  Combat,
+  Health,
+  Owner,
+  Position,
+  Rotation,
+  TurretRotation,
+  UnitType,
+} from '../../src/core/ECS';
+
+type World = ReturnType<typeof createWorld>;
+
+/** A turreted building (e.g. a gun turret): has combat, turret aim, and a target. */
+function spawnTurretBuilding(world: World): number {
+  const eid = addEntity(world);
+  for (const c of [Position, BuildingType, Owner, Health, Rotation, Combat, TurretRotation, AttackTarget]) {
+    addComponent(world, c, eid);
+  }
+  Position.x[eid] = 30; Position.z[eid] = 30;
+  Health.current[eid] = 400; Health.max[eid] = 400;
+  Owner.playerId[eid] = 1;
+  return eid;
+}
+
+function spawnTurretedUnit(world: World): number {
+  const eid = addEntity(world);
+  for (const c of [Position, UnitType, Owner, Health, Rotation, Combat, TurretRotation]) {
+    addComponent(world, c, eid);
+  }
+  Position.x[eid] = 10; Position.z[eid] = 10;
+  Health.current[eid] = 100; Health.max[eid] = 100;
+  Owner.playerId[eid] = 0;
+  return eid;
+}
 
 describe('SimulationHashTracker', () => {
   it('records and retrieves hashes', () => {
@@ -66,5 +105,59 @@ describe('SimulationHashTracker', () => {
     tracker.record(25, 0xABCD);
     tracker.reset();
     expect(tracker.getHash(25)).toBeNull();
+  });
+});
+
+describe('computeSimulationHash field coverage', () => {
+  it('is stable when nothing changes', () => {
+    const world = createWorld();
+    spawnTurretBuilding(world);
+    spawnTurretedUnit(world);
+    expect(computeSimulationHash(world)).toBe(computeSimulationHash(world));
+  });
+
+  it('reflects a building turret rotation change', () => {
+    const world = createWorld();
+    const bld = spawnTurretBuilding(world);
+    TurretRotation.y[bld] = 0;
+    const before = computeSimulationHash(world);
+    TurretRotation.y[bld] = 1.5; // turret swivels — same everything else
+    expect(computeSimulationHash(world)).not.toBe(before);
+  });
+
+  it('reflects a building fire timer change', () => {
+    const world = createWorld();
+    const bld = spawnTurretBuilding(world);
+    Combat.fireTimer[bld] = 0;
+    const before = computeSimulationHash(world);
+    Combat.fireTimer[bld] = 12;
+    expect(computeSimulationHash(world)).not.toBe(before);
+  });
+
+  it('reflects a building attack-target change', () => {
+    const world = createWorld();
+    const bld = spawnTurretBuilding(world);
+    AttackTarget.active[bld] = 1; AttackTarget.entityId[bld] = 7;
+    const before = computeSimulationHash(world);
+    AttackTarget.entityId[bld] = 99;
+    expect(computeSimulationHash(world)).not.toBe(before);
+  });
+
+  it('reflects a unit body rotation change', () => {
+    const world = createWorld();
+    const unit = spawnTurretedUnit(world);
+    Rotation.y[unit] = 0;
+    const before = computeSimulationHash(world);
+    Rotation.y[unit] = 2.0;
+    expect(computeSimulationHash(world)).not.toBe(before);
+  });
+
+  it('reflects a unit turret rotation change', () => {
+    const world = createWorld();
+    const unit = spawnTurretedUnit(world);
+    TurretRotation.y[unit] = 0;
+    const before = computeSimulationHash(world);
+    TurretRotation.y[unit] = 0.75;
+    expect(computeSimulationHash(world)).not.toBe(before);
   });
 });

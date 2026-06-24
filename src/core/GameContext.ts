@@ -92,6 +92,7 @@ export interface SaveData {
     kobraBaseRange?: Array<{ eid: number; range: number }>;
   };
   rngState?: [number, number, number, number];
+  stormWaitTimer?: number;
   scriptState?: import('../campaign/scripting/MissionScriptTypes').MissionScriptState;
   scriptId?: string;
 }

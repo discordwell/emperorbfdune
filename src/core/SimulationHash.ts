@@ -5,7 +5,7 @@
  */
 
 import {
-  Position, Health, Owner, UnitType, BuildingType,
+  Position, Rotation, TurretRotation, Health, Owner, UnitType, BuildingType,
   MoveTarget, AttackTarget, Harvester, Veterancy, Combat, Shield,
   Speed, Production,
   unitQuery, buildingQuery, hasComponent,
@@ -56,6 +56,10 @@ export function computeSimulationHash(world: World, playerCredits?: number[]): n
       h = fnvMix(h, AttackTarget.entityId[eid]);
     }
     h = fnvMixF32(h, Combat.fireTimer[eid]);
+    // Facing/turret aim gate firing (CombatSystem rejects shots until aligned),
+    // so two states that differ only in aim must hash differently.
+    h = fnvMixF32(h, Rotation.y[eid]);
+    if (hasComponent(world, TurretRotation, eid)) h = fnvMixF32(h, TurretRotation.y[eid]);
     h = fnvMixF32(h, Speed.max[eid]);
     h = fnvMixF32(h, Speed.current[eid]);
     h = fnvMix(h, Veterancy.rank[eid]);
@@ -79,6 +83,15 @@ export function computeSimulationHash(world: World, playerCredits?: number[]): n
     h = fnvMixF32(h, Health.current[eid]);
     h = fnvMix(h, Owner.playerId[eid]);
     h = fnvMix(h, BuildingType.id[eid]);
+    // Turreted buildings fire too: their fire timer, turret aim, and target are
+    // gameplay state. Omitting them let two diverged turret states hash equal.
+    if (hasComponent(world, Combat, eid)) h = fnvMixF32(h, Combat.fireTimer[eid]);
+    if (hasComponent(world, Rotation, eid)) h = fnvMixF32(h, Rotation.y[eid]);
+    if (hasComponent(world, TurretRotation, eid)) h = fnvMixF32(h, TurretRotation.y[eid]);
+    if (hasComponent(world, AttackTarget, eid)) {
+      h = fnvMix(h, AttackTarget.active[eid]);
+      if (AttackTarget.active[eid]) h = fnvMix(h, AttackTarget.entityId[eid]);
+    }
     // Production state
     if (hasComponent(world, Production, eid)) {
       h = fnvMix(h, Production.queueSlot0[eid]);

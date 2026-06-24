@@ -276,6 +276,49 @@ export class SuperweaponSystem {
     }
   }
 
+  /**
+   * Choose an AI superweapon target. Prefers the densest cluster of enemy
+   * buildings; if the enemy has no buildings left (e.g. all razed, or a
+   * units-only force), falls back to the densest cluster of enemy units so the
+   * charged weapon is not wasted. Returns the cluster centre, or null when the
+   * enemy has no surviving targets at all.
+   *
+   * Pure and DOM-free so it can be unit-tested directly; the caller applies the
+   * firing jitter (RNG) and triggers fire().
+   */
+  static pickAiTarget(world: World, aiPid: number): { x: number; z: number } | null {
+    const densest = (eids: number[]): { x: number; z: number; count: number } => {
+      let bestX = 0, bestZ = 0, bestCount = 0;
+      for (const a of eids) {
+        const ax = Position.x[a], az = Position.z[a];
+        let count = 0;
+        for (const b of eids) {
+          const dx = Position.x[b] - ax, dz = Position.z[b] - az;
+          if (dx * dx + dz * dz < 225) count++;
+        }
+        if (count > bestCount) { bestCount = count; bestX = ax; bestZ = az; }
+      }
+      return { x: bestX, z: bestZ, count: bestCount };
+    };
+
+    // Enemy buildings are the primary target.
+    const enemyBuildings = buildingQuery(world).filter(
+      eid => Owner.playerId[eid] !== aiPid && Health.current[eid] > 0,
+    );
+    const b = densest(enemyBuildings);
+    if (b.count > 0) return { x: b.x, z: b.z };
+
+    // No enemy buildings remain — target the densest cluster of enemy units.
+    // Skip off-map passengers (parked at large negative coordinates).
+    const enemyUnits = unitQuery(world).filter(
+      eid => Owner.playerId[eid] !== aiPid && Health.current[eid] > 0 && Position.x[eid] > -900,
+    );
+    const u = densest(enemyUnits);
+    if (u.count > 0) return { x: u.x, z: u.z };
+
+    return null;
+  }
+
   /** Called from game:tick handler. Handles charging, AI firing, and UI updates. */
   update(world: World, tickCount: number): void {
     if (tickCount % 25 !== 0) return; // Check every second
@@ -345,29 +388,16 @@ export class SuperweaponSystem {
       this.swButton.style.display = 'none';
     }
 
-    // AI fires superweapon at densest cluster of enemy buildings
-    const aiSwBlds = buildingQuery(world);
+    // AI fires superweapon at the densest cluster of enemy buildings, or — if
+    // the enemy has no buildings left — the densest cluster of enemy units.
     for (let aiPid = 1; aiPid < totalPlayers; aiPid++) {
       const aiSw = this.state.get(aiPid);
       if (aiSw?.ready) {
-        let bestX = 100, bestZ = 100, bestCount = 0;
-        // Find enemy building with most other enemy buildings nearby
-        for (const bid of aiSwBlds) {
-          if (Owner.playerId[bid] === aiPid || Health.current[bid] <= 0) continue;
-          const bx = Position.x[bid], bz = Position.z[bid];
-          let count = 0;
-          for (const bid2 of aiSwBlds) {
-            // Count nearby buildings NOT owned by this AI (i.e. enemy buildings)
-            if (Owner.playerId[bid2] === aiPid || Health.current[bid2] <= 0) continue;
-            const dx = Position.x[bid2] - bx, dz = Position.z[bid2] - bz;
-            if (dx * dx + dz * dz < 225) count++;
-          }
-          if (count > bestCount) { bestCount = count; bestX = bx; bestZ = bz; }
-        }
-        if (bestCount > 0) {
-          bestX += (simRng.random() - 0.5) * 6;
-          bestZ += (simRng.random() - 0.5) * 6;
-          this.fire(aiPid, bestX, bestZ);
+        const target = SuperweaponSystem.pickAiTarget(world, aiPid);
+        if (target) {
+          const fireX = target.x + (simRng.random() - 0.5) * 6;
+          const fireZ = target.z + (simRng.random() - 0.5) * 6;
+          this.fire(aiPid, fireX, fireZ);
         }
       }
     }

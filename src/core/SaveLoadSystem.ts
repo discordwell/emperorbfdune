@@ -154,6 +154,7 @@ export function buildSaveData(ctx: GameContext): SaveData {
       return { deviated, leech, kobraDeployed, kobraBaseRange };
     })(),
     rngState: simRng.getState(),
+    stormWaitTimer: ctx.stormWaitTimer,
     scriptState: ctx.missionScriptRunner?.isActive() ? ctx.missionScriptRunner.serialize(eidToIndex) : undefined,
     scriptId: ctx.missionScriptRunner?.getScriptId() ?? undefined,
   };
@@ -334,7 +335,15 @@ export function restoreFromSave(ctx: GameContext, savedGame: SaveData): void {
     ctx.activeStormListener = null;
     ctx.effectsManager.stopSandstorm();
   }
-  ctx.stormWaitTimer = GameConstants.STORM_MIN_WAIT + Math.floor(simRng.random() * GameConstants.STORM_MAX_WAIT);
+  // Restore the storm countdown from the save. Do NOT draw from simRng here:
+  // rerolling consumed an RNG draw and re-randomised the storm cadence on every
+  // load, so a save->load diverged from an unsaved run. Only legacy saves that
+  // predate this field fall back to a reseed.
+  if (savedGame.stormWaitTimer !== undefined) {
+    ctx.stormWaitTimer = savedGame.stormWaitTimer;
+  } else {
+    ctx.stormWaitTimer = GameConstants.STORM_MIN_WAIT + Math.floor(simRng.random() * GameConstants.STORM_MAX_WAIT);
+  }
 
   // Restore ground splats
   ctx.effectsManager.clearAllGroundSplats();
