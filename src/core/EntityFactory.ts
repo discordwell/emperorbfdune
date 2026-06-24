@@ -1,4 +1,5 @@
 import type { GameRules } from '../config/RulesParser';
+import { primaryTurretName } from '../config/RulesParser';
 import type { ArtEntry } from '../config/ArtIniParser';
 import type { TypeRegistry } from './TypeRegistry';
 import type { TerrainRenderer } from '../rendering/TerrainRenderer';
@@ -124,7 +125,7 @@ export function createEntityFactory(deps: EntityFactoryDeps) {
       addComponent(world, Combat, eid);
       addComponent(world, TurretRotation, eid);
       TurretRotation.y[eid] = 0;
-      const turret = gameRules.turrets.get(def.turretAttach);
+      const turret = gameRules.turrets.get(primaryTurretName(def.turretAttach));
       const bullet = turret ? gameRules.bullets.get(turret.bullet) : null;
       Combat.weaponId[eid] = 0;
       Combat.attackRange[eid] = bullet ? bullet.maxRange * 2 : 8;
@@ -251,7 +252,7 @@ export function createEntityFactory(deps: EntityFactoryDeps) {
       AttackTarget.active[eid] = 0;
       AttackTarget.entityId[eid] = 0;
       Velocity.x[eid] = 0; Velocity.y[eid] = 0; Velocity.z[eid] = 0;
-      const turret = gameRules.turrets.get(def.turretAttach);
+      const turret = gameRules.turrets.get(primaryTurretName(def.turretAttach));
       const bullet = turret ? gameRules.bullets.get(turret.bullet) : null;
       Combat.weaponId[eid] = 0;
       Combat.fireTimer[eid] = 0;

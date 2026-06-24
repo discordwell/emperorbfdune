@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseRules } from '../../src/config/RulesParser';
+import { parseRules, primaryTurretName } from '../../src/config/RulesParser';
 
 const SAMPLE_RULES = `
 [General]
@@ -369,5 +369,51 @@ Cost=200
     expect(rules.units.size).toBe(2);
     expect(rules.units.get('UnitA')!.cost).toBe(100);
     expect(rules.units.get('UnitB')!.cost).toBe(200);
+  });
+});
+
+describe('primaryTurretName', () => {
+  it('returns the first turret from a comma-separated multi-turret list', () => {
+    // Mirrors the shipped rules.txt format, including the trailing-space variants.
+    expect(primaryTurretName('HKDevastatorGun, HKDevastatorMissile')).toBe('HKDevastatorGun');
+    expect(primaryTurretName('ATKindjalGun, ATKindjalBigGun ')).toBe('ATKindjalGun');
+    expect(primaryTurretName('ORKobraUndeployedGun,ORKobraDeployedGun')).toBe('ORKobraUndeployedGun');
+  });
+
+  it('returns a single turret name unchanged (trimmed)', () => {
+    expect(primaryTurretName('ATCombatTankGun')).toBe('ATCombatTankGun');
+    expect(primaryTurretName('  ATCombatTankGun  ')).toBe('ATCombatTankGun');
+  });
+
+  it('returns empty string for no turret', () => {
+    expect(primaryTurretName('')).toBe('');
+    expect(primaryTurretName(undefined)).toBe('');
+    expect(primaryTurretName(null)).toBe('');
+  });
+
+  it('a parsed multi-turret unit resolves its bullet via the primary turret', () => {
+    // The parser stores TurretAttach raw (comma-separated); the consumer must
+    // split it. This is the end-to-end parser + helper contract.
+    const rules = parseRules(`
+[UnitTypes]
+HKDevastator
+[TurretTypes]
+HKDevastatorGun
+[BulletTypes]
+DevBullet
+[HKDevastator]
+TurretAttach=HKDevastatorGun, HKDevastatorMissile
+[HKDevastatorGun]
+Bullet=DevBullet
+[DevBullet]
+Damage=200
+`);
+    const def = rules.units.get('HKDevastator')!;
+    expect(def.turretAttach).toBe('HKDevastatorGun, HKDevastatorMissile'); // stored raw
+    // Raw lookup misses (the bug); primary-turret lookup resolves (the fix).
+    expect(rules.turrets.get(def.turretAttach)).toBeUndefined();
+    const turret = rules.turrets.get(primaryTurretName(def.turretAttach));
+    expect(turret).toBeDefined();
+    expect(rules.bullets.get(turret!.bullet)?.damage).toBe(200);
   });
 });

@@ -5,6 +5,7 @@
  */
 
 import type { GameRules } from '../config/RulesParser';
+import { primaryTurretName } from '../config/RulesParser';
 import type { UnitDef } from '../config/UnitDefs';
 import type { BuildingDef } from '../config/BuildingDefs';
 import { getDisplayName, getFactionPrefix, getFactionName, stripFactionPrefix } from '../config/DisplayNames';
@@ -165,7 +166,7 @@ export class MentatScreen {
     // Weapon info
     let weaponInfo = '';
     if (def.turretAttach) {
-      const turret = this.rules.turrets.get(def.turretAttach);
+      const turret = this.rules.turrets.get(primaryTurretName(def.turretAttach));
       if (turret) {
         const bullet = this.rules.bullets.get(turret.bullet);
         if (bullet) {
@@ -274,7 +275,7 @@ export class MentatScreen {
     // Weapon info for turrets
     let weaponInfo = '';
     if (def.turretAttach) {
-      const turret = this.rules.turrets.get(def.turretAttach);
+      const turret = this.rules.turrets.get(primaryTurretName(def.turretAttach));
       if (turret) {
         const bullet = this.rules.bullets.get(turret.bullet);
         if (bullet) {

@@ -22,6 +22,11 @@ export class MovementSystem implements GameSystem {
   // Path cache per entity
   private paths = new Map<number, { x: number; z: number }[]>();
   private pathIndex = new Map<number, number>();
+  // Destination each cached path was REQUESTED for (the raw MoveTarget at request
+  // time). Used to decide when a path is stale — we must NOT compare against the
+  // path's endpoint, because the pathfinder remaps an impassable target to the
+  // nearest passable tile, so the endpoint legitimately differs from the target.
+  private pathTarget = new Map<number, { x: number; z: number }>();
   // Entities waiting for async path result
   private pendingAsync = new Set<number>();
   // Path generation counter per entity (guards against stale async results on ID recycling)
@@ -77,6 +82,7 @@ export class MovementSystem implements GameSystem {
   invalidateAllPaths(): void {
     this.paths.clear();
     this.pathIndex.clear();
+    this.pathTarget.clear();
   }
 
   isFlyer(eid: number): boolean {
@@ -103,6 +109,7 @@ export class MovementSystem implements GameSystem {
   unregisterEntity(eid: number): void {
     this.paths.delete(eid);
     this.pathIndex.delete(eid);
+    this.pathTarget.delete(eid);
     this.stuckTicks.delete(eid);
     this.lastPos.delete(eid);
     this.flyingEntities.delete(eid);
@@ -130,6 +137,7 @@ export class MovementSystem implements GameSystem {
       if (hasComponent(world, Health, eid) && Health.current[eid] <= 0) {
         this.paths.delete(eid);
         this.pathIndex.delete(eid);
+        this.pathTarget.delete(eid);
         this.stuckTicks.delete(eid);
         this.lastPos.delete(eid);
         continue;
@@ -234,13 +242,19 @@ export class MovementSystem implements GameSystem {
       let path = this.paths.get(eid);
       let idx = this.pathIndex.get(eid) ?? 0;
 
-      // Invalidate cached path if destination has changed
+      // Invalidate cached path if the COMMANDED destination has changed.
+      // Compare against the destination the path was requested for — not the
+      // path's last waypoint, which the pathfinder snaps to the nearest passable
+      // tile when the target is impassable (e.g. a building or rock). Comparing
+      // the endpoint discarded every valid path to such targets, leaving the unit
+      // beelining at the unreachable point instead of routing around obstacles.
       if (path && path.length > 0) {
-        const lastWp = path[path.length - 1];
-        if (Math.abs(lastWp.x - targetX) > 2 || Math.abs(lastWp.z - targetZ) > 2) {
+        const reqTarget = this.pathTarget.get(eid);
+        if (reqTarget && (Math.abs(reqTarget.x - targetX) > 2 || Math.abs(reqTarget.z - targetZ) > 2)) {
           path = undefined;
           this.paths.delete(eid);
           this.pathIndex.delete(eid);
+          this.pathTarget.delete(eid);
           idx = 0;
         }
       }
@@ -264,17 +278,20 @@ export class MovementSystem implements GameSystem {
             if (result && this.pathGeneration.get(eid) === gen && MoveTarget.active[eid] === 1) {
               this.paths.set(eid, result);
               this.pathIndex.set(eid, 0);
+              this.pathTarget.set(eid, { x: targetX, z: targetZ });
             }
           });
           // Move directly toward target while waiting for path (straight-line approximation)
           path = [{ x: targetX, z: targetZ }];
           this.paths.set(eid, path);
+          this.pathTarget.set(eid, { x: targetX, z: targetZ });
           idx = 0;
           this.pathIndex.set(eid, 0);
         } else {
           // Sync fallback
           path = this.pathfinder.findPath(startTile.tx, startTile.tz, endTile.tx, endTile.tz, isVehicle) ?? [{ x: targetX, z: targetZ }];
           this.paths.set(eid, path);
+          this.pathTarget.set(eid, { x: targetX, z: targetZ });
           idx = 0;
           this.pathIndex.set(eid, 0);
         }
@@ -289,6 +306,7 @@ export class MovementSystem implements GameSystem {
         Speed.current[eid] = 0;
         this.paths.delete(eid);
         this.pathIndex.delete(eid);
+        this.pathTarget.delete(eid);
         this.stuckTicks.delete(eid);
         this.lastPos.delete(eid);
         continue;
@@ -309,6 +327,7 @@ export class MovementSystem implements GameSystem {
           Speed.current[eid] = 0;
           this.paths.delete(eid);
           this.pathIndex.delete(eid);
+          this.pathTarget.delete(eid);
           continue;
         }
       }
@@ -439,6 +458,7 @@ export class MovementSystem implements GameSystem {
         if (stuck >= 30) {
           this.paths.delete(eid);
           this.pathIndex.delete(eid);
+          this.pathTarget.delete(eid);
           this.stuckTicks.set(eid, 0);
         }
       } else {
@@ -458,6 +478,7 @@ export class MovementSystem implements GameSystem {
   clearPath(eid: number): void {
     this.paths.delete(eid);
     this.pathIndex.delete(eid);
+    this.pathTarget.delete(eid);
     this.stuckTicks.delete(eid);
     this.lastPos.delete(eid);
     this.pendingAsync.delete(eid);

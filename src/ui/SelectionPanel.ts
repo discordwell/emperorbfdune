@@ -4,6 +4,7 @@ import {
   hasComponent, type World,
 } from '../core/ECS';
 import type { GameRules } from '../config/RulesParser';
+import { primaryTurretName } from '../config/RulesParser';
 import { EventBus } from '../core/EventBus';
 import type { AudioManager } from '../audio/AudioManager';
 import type { ProductionSystem } from '../simulation/ProductionSystem';
@@ -327,7 +328,7 @@ export class SelectionPanel {
       let dmg = 1;
       const turretName = def?.turretAttach;
       if (turretName) {
-        const turret = this.rules.turrets.get(turretName);
+        const turret = this.rules.turrets.get(primaryTurretName(turretName));
         const bullet = turret ? this.rules.bullets.get(turret.bullet) : null;
         if (bullet) dmg = bullet.damage;
       }

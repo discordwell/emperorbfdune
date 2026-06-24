@@ -10,6 +10,9 @@ const ROOT = path.resolve(TEST_DIR, '../../../');
 const TOK_DIR = path.join(ROOT, 'assets/data/missions/tok');
 
 describe('Tok save/restore corpus parity', () => {
+  // Runs all 229 missions × 2 traces in one case; well over the default 5s
+  // timeout under parallel suite load (it's ~1.5s in isolation but can spike to
+  // several seconds when the machine is busy), so give it generous headroom.
   it('matches final VM state for every mission after save/restore continuation', () => {
     const files = fs.readdirSync(TOK_DIR).filter((f) => f.endsWith('.tok')).sort();
     expect(files.length).toBe(229);
@@ -26,5 +29,5 @@ describe('Tok save/restore corpus parity', () => {
       const restoredFinal = restored[restored.length - 1];
       expect(restoredFinal).toEqual(freshFinal);
     }
-  });
+  }, 30000);
 });

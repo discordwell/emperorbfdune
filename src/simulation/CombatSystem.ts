@@ -7,6 +7,7 @@ import {
   combatQuery, healthQuery, hasComponent,
 } from '../core/ECS';
 import type { GameRules } from '../config/RulesParser';
+import { primaryTurretName } from '../config/RulesParser';
 import { type BulletDef, classifyImpactType } from '../config/WeaponDefs';
 import { distance2D, worldToTile, angleBetween, stepAngle, TILE_SIZE } from '../utils/MathUtils';
 import { GameConstants } from '../utils/Constants';
@@ -357,6 +358,12 @@ export class CombatSystem implements GameSystem {
     const entities = combatQuery(world);
 
     for (const eid of entities) {
+      // A unit killed earlier in this same tick is still present in this query
+      // snapshot — entity removal is deferred — and `unit:died` may have already
+      // cleared its weapon registration. Without this guard it would decrement
+      // its fire timer, re-acquire a target, and fire a "corpse shot" (using the
+      // fallback 100 damage once unregistered). Dead attackers must not act.
+      if (hasComponent(world, Health, eid) && Health.current[eid] <= 0) continue;
       // Skip disabled buildings (low power), suppressed units (rearming), or infantry suppressed by combat
       if (this.disabledBuildings.has(eid)) continue;
       if (this.suppressedEntities.has(eid)) continue;
@@ -575,8 +582,7 @@ export class CombatSystem implements GameSystem {
     if (!turretName) return true;
 
     // Check the first turret in the attach list (comma-separated for multi-turret units)
-    const firstName = turretName.split(',')[0].trim();
-    const turret = this.rules.turrets.get(firstName);
+    const turret = this.rules.turrets.get(primaryTurretName(turretName));
     if (!turret) return true;
 
     const isDeployed = this.deployedEntities.has(eid);
@@ -604,7 +610,8 @@ export class CombatSystem implements GameSystem {
       this.bulletCache.set(typeName, null);
       return null;
     }
-    const turret = this.rules.turrets.get(turretName);
+    // Multi-turret units store a comma-separated list; use the primary turret.
+    const turret = this.rules.turrets.get(primaryTurretName(turretName));
     if (!turret?.bullet) {
       this.bulletCache.set(typeName, null);
       return null;
@@ -630,7 +637,7 @@ export class CombatSystem implements GameSystem {
     const bldgDef = this.rules.buildings.get(typeName);
     const turretName = unitDef?.turretAttach ?? bldgDef?.turretAttach;
     if (turretName) {
-      const turretDef = this.rules.turrets.get(turretName);
+      const turretDef = this.rules.turrets.get(primaryTurretName(turretName));
       if (turretDef && turretDef.yRotationAngle > 0) {
         // TurretYRotationAngle is degrees per tick — convert to radians
         const radsPerTick = turretDef.yRotationAngle * (Math.PI / 180);

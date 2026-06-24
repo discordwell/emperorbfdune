@@ -7,6 +7,7 @@ import {
   BuildingType, Harvester, hasComponent, ViewRange,
 } from '../core/ECS';
 import type { GameRules } from '../config/RulesParser';
+import { primaryTurretName } from '../config/RulesParser';
 import type { BuildingDef } from '../config/BuildingDefs';
 import type { CombatSystem } from '../simulation/CombatSystem';
 import type { ProductionSystem } from '../simulation/ProductionSystem';
@@ -862,16 +863,23 @@ export class AIPlayer implements GameSystem {
   /** Create a StrategyWorldView adapter for the StrategyRunner */
   private createStrategyWorldView(world: World): StrategyWorldView {
     const combatSystem = this.combatSystem;
+    const playerId = this.playerId;
     return {
       getUnitPosition(eid: number) {
-        if (Health.current[eid] <= 0) return null;
+        if (Health.current[eid] <= 0 || Owner.playerId[eid] !== playerId) return null;
         return { x: Position.x[eid], z: Position.z[eid] };
       },
       getUnitHealth(eid: number) {
         return Health.current[eid] ?? 0;
       },
       isUnitAlive(eid: number) {
-        return (Health.current[eid] ?? 0) > 0;
+        // Owner re-validation guards against bitecs id recycling: an assigned
+        // unit can die and have its id reused by ANOTHER player's freshly-built
+        // unit before the next strategy tick (~75 ticks) prunes the assignment.
+        // Without this the runner would issue move/attack-move orders to that
+        // foreign unit (MovementSystem obeys any active MoveTarget). Mirrors the
+        // owner re-validation already used for scoutEntities/specialEntities.
+        return (Health.current[eid] ?? 0) > 0 && Owner.playerId[eid] === playerId;
       },
       moveUnit(eid: number, x: number, z: number) {
         MoveTarget.x[eid] = x;
@@ -1189,8 +1197,9 @@ export class AIPlayer implements GameSystem {
         continue;
       }
 
-      // Follow the turret -> bullet -> warhead chain
-      const turret = this.rules.turrets.get(def.turretAttach);
+      // Follow the turret -> bullet -> warhead chain.
+      // Multi-turret units store a comma-separated list; use the primary turret.
+      const turret = this.rules.turrets.get(primaryTurretName(def.turretAttach));
       if (!turret || !turret.bullet) {
         this.unitRoles.set(unitName, 'scout');
         continue;

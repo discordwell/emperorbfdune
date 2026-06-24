@@ -119,4 +119,37 @@ describe('CombatSystem events', () => {
     expect(Combat.fireTimer[attacker]).toBe(1);
     expect(Health.current[target]).toBe(200);
   });
+
+  it('does not let a dead attacker fire a "corpse shot"', () => {
+    // A unit killed earlier in the same tick is still in the combatQuery snapshot
+    // (entity removal is deferred). With a ready weapon and a valid target it
+    // would fire one last shot before being reaped — a deterministic-but-wrong
+    // extra hit. The Health<=0 guard in update() must skip it entirely.
+    const world = createWorld();
+    const system = new CombatSystem(makeRules());
+    system.init(world);
+
+    const attacker = spawnAttacker(world, 0, 10, 10);
+    const target = spawnTarget(world, 1, 11, 11);
+
+    AttackTarget.entityId[attacker] = target;
+    AttackTarget.active[attacker] = 1;
+    Combat.attackRange[attacker] = 25;
+    Combat.fireTimer[attacker] = 0; // weapon ready
+    Combat.rof[attacker] = 7;
+
+    // The attacker is dead this tick (e.g. killed by an ally's blast moments ago).
+    Health.current[attacker] = 0;
+
+    const fire = vi.fn();
+    const attacked = vi.fn();
+    EventBus.on('combat:fire', fire);
+    EventBus.on('unit:attacked', attacked);
+
+    system.update(world, 0);
+
+    expect(fire).not.toHaveBeenCalled();
+    expect(attacked).not.toHaveBeenCalled();
+    expect(Health.current[target]).toBe(200); // target untouched by the corpse
+  });
 });

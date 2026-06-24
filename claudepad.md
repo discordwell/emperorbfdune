@@ -2,6 +2,14 @@
 
 ## Session Summaries
 
+### 2026-06-24T05:35UTC - Bugfixes: Pathfinding Discard, Multi-Turret Lookup, Corpse Shot, Strategy Recycle
+- **Four genuine bugs** found via 4 parallel read-only bug-hunt agents, each verified by reverting the fix and watching the new test fail. Suite: **843 pass / 65 files** (was 831/62). Typecheck + production build clean. Adversarial read-only review of the final diff: all four correct, no regressions, set/delete coverage cross-checked.
+- **Units beelined at impassable targets; the A* path was discarded every tick** (`MovementSystem.ts`). The staleness check compared the cached path's *last waypoint* against the raw `MoveTarget`; but `PathfindingSystem.findPath` remaps an impassable target (building/rock/wall) to the nearest passable tile, so the endpoint legitimately differs by >2 units. In async mode (the gameplay default) the freshly-computed route was deleted before it was ever followed, and the unit perpetually chased a straight-line stub into the obstacle. Fix: track the destination each path was *requested* for (`pathTarget` map) and invalidate only when the commanded `MoveTarget` changes. `pathTarget` set at all 3 path-creation sites, deleted/cleared at all 8 teardown sites (mirrors `paths`). New `tests/simulation/movement-pathing.test.ts` drives a real MovementSystem+async pathfinder around a cliff wall.
+- **Multi-turret units' weapons/AI-roles silently broke** (`RulesParser.ts` + 6 consumer files). 8 units (Devastator, Kobra, Flame Tank, Kindjal, Buzzsaw, Mortar Inf, ADV Sardaukar) store `TurretAttach` as a comma-separated list ("HKDevastatorGun, HKDevastatorMissile"); only `checkTurretDeployRestriction` split it. The rest looked up the whole joined string → miss → AI tagged them `scout` (never counted toward composition, never led counter-waves), `getBulletDef` fell back to 100 damage, `EntityFactory` defaulted attackRange/rof, and Sidebar/Mentat/SelectionPanel showed no weapon stats. Fix: new exported `primaryTurretName()` helper applied at AIPlayer:1202, CombatSystem ×3, EntityFactory ×2, Sidebar ×2, MentatScreen ×2, SelectionPanel. No-op for single-turret units (parser already trims). New `AIPlayerRoleClassification.test.ts` + 6 `RulesParser.test.ts` helper tests.
+- **Dead units fired a "corpse shot"** (`CombatSystem.ts`). The per-entity firing loop snapshots `combatQuery` (no Health) and guarded only disabled/suppressed — not `Health<=0`. A unit killed earlier in the same tick is still in the snapshot (removal deferred ~13 ticks) and `unit:died` already unregistered its weapon, so it decremented its fire timer, re-acquired, and fired with the fallback 100 damage. Fix: `if (Health.current[eid] <= 0) continue;` at loop top (after the pre-loop DoT/suppression timers, which must still run). New combat test asserts a dead attacker emits no `combat:fire` and deals no damage.
+- **AI commanded recycled foreign units** (`AIPlayer.ts` `createStrategyWorldView`). The data-driven StrategyRunner's `isUnitAlive`/`getUnitPosition` checked only `Health>0`, no owner — same recycle-hijack class as the already-fixed `scoutEntities`. A dead assignee's bitecs id reused by another player's unit before the next strategy tick (~75) stayed assigned and got move/attack-move orders. Fix: re-validate `Owner.playerId === playerId` (all StrategyRunner call sites operate only on own units). Data-driven mode is wired (`SystemInit.ts:291`, all enemy AIs). New `AIPlayerStrategyRecycle.test.ts`.
+- **Process note**: review agent run strictly read-only (worktree-free); did not revert source. Also bumped the heavy `TokSaveRestoreCorpus` test (229 missions × 2 traces in one case) to an explicit 30s timeout — it was flaky under parallel suite load against the default 5s. Deferred candidates surfaced by agents: HarvestSystem/SandwormSystem internal `tickCounter` not saved (save/load determinism); SimulationHash omits `Rotation.y`/`TurretRotation.y` + building `Combat.fireTimer` (latent desync blind spot) — left for a future pass.
+
 ### 2026-06-18T06:50UTC - Bugfixes: Carryall Delivery Speed, Transport Save/Load Dup, AI Scout Recycle, Repeat Pop-Cap
 - **Four genuine bugs** found via 4 parallel read-only bug-hunt agents (across Production/SaveLoad, Ability/Superweapon/Sandworm, Movement/Delivery/Destruction, AI/Combat), each independently verified by reverting the fix and watching the new test fail. Suite: **831 pass / 62 files** (was 823/59). Typecheck + production build clean. Adversarial read-only review of the final diff: no regressions.
 - **Carryall delivery flew ~33x too slow** (`DeliverySystem.ts`). `CARRYALL_SPEED = 0.6` was assigned to `Speed.max`, but `MovementSystem` scales velocity by `*0.04` per tick, so the carryall moved 0.024 u/tick vs a normal unit's ~0.8. The real Carryall is `Speed=20` in rules.txt. Scripted `.tok` reinforcements (CarryAllDelivery/Delivery/StarportDelivery) crawled across the map and effectively never arrived (units only spawn on arrival). Fix: `CARRYALL_SPEED = 24` (raw rules units, faster than ground units). New `tests/simulation/delivery.test.ts` drives a real MovementSystem and asserts the delivery completes within budget.
@@ -225,19 +233,6 @@
 - Fix: index.ts wires ability state to SaveData interface and restore path
 - SuperweaponSystem AI targeting confirmed correct (audit was wrong, filter logic is fine)
 - Full project review in progress
-- Awaiting code review + commit
-
-### 2026-02-21T08:00UTC - 8+ Bug Fixes: SelectionPanel, BuildingPlacement, MinimapRenderer
-- Fix: SelectionPanel DPS formula showed shots/sec not damage/sec (missing bullet damage lookup)
-- Fix: SelectionPanel hardcoded player ID 0 for upgrade queries (now uses Owner.playerId[eid])
-- Fix: SelectionPanel missing dispose() (EventBus listeners + DOM element leaked)
-- Fix: BuildingPlacement concreteMode not reset in startPlacement (building placement silently failed after concrete mode)
-- Fix: BuildingPlacement Escape key in concrete mode triggered incorrect refund event (now matches right-click behavior)
-- Fix: BuildingPlacement shared THREE.Color reference assignment (.color = ref instead of .color.copy())
-- Fix: BuildingPlacement cancel() didn't reset concreteMode/onConcrete flags
-- Fix: MinimapRenderer dead code removed (unused double-click detection fields)
-- Also from previous session: SelectionManager dispose() + text input guard, CommandManager unregisterEntity + dispose + text input guard
-- Full audit of all 59 .ts files in progress via 4 parallel sub-agents
 - Awaiting code review + commit
 
 ## Key Findings

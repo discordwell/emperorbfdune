@@ -1,4 +1,5 @@
 import type { GameRules } from '../config/RulesParser';
+import { primaryTurretName } from '../config/RulesParser';
 import type { ProductionSystem } from '../simulation/ProductionSystem';
 import type { ArtEntry } from '../config/ArtIniParser';
 import type { UnitDef } from '../config/UnitDefs';
@@ -615,7 +616,7 @@ export class Sidebar {
       html += `<div>Speed: ${unitDef.speed.toFixed(1)} &middot; Sight: ${unitDef.viewRange}</div>`;
       // Weapon details from turret → bullet chain
       if (unitDef.turretAttach) {
-        const turret = this.rules.turrets.get(unitDef.turretAttach);
+        const turret = this.rules.turrets.get(primaryTurretName(unitDef.turretAttach));
         const bullet = turret ? this.rules.bullets.get(turret.bullet) : null;
         if (bullet) {
           const dmg = bullet.damage;
@@ -641,7 +642,7 @@ export class Sidebar {
       }
       // Weapon details for defensive buildings
       if (bDef.turretAttach) {
-        const turret = this.rules.turrets.get(bDef.turretAttach);
+        const turret = this.rules.turrets.get(primaryTurretName(bDef.turretAttach));
         const bullet = turret ? this.rules.bullets.get(turret.bullet) : null;
         if (bullet) {
           const dmg = bullet.damage;

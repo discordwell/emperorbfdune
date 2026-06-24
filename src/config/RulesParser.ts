@@ -28,6 +28,19 @@ export interface GameRules {
   crates: Map<string, CrateDef>;
 }
 
+/**
+ * Extract the primary (first) turret name from a `TurretAttach` value.
+ * Multi-turret units (Devastator, Kobra, Flame Tank, Kindjal, Buzzsaw,
+ * Mortar Infantry, ADV Sardaukar) store a comma-separated list such as
+ * "HKDevastatorGun, HKDevastatorMissile"; the first entry is the primary
+ * weapon used for damage / range / rate-of-fire / AI-role lookups.
+ * Returns '' when there is no turret attached.
+ */
+export function primaryTurretName(turretAttach: string | undefined | null): string {
+  if (!turretAttach) return '';
+  return turretAttach.split(',')[0].trim();
+}
+
 type Section = { name: string; entries: [string, string][] };
 
 function parseSections(text: string): Section[] {
