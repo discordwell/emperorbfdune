@@ -1599,6 +1599,15 @@ export class EffectsManager {
     }
   }
 
+  /** Remove every crate visual silently (no collection VFX) — used on save/load restore. */
+  clearAllCrates(): void {
+    for (const mesh of this.crateVisuals.values()) {
+      this.sceneManager.scene.remove(mesh);
+      (mesh.material as THREE.Material).dispose();
+    }
+    this.crateVisuals.clear();
+  }
+
   /** Animate spinning crates (call in update) */
   private updateCrates(dt: number): void {
     const dtSec = dt / 1000;

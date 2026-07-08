@@ -65,6 +65,8 @@ function makeContext(
       getAbilityState: () => ({ deviated: [], leech: [], kobraDeployed: [], kobraBaseRange: [] }),
     },
     deliverySystem: { getActiveCarryallEids: () => activeCarryallEids },
+    activeCrates: new Map<number, { x: number; z: number; type: string }>(),
+    nextCrateId: 0,
     aircraftAmmo: new Map<number, number>(),
     combatSystem: {
       getStance: () => 1,

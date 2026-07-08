@@ -163,6 +163,10 @@ export function buildSaveData(ctx: GameContext): SaveData {
     })(),
     rngState: simRng.getState(),
     stormWaitTimer: ctx.stormWaitTimer,
+    crates: ctx.activeCrates.size > 0
+      ? Array.from(ctx.activeCrates, ([id, c]) => ({ id, x: c.x, z: c.z, type: c.type }))
+      : undefined,
+    nextCrateId: ctx.nextCrateId,
     scriptState: ctx.missionScriptRunner?.isActive() ? ctx.missionScriptRunner.serialize(eidToIndex) : undefined,
     scriptId: ctx.missionScriptRunner?.getScriptId() ?? undefined,
   };
@@ -362,6 +366,24 @@ export function restoreFromSave(ctx: GameContext, savedGame: SaveData): void {
       ctx.groundSplats.push({ x: s.x, z: s.z, ticksLeft: s.ticksLeft, ownerPlayerId: s.ownerPlayerId, type: splatType });
       ctx.effectsManager.spawnGroundSplat(s.x, s.z, splatType);
     }
+  }
+
+  // Restore uncollected pickup crates. These are non-ECS gameplay state spawned
+  // deterministically off simRng and gated by `activeCrates.size < 3` in the tick
+  // handler, so dropping them on load would both forfeit their solaris/XP/heal
+  // payouts AND desync the shared RNG stream (the next spawn check flips, shifting
+  // every later draw). Rebuild the map + visuals so the post-load draw schedule
+  // matches an uninterrupted run (rngState itself is restored above).
+  ctx.effectsManager.clearAllCrates();
+  ctx.activeCrates.clear();
+  if (savedGame.crates) {
+    for (const c of savedGame.crates) {
+      ctx.activeCrates.set(c.id, { x: c.x, z: c.z, type: c.type });
+      ctx.effectsManager.spawnCrate(c.id, c.x, c.z, c.type);
+    }
+  }
+  if (savedGame.nextCrateId !== undefined) {
+    ctx.nextCrateId = savedGame.nextCrateId;
   }
 
   // Restore AI state from saved buildings

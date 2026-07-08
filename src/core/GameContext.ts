@@ -93,6 +93,8 @@ export interface SaveData {
   };
   rngState?: [number, number, number, number];
   stormWaitTimer?: number;
+  crates?: Array<{ id: number; x: number; z: number; type: string }>;
+  nextCrateId?: number;
   scriptState?: import('../campaign/scripting/MissionScriptTypes').MissionScriptState;
   scriptId?: string;
 }
