@@ -28,6 +28,25 @@ interface Worm {
   riderOwner?: number; // Owner of the rider
 }
 
+/**
+ * Serialized worm-subsystem state for save/load. Entity references (hunt target,
+ * rider) are stored as save-array *indices* (via the SaveLoad eid<->index maps),
+ * not raw eids, so they survive bitECS id reassignment on load. `-1` = no ref.
+ */
+export interface SandwormSaveState {
+  worms: Array<{
+    x: number; z: number; targetX: number; targetZ: number;
+    speed: number; life: number;
+    huntingIndex: number; huntingOwner: number;
+    state: Worm['state']; emergeTicks: number;
+    riderIndex: number; riderOwner: number;
+  }>;
+  tickCounter: number;
+  thumpers: Array<{ x: number; z: number; ticksLeft: number }>;
+  attractSides: number[];
+  repelSides: number[];
+}
+
 export class SandwormSystem implements GameSystem {
   private terrain: TerrainRenderer;
   private effects: EffectsManager;
@@ -427,6 +446,66 @@ export class SandwormSystem implements GameSystem {
 
   getWorms(): ReadonlyArray<Worm> {
     return this.worms;
+  }
+
+  /**
+   * Serialize the whole worm subsystem for save/load. This state is not derivable
+   * from ECS components, and — critically — the update loop draws from the shared
+   * `simRng` on a schedule gated by `worms.length`/`tickCounter`, so failing to
+   * persist it desyncs the global RNG stream after a load (and silences worm
+   * spawns for MIN_TICKS_WORM_CAN_APPEAR ticks, since tickCounter would restart at 0).
+   * `mapEid` maps a live eid to its save-array index (undefined -> not saved).
+   */
+  serialize(mapEid: (eid: number) => number | undefined): SandwormSaveState {
+    return {
+      worms: this.worms.map(w => ({
+        x: w.x, z: w.z, targetX: w.targetX, targetZ: w.targetZ,
+        speed: w.speed, life: w.life,
+        huntingIndex: w.huntingEid != null ? (mapEid(w.huntingEid) ?? -1) : -1,
+        huntingOwner: w.huntingOwner,
+        state: w.state, emergeTicks: w.emergeTicks,
+        riderIndex: w.riderEid != null ? (mapEid(w.riderEid) ?? -1) : -1,
+        riderOwner: w.riderOwner ?? -1,
+      })),
+      tickCounter: this.tickCounter,
+      thumpers: this.thumpers.map(t => ({ ...t })),
+      attractSides: [...this.sideAttractsWorms],
+      repelSides: [...this.sideRepelsWorms],
+    };
+  }
+
+  /**
+   * Restore worm-subsystem state, remapping saved indices back to live eids via
+   * `mapIndex`. A hunt target or rider that did not survive the load is dropped
+   * (a 'mounted' worm whose rider is gone reverts to roaming, rather than tracking
+   * a dangling eid). Replaces any current state.
+   */
+  deserialize(state: SandwormSaveState, mapIndex: (idx: number) => number | undefined): void {
+    this.tickCounter = state.tickCounter ?? 0;
+    this.thumpers = (state.thumpers ?? []).map(t => ({ ...t }));
+    this.sideAttractsWorms = new Set(state.attractSides ?? []);
+    this.sideRepelsWorms = new Set(state.repelSides ?? []);
+    this.worms = (state.worms ?? []).map(w => {
+      const huntingEid = w.huntingIndex >= 0 ? mapIndex(w.huntingIndex) : undefined;
+      const riderEid = w.riderIndex >= 0 ? mapIndex(w.riderIndex) : undefined;
+      const worm: Worm = {
+        x: w.x, z: w.z, targetX: w.targetX, targetZ: w.targetZ,
+        speed: w.speed, life: w.life,
+        huntingEid: huntingEid ?? null,
+        huntingOwner: w.huntingOwner,
+        state: w.state, emergeTicks: w.emergeTicks,
+      };
+      if (riderEid !== undefined) {
+        worm.riderEid = riderEid;
+        worm.riderOwner = w.riderOwner;
+      } else if (worm.state === 'mounted') {
+        // Rider entity did not survive the load — un-mount so the worm doesn't
+        // follow/keep-alive a dangling eid.
+        worm.state = 'roaming';
+        worm.speed = GameConstants.WORM_ROAM_SPEED;
+      }
+      return worm;
+    });
   }
 
   /** Try to mount a worm near the given position. Returns true if successful. */

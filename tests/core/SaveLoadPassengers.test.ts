@@ -77,6 +77,7 @@ function makeContext(
     harvestSystem: { getSolaris: () => 0 },
     productionSystem: { getState: () => ({}) },
     fogOfWar: { getExploredData: () => [] },
+    sandwormSystem: { serialize: () => ({ worms: [], tickCounter: 0, thumpers: [], attractSides: [], repelSides: [] }) },
     superweaponSystem: { getChargeState: () => ({}) },
     victorySystem: { getTickCounter: () => 0 },
     selectionManager: { getControlGroups: () => new Map() },

@@ -17,7 +17,7 @@ import type { MinimapRenderer } from '../rendering/MinimapRenderer';
 import type { FogOfWar } from '../rendering/FogOfWar';
 import type { EffectsManager } from '../rendering/EffectsManager';
 import type { DamageNumbers } from '../rendering/DamageNumbers';
-import type { SandwormSystem } from '../simulation/SandwormSystem';
+import type { SandwormSystem, SandwormSaveState } from '../simulation/SandwormSystem';
 import type { AbilitySystem } from '../simulation/AbilitySystem';
 import type { SuperweaponSystem } from '../simulation/SuperweaponSystem';
 import type { WallSystem } from '../simulation/WallSystem';
@@ -95,6 +95,7 @@ export interface SaveData {
   stormWaitTimer?: number;
   crates?: Array<{ id: number; x: number; z: number; type: string }>;
   nextCrateId?: number;
+  sandworm?: SandwormSaveState;
   scriptState?: import('../campaign/scripting/MissionScriptTypes').MissionScriptState;
   scriptId?: string;
 }

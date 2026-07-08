@@ -167,6 +167,7 @@ export function buildSaveData(ctx: GameContext): SaveData {
       ? Array.from(ctx.activeCrates, ([id, c]) => ({ id, x: c.x, z: c.z, type: c.type }))
       : undefined,
     nextCrateId: ctx.nextCrateId,
+    sandworm: ctx.sandwormSystem.serialize(eid => eidToIndex.get(eid)),
     scriptState: ctx.missionScriptRunner?.isActive() ? ctx.missionScriptRunner.serialize(eidToIndex) : undefined,
     scriptId: ctx.missionScriptRunner?.getScriptId() ?? undefined,
   };
@@ -384,6 +385,16 @@ export function restoreFromSave(ctx: GameContext, savedGame: SaveData): void {
   }
   if (savedGame.nextCrateId !== undefined) {
     ctx.nextCrateId = savedGame.nextCrateId;
+  }
+
+  // Restore sandworm subsystem (worms, thumpers, tickCounter, side flags). Like the
+  // crates above this is non-ECS state whose absence desyncs the shared simRng (the
+  // worm-spawn draw is gated by worms.length/tickCounter) and silences worm spawns
+  // until tickCounter re-crosses MIN_TICKS_WORM_CAN_APPEAR. Worm visuals are rebuilt
+  // automatically by updateWormVisuals (index-keyed off getWorms()). Legacy saves
+  // without the field keep the fresh-start defaults.
+  if (savedGame.sandworm) {
+    ctx.sandwormSystem.deserialize(savedGame.sandworm, idx => indexToEid.get(idx));
   }
 
   // Restore AI state from saved buildings

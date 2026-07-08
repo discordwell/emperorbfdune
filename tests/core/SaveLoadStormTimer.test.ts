@@ -45,6 +45,7 @@ function makeSaveCtx(world: World) {
     harvestSystem: { getSolaris: () => 0 },
     productionSystem: { getState: () => ({}) },
     fogOfWar: { getExploredData: () => [] },
+    sandwormSystem: { serialize: () => ({ worms: [], tickCounter: 0, thumpers: [], attractSides: [], repelSides: [] }) },
     superweaponSystem: { getChargeState: () => ({}) },
     victorySystem: { getTickCounter: () => 0 },
     selectionManager: { getControlGroups: () => new Map() },
@@ -70,6 +71,7 @@ function makeRestoreCtx(world: World) {
     selectionManager: { setControlGroups: vi.fn() },
     abilitySystem: { restoreAbilityState: vi.fn() },
     productionSystem: { restoreState: vi.fn() },
+    sandwormSystem: { deserialize: vi.fn() },
     combatSystem: {
       setSuppressed: vi.fn(), setStance: vi.fn(),
       setGuardPosition: vi.fn(), restoreAttackMove: vi.fn(),
