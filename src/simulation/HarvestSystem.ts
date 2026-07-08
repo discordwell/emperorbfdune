@@ -54,10 +54,16 @@ export class HarvestSystem implements GameSystem {
   private buildingTypeNames: string[] = [];
 
   /** Validate that a stored refinery entity ID is still a living refinery (guards against ID recycling) */
-  private isValidRefinery(refEntity: number): boolean {
+  private isValidRefinery(refEntity: number, owner: number): boolean {
     if (refEntity <= 0) return false;
     if (!this.world || !hasComponent(this.world, BuildingType, refEntity)) return false;
     if (Health.current[refEntity] <= 0) return false;
+    // Ownership can flip in place with no eid recycle and no event when an enemy
+    // engineer captures the building (AbilitySystem.updateEngineerCapture). Without
+    // this check a harvester stays bound to its now-enemy refinery and never retasks
+    // to a surviving own one — mirrors the owner filter in findRefinery and in the
+    // returnToRefinery reassignment loop below.
+    if (Owner.playerId[refEntity] !== owner) return false;
     const bTypeId = BuildingType.id[refEntity];
     const bName = this.buildingTypeNames[bTypeId] ?? '';
     return bName.includes('Refinery');
@@ -612,7 +618,7 @@ export class HarvestSystem implements GameSystem {
       // Airlift complete - land adjacent to refinery (try cardinal directions to avoid obstacles)
       this.airlifting.delete(eid);
       const refEntity = Harvester.refineryEntity[eid];
-      if (this.isValidRefinery(refEntity)) {
+      if (this.isValidRefinery(refEntity, owner)) {
         const rx = Position.x[refEntity];
         const rz = Position.z[refEntity];
         // Try 4 cardinal offsets outside 3x3 building footprint
@@ -670,7 +676,7 @@ export class HarvestSystem implements GameSystem {
   private handleUnloading(eid: number): void {
     // Verify refinery is still alive during unload
     const refEntity = Harvester.refineryEntity[eid];
-    if (!this.isValidRefinery(refEntity)) {
+    if (!this.isValidRefinery(refEntity, Owner.playerId[eid])) {
       this.harvestTimers.delete(eid);
       Harvester.state[eid] = RETURNING;
       this.returnToRefinery(eid);
@@ -703,7 +709,7 @@ export class HarvestSystem implements GameSystem {
   private returnToRefinery(eid: number): void {
     const refineryEntity = Harvester.refineryEntity[eid];
     // Validate refinery is alive and still a refinery (guards against entity ID recycling)
-    if (this.isValidRefinery(refineryEntity)) {
+    if (this.isValidRefinery(refineryEntity, Owner.playerId[eid])) {
       MoveTarget.x[eid] = Position.x[refineryEntity];
       MoveTarget.z[eid] = Position.z[refineryEntity];
     } else {

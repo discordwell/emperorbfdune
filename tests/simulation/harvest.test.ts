@@ -10,6 +10,7 @@ import {
   addComponent,
   addEntity,
   AttackTarget,
+  BuildingType,
   Combat,
   Harvester,
   Health,
@@ -362,5 +363,78 @@ describe('HarvestSystem flee-on-damage', () => {
 
     // No hit emitted -> never marked fleeing -> stays eligible to act on IDLE.
     expect(Harvester.state[harvester]).not.toBe(RETURNING);
+  });
+});
+
+describe('HarvestSystem refinery ownership', () => {
+  beforeEach(() => {
+    EventBus.clear();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).document = { getElementById: () => null };
+  });
+
+  afterEach(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    delete (globalThis as any).document;
+  });
+
+  // Spawn a refinery building: BuildingType.id 0 -> name 'ATRefinery' (contains "Refinery").
+  function spawnRefinery(world: TestWorld, owner: number, x: number, z: number): number {
+    const eid = addEntity(world);
+    addComponent(world, Position, eid);
+    addComponent(world, Health, eid);
+    addComponent(world, Owner, eid);
+    addComponent(world, BuildingType, eid);
+    Position.x[eid] = x;
+    Position.z[eid] = z;
+    Health.max[eid] = 2000;
+    Health.current[eid] = 2000;
+    Owner.playerId[eid] = owner;
+    BuildingType.id[eid] = 0;
+    return eid;
+  }
+
+  it('retasks a harvester to a surviving own refinery after its refinery is captured', () => {
+    const world = createWorld();
+    const harvest = new HarvestSystem(makeMockTerrain());
+    harvest.init(world);
+    harvest.setBuildingContext(world, ['ATRefinery']);
+
+    const refA = spawnRefinery(world, 0, 40, 40);
+    const refB = spawnRefinery(world, 0, 80, 80);
+    const harvester = spawnHarvester(world, 0, 41, 41);
+    Harvester.refineryEntity[harvester] = refA;
+    Harvester.spiceCarried[harvester] = 5;
+    Harvester.state[harvester] = UNLOADING;
+
+    // Baseline: while the harvester still owns refA it stays assigned to it.
+    harvest.update(world, 0);
+    expect(Harvester.refineryEntity[harvester]).toBe(refA);
+
+    // Enemy engineer captures refA in place: Owner flips, eid unchanged, no event.
+    Owner.playerId[refA] = 1;
+    harvest.update(world, 0);
+
+    // The harvester must abandon the now-enemy refinery and retask to its own refB.
+    // Before the owner check it stayed bound to refA (captured) indefinitely.
+    expect(Harvester.refineryEntity[harvester]).toBe(refB);
+  });
+
+  it('goes idle when its only refinery is captured and no own refinery remains', () => {
+    const world = createWorld();
+    const harvest = new HarvestSystem(makeMockTerrain());
+    harvest.init(world);
+    harvest.setBuildingContext(world, ['ATRefinery']);
+
+    const refA = spawnRefinery(world, 0, 40, 40);
+    const harvester = spawnHarvester(world, 0, 41, 41);
+    Harvester.refineryEntity[harvester] = refA;
+    Harvester.spiceCarried[harvester] = 5;
+    Harvester.state[harvester] = UNLOADING;
+
+    Owner.playerId[refA] = 1; // captured — no other own refinery exists
+    harvest.update(world, 0);
+
+    expect(Harvester.state[harvester]).toBe(IDLE);
   });
 });
