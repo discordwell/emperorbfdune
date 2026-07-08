@@ -788,8 +788,15 @@ export class CombatSystem implements GameSystem {
     // Emit blast event for visual effects
     EventBus.emit('combat:blast', { x: impactX, z: impactZ, radius: worldRadius });
 
-    // Iterate all entities with Health+Position
-    const entities = healthQuery(world);
+    // Snapshot the query before iterating. applyDamageToEntity below can drop a
+    // building to 0 HP, which synchronously emits `unit:died`; the EventHandlers
+    // listener spawns "survivor" infantry inline (ctx.spawnUnit -> addEntity) at the
+    // building centre — i.e. inside this blast. Those survivors are appended to the
+    // live healthQuery.dense array, so iterating it directly would retroactively hit
+    // (and often kill) units that only just emerged from the wreckage this same
+    // blast created. Copying up front excludes anything spawned mid-loop; no removals
+    // happen during the loop (all deaths defer removal), so the snapshot is stable.
+    const entities = [...healthQuery(world)];
     for (const eid of entities) {
       if (Health.current[eid] <= 0) continue;
 

@@ -153,3 +153,48 @@ describe('CombatSystem events', () => {
     expect(Health.current[target]).toBe(200); // target untouched by the corpse
   });
 });
+
+describe('CombatSystem AoE blast — units spawned mid-blast', () => {
+  beforeEach(() => {
+    EventBus.clear();
+  });
+
+  // A bullet with a real blast radius; only the fields applyBlastDamage reads matter.
+  function blastBullet() {
+    return {
+      name: 'TestBlast', blastRadius: 64, damage: 100, warhead: '',
+      reduceDamageWithDistance: false, damageFriendly: false, friendlyDamageAmount: 0,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any;
+  }
+
+  it('does not retroactively hit a unit spawned (via unit:died) during the blast', () => {
+    const world = createWorld();
+    const system = new CombatSystem(makeRules());
+    system.init(world);
+
+    const attacker = spawnAttacker(world, 0, 10, 10);
+    // The building the blast destroys — 1 HP so the blast is a lethal hit.
+    const doomed = spawnTarget(world, 1, 11, 11);
+    Health.current[doomed] = 1;
+
+    // Mimic EventHandlers' building-survivor spawn: when the building dies, infantry
+    // emerge at its position (well inside this blast). Capture the survivor eid.
+    let survivor = -1;
+    EventBus.on('unit:died', (payload: { entityId: number }) => {
+      if (payload.entityId !== doomed) return;
+      survivor = spawnTarget(world, 1, 11, 11); // full HP, at the blast centre
+    });
+
+    // Drive the blast directly (in game this runs from update()'s fire path).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (system as any).applyBlastDamage(world, attacker, doomed, 100, blastBullet());
+
+    expect(Health.current[doomed]).toBe(0);   // the blast did destroy the building
+    expect(survivor).toBeGreaterThan(0);       // a survivor did spawn mid-blast
+    // The survivor only just emerged from the wreckage this blast created — it must
+    // NOT be damaged by that same blast. Before the query snapshot it was appended
+    // to the live iteration array and took the hit (dropping to 100/200).
+    expect(Health.current[survivor]).toBe(Health.max[survivor]);
+  });
+});
