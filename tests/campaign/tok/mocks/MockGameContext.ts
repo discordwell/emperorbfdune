@@ -248,6 +248,7 @@ export function createMockCtx(): MockCtx {
       setHousePrefix: vi.fn(),
       getActiveCount: vi.fn(() => 0),
       hasActiveDeliveries: vi.fn(() => false),
+      getActiveCarryallEids: vi.fn(() => [] as number[]),
     },
 
     missionScriptRunner: null,

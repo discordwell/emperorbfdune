@@ -194,6 +194,17 @@ export class DeliverySystem {
     return this.deliveries.length;
   }
 
+  /**
+   * Entity ids of the temporary Carryall transports for in-flight deliveries.
+   * These live in `unitQuery` (Position/UnitType/Owner) but are throwaway animation
+   * entities tracked only in `this.deliveries` — save/load must skip them, or a
+   * saved game restores an immortal (Health=9999) phantom Carryall with no delivery
+   * record to ever advance or despawn it (and it inflates the owner's pop cap).
+   */
+  getActiveCarryallEids(): number[] {
+    return this.deliveries.map(d => d.carryallEid);
+  }
+
   /** Check if there are active deliveries for serialization awareness. */
   hasActiveDeliveries(): boolean {
     return this.deliveries.length > 0;

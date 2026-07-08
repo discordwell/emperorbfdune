@@ -470,6 +470,13 @@ export class BuildingDestructionSystem {
   private removeEntity(state: DyingBuilding, removeEntityFn: (eid: number) => void): void {
     if (state.entityRemoved) return;
     state.entityRemoved = true;
+    // `startDestruction` suppressed this entity's combat, but the death handler's
+    // `unregisterUnit` already ran *before* that (so it can't undo the suppression),
+    // and the ECS removal below does not touch CombatSystem. Without this the eid
+    // stays in `suppressedEntities` forever — an unbounded leak, and once bitECS
+    // recycles the id for a new combat entity that unit is silently skipped in the
+    // firing loop (never shoots). Clear it as the entity leaves the world.
+    this.combatSystem.setSuppressed(state.entityId, false);
     try {
       removeEntityFn(state.entityId);
     } catch {

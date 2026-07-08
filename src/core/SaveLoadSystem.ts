@@ -26,6 +26,14 @@ export function buildSaveData(ctx: GameContext): SaveData {
   for (const passengers of ctx.abilitySystem.getTransportPassengers().values()) {
     for (const p of passengers) passengerEids.add(p);
   }
+  // In-flight delivery Carryalls are throwaway animation entities (Health=9999) that
+  // appear in unitQuery but are tracked only by DeliverySystem. Persisting one would
+  // restore a permanent phantom unit — no delivery record ever advances or despawns
+  // it, and it counts against the owner's pop cap. Skip them (same rationale as
+  // transport passengers above).
+  for (const carryallEid of ctx.deliverySystem.getActiveCarryallEids()) {
+    passengerEids.add(carryallEid);
+  }
 
   // Save all units
   const allUnits = unitQuery(w);

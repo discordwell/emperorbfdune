@@ -34,6 +34,7 @@ function makeSaveCtx(world: World) {
       getTransportPassengers: () => new Map<number, number[]>(),
       getAbilityState: () => ({ deviated: [], leech: [], kobraDeployed: [], kobraBaseRange: [] }),
     },
+    deliverySystem: { getActiveCarryallEids: () => [] as number[] },
     aircraftAmmo: new Map<number, number>(),
     combatSystem: {
       getStance: () => 1, getGuardPosition: () => null,

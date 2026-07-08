@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ProductionSystem } from '../../src/simulation/ProductionSystem';
 import { parseRules, type GameRules } from '../../src/config/RulesParser';
 import { EventBus } from '../../src/core/EventBus';
+import { GameConstants } from '../../src/utils/Constants';
 
 // Minimal HarvestSystem mock that satisfies ProductionSystem's needs
 class MockHarvestSystem {
@@ -769,6 +770,64 @@ PrimaryBuilding=ATConYard
 
       // Repeat mode should be restored
       expect(production2.isOnRepeat(0, 'ATLightInf')).toBe(true);
+    });
+  });
+
+  describe('starport delivery', () => {
+    // beforeEach gives player 0 an ATConYard + ATBarracks but NO ATFactory.
+    // ATCombatTank is a Starportable vehicle, so it would queue in the (factory-gated)
+    // vehicle queue.
+    beforeEach(() => {
+      production.addPlayerBuilding(0, 'ATStarport');
+      production.updateStarportPrices(); // populate prices + stock for ATCombatTank
+    });
+
+    it('delivers a starport-ordered vehicle even with no vehicle factory', () => {
+      expect(production.ownsAnyBuildingSuffix(0, 'Factory')).toBe(false);
+
+      const done = vi.fn();
+      EventBus.on('production:complete', done);
+
+      expect(production.buyFromStarport(0, 'ATCombatTank')).toBe(true);
+
+      // Run past the fixed frigate countdown. Without the fix the vehicle queue
+      // multiplier is 0 (no Factory) so the order's elapsed never advances and it
+      // freezes forever — credits + stock + a pop slot locked with no refund.
+      for (let i = 0; i < GameConstants.FRIGATE_COUNTDOWN + 10; i++) production.update();
+
+      expect(done).toHaveBeenCalledWith(
+        expect.objectContaining({ unitType: 'ATCombatTank', owner: 0, isBuilding: false }),
+      );
+    });
+
+    it('frigate timer is independent of base power (not halved when low power)', () => {
+      const done = vi.fn();
+      EventBus.on('production:complete', done);
+
+      production.setPowerMultiplier(0, 0.5); // low-power penalty
+      expect(production.buyFromStarport(0, 'ATCombatTank')).toBe(true);
+
+      // Exactly FRIGATE_COUNTDOWN ticks at 1.0/tick should complete it. If power
+      // halved the rate, it would still be in flight here.
+      for (let i = 0; i < GameConstants.FRIGATE_COUNTDOWN; i++) production.update();
+      expect(done).toHaveBeenCalledTimes(1);
+    });
+
+    it('starport flag survives save/load and the order still completes', () => {
+      expect(production.buyFromStarport(0, 'ATCombatTank')).toBe(true);
+      for (let i = 0; i < 100; i++) production.update();
+
+      const restored = JSON.parse(JSON.stringify(production.getState()));
+      const production2 = new ProductionSystem(rules, harvest as any);
+      production2.addPlayerBuilding(0, 'ATConYard'); // still no factory
+      production2.restoreState(restored);
+
+      const done = vi.fn();
+      EventBus.on('production:complete', done);
+      for (let i = 0; i < GameConstants.FRIGATE_COUNTDOWN; i++) production2.update();
+      expect(done).toHaveBeenCalledWith(
+        expect.objectContaining({ unitType: 'ATCombatTank', owner: 0 }),
+      );
     });
   });
 });

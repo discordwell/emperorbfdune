@@ -43,7 +43,11 @@ function makeUnit(world: ReturnType<typeof createWorld>, typeId: number, owner: 
   return eid;
 }
 
-function makeContext(world: ReturnType<typeof createWorld>, transportPassengers: Map<number, number[]>) {
+function makeContext(
+  world: ReturnType<typeof createWorld>,
+  transportPassengers: Map<number, number[]>,
+  activeCarryallEids: number[] = [],
+) {
   return {
     game: { getWorld: () => world, getTickCount: () => 0 },
     typeRegistry: { unitTypeNames: UNIT_NAMES, buildingTypeNames: [] as string[] },
@@ -60,6 +64,7 @@ function makeContext(world: ReturnType<typeof createWorld>, transportPassengers:
       getTransportPassengers: () => transportPassengers,
       getAbilityState: () => ({ deviated: [], leech: [], kobraDeployed: [], kobraBaseRange: [] }),
     },
+    deliverySystem: { getActiveCarryallEids: () => activeCarryallEids },
     aircraftAmmo: new Map<number, number>(),
     combatSystem: {
       getStance: () => 1,
@@ -113,5 +118,24 @@ describe('buildSaveData transport passengers', () => {
     expect(unitEntities.length).toBe(2); // APC + free infantry both saved
     expect(unitEntities.some(e => e.unitTypeId === AT_LIGHT_INF && e.x === 30)).toBe(true);
     void free;
+  });
+
+  it('does not serialize in-flight delivery Carryalls (throwaway animation entities)', () => {
+    const world = createWorld();
+    const tank = makeUnit(world, AT_APC, 0, 40, 40); // a normal owned unit
+    // A delivery Carryall mid-flight: real unitQuery entity, Health 9999, tracked
+    // only by DeliverySystem.
+    const carryall = makeUnit(world, AT_LIGHT_INF, 0, 12, 12);
+    Health.current[carryall] = 9999;
+    Health.max[carryall] = 9999;
+
+    const save = buildSaveData(makeContext(world, new Map(), [carryall]));
+
+    const unitEntities = save.entities.filter(e => e.unitTypeId !== undefined);
+    // Only the real tank is saved; the delivery Carryall is skipped so it can't be
+    // restored as an immortal phantom.
+    expect(unitEntities.length).toBe(1);
+    expect(unitEntities.some(e => e.x === 12)).toBe(false);
+    void tank;
   });
 });

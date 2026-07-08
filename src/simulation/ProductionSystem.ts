@@ -14,6 +14,9 @@ interface QueueItem {
   totalTime: number;
   elapsed: number;
   cost: number;
+  /** Starport air-delivery order: progresses on a fixed frigate timer, independent
+   *  of the player's factories/barracks and base power. */
+  starport?: boolean;
 }
 
 export interface ProductionState {
@@ -468,7 +471,12 @@ export class ProductionSystem {
     for (const [playerId, queue] of this.infantryQueues) {
       if (queue.length === 0) continue;
       const item = queue[0];
-      const mult = (this.powerMultipliers.get(playerId) ?? 1.0) * this.getFactorySpeedBonus(playerId, 'infantry');
+      // Starport orders arrive by off-map frigate on a fixed timer — a missing (or
+      // destroyed) Barracks must NOT stall them, or the spent credits + stock + pop
+      // slot would be locked forever with no refund.
+      const mult = item.starport
+        ? 1.0
+        : (this.powerMultipliers.get(playerId) ?? 1.0) * this.getFactorySpeedBonus(playerId, 'infantry');
       item.elapsed += mult;
       if (item.elapsed >= item.totalTime) {
         const completedName = item.typeName;
@@ -495,7 +503,11 @@ export class ProductionSystem {
     for (const [playerId, queue] of this.vehicleQueues) {
       if (queue.length === 0) continue;
       const item = queue[0];
-      const mult = (this.powerMultipliers.get(playerId) ?? 1.0) * this.getFactorySpeedBonus(playerId, 'vehicle');
+      // Starport orders arrive by off-map frigate on a fixed timer — a missing (or
+      // destroyed) Factory must NOT stall them (see infantry queue above).
+      const mult = item.starport
+        ? 1.0
+        : (this.powerMultipliers.get(playerId) ?? 1.0) * this.getFactorySpeedBonus(playerId, 'vehicle');
       item.elapsed += mult;
       if (item.elapsed >= item.totalTime) {
         const completedName = item.typeName;
@@ -673,6 +685,7 @@ export class ProductionSystem {
       totalTime: GameConstants.FRIGATE_COUNTDOWN, // Fixed delivery time from rules.txt
       elapsed: 0,
       cost: price,
+      starport: true,
     });
     queueMap.set(playerId, queue);
     return true;
