@@ -294,9 +294,26 @@ export function restoreFromSave(ctx: GameContext, savedGame: SaveData): void {
   ctx.deferredActions.length = 0;
   ctx.descendingUnits.clear();
 
+  // Restore the sandworm subsystem (worms, thumpers, tickCounter, side flags). This
+  // is non-ECS state whose absence desyncs the shared simRng (the worm-spawn draw is
+  // gated by worms.length/tickCounter) and silences spawns until tickCounter
+  // re-crosses MIN_TICKS_WORM_CAN_APPEAR. It runs BEFORE the snap-to-ground pass
+  // below so a mounted Fremen rider (a live unit parked at y=1.5 on its worm) can be
+  // excluded there — otherwise the snap would ground it and overwrite its move order
+  // with the rally point, and the re-linked worm would chase the rally instead of the
+  // player's commanded destination. Worm visuals rebuild via updateWormVisuals
+  // (index-keyed off getWorms()); legacy saves without the field keep fresh defaults.
+  if (savedGame.sandworm) {
+    ctx.sandwormSystem.deserialize(savedGame.sandworm, idx => indexToEid.get(idx));
+  }
+
   // Snap any units with elevated Y to ground level
+  const wormRiderEids = ctx.sandwormSystem.getRiderEids();
   for (const eid of unitQuery(world)) {
     if (Health.current[eid] <= 0) continue;
+    // Worm riders are kept aloft (y=1.5) and steered by SandwormSystem — leave their
+    // position and move order intact instead of grounding + rallying them.
+    if (wormRiderEids.has(eid)) continue;
     const groundY = ctx.terrain.getHeightAt(Position.x[eid], Position.z[eid]) + 0.1;
     if (Position.y[eid] > groundY + 1.0 && !ctx.movement.isFlyer(eid)) {
       Position.y[eid] = groundY;
@@ -385,16 +402,6 @@ export function restoreFromSave(ctx: GameContext, savedGame: SaveData): void {
   }
   if (savedGame.nextCrateId !== undefined) {
     ctx.nextCrateId = savedGame.nextCrateId;
-  }
-
-  // Restore sandworm subsystem (worms, thumpers, tickCounter, side flags). Like the
-  // crates above this is non-ECS state whose absence desyncs the shared simRng (the
-  // worm-spawn draw is gated by worms.length/tickCounter) and silences worm spawns
-  // until tickCounter re-crosses MIN_TICKS_WORM_CAN_APPEAR. Worm visuals are rebuilt
-  // automatically by updateWormVisuals (index-keyed off getWorms()). Legacy saves
-  // without the field keep the fresh-start defaults.
-  if (savedGame.sandworm) {
-    ctx.sandwormSystem.deserialize(savedGame.sandworm, idx => indexToEid.get(idx));
   }
 
   // Restore AI state from saved buildings

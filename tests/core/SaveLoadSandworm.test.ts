@@ -4,6 +4,9 @@ import { createWorld } from 'bitecs';
 import { buildSaveData, restoreFromSave } from '../../src/core/SaveLoadSystem';
 import { SandwormSystem, type SandwormSaveState } from '../../src/simulation/SandwormSystem';
 import type { SaveData } from '../../src/core/GameContext';
+import {
+  addComponent, addEntity, Health, MoveTarget, Owner, Position, UnitType,
+} from '../../src/core/ECS';
 
 type World = ReturnType<typeof createWorld>;
 
@@ -173,6 +176,15 @@ function makeRestoreCtx(world: World, sandwormSystem: SandwormSystem) {
   } as any;
 }
 
+function baseSave(extra: Partial<SaveData>): SaveData {
+  return {
+    version: 1, tick: 500,
+    housePrefix: 'AT', enemyPrefix: 'HK', houseName: 'Atreides', enemyName: 'Harkonnen',
+    solaris: [], entities: [], spice: [],
+    ...extra,
+  } as SaveData;
+}
+
 describe('save/load sandworm integration', () => {
   it('a worm + tickCounter present at save survives buildSaveData -> restoreFromSave', () => {
     // Source system carrying a roaming worm and an advanced spawn timer.
@@ -196,5 +208,58 @@ describe('save/load sandworm integration', () => {
     expect(dst.getWorms()[0]).toMatchObject({ x: 15, z: 25, state: 'roaming' });
     // tickCounter restored so worms aren't silenced for MIN_TICKS_WORM_CAN_APPEAR after load.
     expect(dst.serialize(() => undefined).tickCounter).toBe(5000);
+  });
+
+  it('keeps a restored worm rider aloft with its command intact (not grounded + rallied)', () => {
+    const world = createWorld();
+    const dst = makeSystem();
+
+    // Real spawnUnit so the rider becomes a queryable ECS unit; low terrain + a set
+    // rally point are exactly the conditions under which the snap-to-ground pass would
+    // otherwise clobber an elevated player-0 unit's move order.
+    let riderEid = -1;
+    const ctx = {
+      ...makeRestoreCtx(world, dst),
+      typeRegistry: { unitTypeNames: ['ATFremen'], buildingTypeNames: [] as string[] },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      spawnUnit: (w: any, _name: string, owner: number, x: number, z: number) => {
+        const eid = addEntity(w);
+        addComponent(w, Position, eid); addComponent(w, Health, eid);
+        addComponent(w, Owner, eid); addComponent(w, UnitType, eid);
+        addComponent(w, MoveTarget, eid);
+        Position.x[eid] = x; Position.z[eid] = z;
+        Owner.playerId[eid] = owner; UnitType.id[eid] = 0;
+        riderEid = eid;
+        return eid;
+      },
+      commandManager: { getRallyPoint: () => ({ x: 5, z: 5 }) },
+    } as any;
+
+    const save = baseSave({
+      rngState: [1, 2, 3, 4], stormWaitTimer: 500,
+      entities: [
+        // The rider: a player-0 unit parked on its worm (y=1.5) with a live order to (99,99).
+        {
+          x: 15, z: 25, y: 1.5, rotY: 0, hp: 100, maxHp: 100, owner: 0, unitTypeId: 0,
+          speed: { max: 1, turn: 1, accel: 1, cur: 1 }, vet: { xp: 0, rank: 0 },
+          moveTarget: { x: 99, z: 99, active: 1 },
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any,
+      ],
+      sandworm: state({
+        worms: [wormEntry({ x: 15, z: 25, state: 'mounted', speed: 0.9, riderIndex: 0, riderOwner: 0 })],
+        tickCounter: 5000,
+      }),
+    });
+
+    restoreFromSave(ctx, save);
+
+    // The worm re-linked to the freshly-spawned rider...
+    expect(dst.getWorms()[0].riderEid).toBe(riderEid);
+    // ...and the snap pass left the rider aloft with its original command, NOT grounded
+    // and NOT rallied to (5,5). Before the fix its MoveTarget was clobbered to the rally.
+    expect(Position.y[riderEid]).toBe(1.5);
+    expect(MoveTarget.x[riderEid]).toBe(99);
+    expect(MoveTarget.z[riderEid]).toBe(99);
   });
 });

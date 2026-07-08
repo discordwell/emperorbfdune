@@ -449,6 +449,18 @@ export class SandwormSystem implements GameSystem {
   }
 
   /**
+   * Entity ids currently mounted as worm riders. These are live units kept aloft
+   * (y=1.5) and steered by this system; save/load restore must not ground/rally them.
+   */
+  getRiderEids(): Set<number> {
+    const s = new Set<number>();
+    for (const w of this.worms) {
+      if (w.riderEid != null) s.add(w.riderEid);
+    }
+    return s;
+  }
+
+  /**
    * Serialize the whole worm subsystem for save/load. This state is not derivable
    * from ECS components, and — critically — the update loop draws from the shared
    * `simRng` on a schedule gated by `worms.length`/`tickCounter`, so failing to

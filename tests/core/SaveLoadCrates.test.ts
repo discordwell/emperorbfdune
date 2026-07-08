@@ -75,7 +75,7 @@ function makeRestoreCtx(world: World) {
     selectionManager: { setControlGroups: vi.fn() },
     abilitySystem: { restoreAbilityState: vi.fn() },
     productionSystem: { restoreState: vi.fn() },
-    sandwormSystem: { deserialize: vi.fn() },
+    sandwormSystem: { deserialize: vi.fn(), getRiderEids: () => new Set<number>() },
     combatSystem: {
       setSuppressed: vi.fn(), setStance: vi.fn(),
       setGuardPosition: vi.fn(), restoreAttackMove: vi.fn(),
